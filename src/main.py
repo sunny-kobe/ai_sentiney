@@ -27,6 +27,11 @@ async def main_midday_check(dry_run: bool = False, replay: bool = False):
         logger.info("Replay Mode: Loading data from local file...")
         with open(data_path, 'r', encoding='utf-8') as f:
             ai_input = json.load(f)
+        
+        # EXTRACT data needed for post-processing from saved context
+        indices = ai_input.get('indices', {})
+        macro_news = ai_input.get('macro_news', {})
+        processed_stocks = ai_input.get('stocks', [])
         # Skip steps 1 & 2
     else:            
         if not portfolio:
@@ -41,6 +46,7 @@ async def main_midday_check(dry_run: bool = False, replay: bool = False):
         north_funds = raw_data['north_funds']
         stock_data_list = raw_data['stocks']
         indices = raw_data.get('indices', {})
+        macro_news = raw_data.get('macro_news', {})
         
         logger.info(f"Data Collected. Market Breadth: {market_breadth}, North Funds: {north_funds}")
     
@@ -60,6 +66,7 @@ async def main_midday_check(dry_run: bool = False, replay: bool = False):
             "market_breadth": market_breadth,
             "north_funds": north_funds,
             "indices": indices,
+            "macro_news": macro_news,
             "stocks": processed_stocks
         }
         
@@ -95,13 +102,22 @@ async def main_midday_check(dry_run: bool = False, replay: bool = False):
         analysis_result['indices_info'] = " / ".join(indices_str)
         
         # 2. MATCH Stock Pct Change to Actions
-        # Create map: code -> pct_change
-        stock_map = {s['code']: s.get('pct_change', 0.0) for s in processed_stocks}
+        # Create map: name -> pct_change (AI response usually uses Name/Code)
+        stock_map_by_code = {s['code']: s.get('pct_change', 0.0) for s in processed_stocks}
+        stock_map_by_name = {s['name']: s.get('pct_change', 0.0) for s in processed_stocks}
         
         for action in analysis_result.get('actions', []):
             code = action.get('code')
-            if code in stock_map:
-                pct = stock_map[code]
+            name = action.get('name')
+            
+            # Use code as primary key, name as fallback
+            pct = None
+            if code in stock_map_by_code:
+                pct = stock_map_by_code[code]
+            elif name in stock_map_by_name:
+                pct = stock_map_by_name[name]
+                
+            if pct is not None:
                 sign = "+" if pct > 0 else ""
                 color = "🔴" if pct > 0 else "🟢" # China: Red is up
                 action['pct_change_str'] = f"`{color} {sign}{pct}%`"
@@ -127,6 +143,74 @@ async def main_midday_check(dry_run: bool = False, replay: bool = False):
 
     logger.info("=== Sentinel Check Finished ===")
 
+async def main_close_check(dry_run: bool = False):
+    """
+    Close market review mode - runs at 15:10 PM for end-of-day analysis.
+    """
+    logger.info("=== Starting Sentinel Close Review ===")
+    
+    config = ConfigLoader().config
+    portfolio = config.get('portfolio', [])
+    
+    if not portfolio:
+        logger.warning("Portfolio is empty. Exiting.")
+        return
+
+    # 1. Collect Data (same as midday)
+    collector = DataCollector()
+    raw_data = await collector.collect_all(portfolio)
+    
+    market_breadth = raw_data['market_breadth']
+    north_funds = raw_data['north_funds']
+    stock_data_list = raw_data['stocks']
+    indices = raw_data.get('indices', {})
+    macro_news = raw_data.get('macro_news', {})
+    
+    logger.info(f"Data Collected. Market Breadth: {market_breadth}, North Funds: {north_funds}")
+
+    # 2. Process Data
+    processor = DataProcessor()
+    processed_stocks = []
+    for stock_raw in stock_data_list:
+        stock_indicators = processor.calculate_indicators(stock_raw)
+        processed_stocks.append(stock_indicators)
+    processed_stocks = processor.generate_signals(processed_stocks, north_funds)
+
+    ai_input = {
+        "market_breadth": market_breadth,
+        "north_funds": north_funds,
+        "indices": indices,
+        "macro_news": macro_news,
+        "stocks": processed_stocks
+    }
+
+    # 3. AI Analysis (using close_review prompt)
+    analyst = GeminiClient()
+    try:
+        if dry_run:
+            logger.info("Dry Run Mode: Mocking close review.")
+            analysis_result = {"market_summary": "Dry Run", "actions": []}
+        else:
+            # Override prompt for close mode
+            system_prompt = config['prompts']['close_review']
+            analysis_result = analyst.analyze_with_prompt(ai_input, system_prompt)
+        
+        logger.info("Close Review Analysis Completed.")
+        
+    except Exception as e:
+        logger.error(f"Close Review Failed: {e}")
+        return
+
+    # 4. Report (using different card format for close review)
+    reporter = FeishuClient()
+    if dry_run:
+        logger.info("Dry Run Mode: Skipping Feishu Push.")
+        print(reporter._construct_close_card(analysis_result))
+    else:
+        reporter.send_close_card(analysis_result)
+
+    logger.info("=== Sentinel Close Review Finished ===")
+
 def entry_point():
     parser = argparse.ArgumentParser(description="Project Sentinel V2")
     parser.add_argument('--mode', type=str, default='midday', choices=['midday', 'close'], help='Execution mode')
@@ -137,8 +221,8 @@ def entry_point():
     
     if args.mode == 'midday':
         asyncio.run(main_midday_check(dry_run=args.dry_run, replay=args.replay))
-    else:
-        logger.info(f"Mode {args.mode} not implemented yet.")
+    elif args.mode == 'close':
+        asyncio.run(main_close_check(dry_run=args.dry_run))
 
 if __name__ == "__main__":
     entry_point()

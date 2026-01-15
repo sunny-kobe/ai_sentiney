@@ -146,13 +146,26 @@ class FeishuClient:
         render_group("重点观察/洗盘", "🟡", grouped_actions["WATCH"])
         render_group("持仓安好/躺赢", "🟢", grouped_actions["HOLD"])
 
-        # 3. Footer
+        # 3. Footer with Date and Session
+        from datetime import datetime
+        now = datetime.now()
+        date_str = now.strftime('%Y年%m月%d日')
+        hour = now.hour
+        
+        # Determine market session
+        if hour < 12:
+            session = "盘中（上午）"
+        elif hour < 15:
+            session = "盘中（下午）"
+        else:
+            session = "收盘后"
+            
         elements.append({
              "tag": "note",
              "elements": [
                  {
                      "tag": "plain_text",
-                     "content": f"Sentinel AI V2.0 • {time.strftime('%H:%M')}"
+                     "content": f"Sentinel AI V2.0 • {date_str} {session} • {time.strftime('%H:%M')}"
                  }
              ]
          })
@@ -169,6 +182,106 @@ class FeishuClient:
             "elements": elements
         }
         return card
+
+    def send_close_card(self, data: Dict[str, Any]):
+        """Sends the close review card to Feishu."""
+        card_content = self._construct_close_card(data)
+        payload = {
+            "msg_type": "interactive",
+            "card": card_content
+        }
+        try:
+            response = requests.post(self.webhook_url, json=payload, timeout=10)
+            if response.status_code == 200:
+                logger.info("Feishu close review sent successfully.")
+            else:
+                logger.error(f"Feishu close push failed: {response.text}")
+        except Exception as e:
+            logger.error(f"Failed to send Feishu close card: {e}")
+
+    def _construct_close_card(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Constructs the Feishu Interactive Card for close review.
+        """
+        market_summary = data.get("market_summary", "暂无总结")
+        market_temperature = data.get("market_temperature", "N/A")
+        actions = data.get("actions", [])
+
+        # Temperature-based color
+        header_color = "blue"
+        if "冰点" in market_temperature:
+            header_color = "red"
+        elif "亢奋" in market_temperature:
+            header_color = "orange"
+
+        from datetime import datetime
+        date_str = datetime.now().strftime('%Y年%m月%d日')
+
+        elements = [
+            {
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": f"**📊 市场温度**: {market_temperature}\n**📝 今日总结**: {market_summary}"
+                }
+            },
+            {"tag": "hr"}
+        ]
+
+        # Per-stock review
+        elements.append({
+            "tag": "div",
+            "text": {
+                "tag": "lark_md",
+                "content": f"**📈 个股复盘 ({len(actions)}只)**"
+            }
+        })
+
+        for s in actions:
+            name = s.get('name', '')
+            code = s.get('code', '')
+            today_review = s.get('today_review', '')
+            tomorrow_plan = s.get('tomorrow_plan', '')
+            support = s.get('support_level', 0)
+            resistance = s.get('resistance_level', 0)
+            
+            content = f"**{name}** ({code})"
+            content += f"\n> 📋 **今日**: {today_review}"
+            content += f"\n> 🎯 **明日**: {tomorrow_plan}"
+            if support and resistance:
+                content += f"\n> 📐 支撑: {support} / 压力: {resistance}"
+            
+            elements.append({
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": content
+                }
+            })
+        elements.append({"tag": "hr"})
+
+        # Footer
+        elements.append({
+             "tag": "note",
+             "elements": [
+                 {
+                     "tag": "plain_text",
+                     "content": f"Sentinel AI V2.0 • {date_str} 收盘复盘 • {time.strftime('%H:%M')}"
+                 }
+             ]
+         })
+
+        return {
+            "config": {"wide_screen_mode": True},
+            "header": {
+                "template": header_color,
+                "title": {
+                    "tag": "plain_text",
+                    "content": "🌙 哨兵收盘复盘"
+                }
+            },
+            "elements": elements
+        }
 
 if __name__ == "__main__":
     # Test

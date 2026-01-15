@@ -16,7 +16,7 @@ class GeminiClient:
         genai.configure(api_key=self.api_key)
         self.model = genai.GenerativeModel('gemini-3-pro-preview')
 
-    def _build_context(self, market_breadth: str, north_funds: float, indices: Dict, portfolio: List[Dict]) -> str:
+    def _build_context(self, market_breadth: str, north_funds: float, indices: Dict, macro_news: Dict, portfolio: List[Dict]) -> str:
         """Constructs the prompt context."""
         
         # Simplify portfolio data for AI to save tokens and focus attention
@@ -36,6 +36,10 @@ class GeminiClient:
             "Market_Breadth": market_breadth,
             "North_Money": f"{north_funds} Billion",
             "Indices": indices,
+            "Macro_News": {
+                "财联社电报": macro_news.get("telegraph", []),
+                "AI科技热点": macro_news.get("ai_tech", [])
+            },
             "Portfolio": portfolio_summary
         }
         return json.dumps(context, ensure_ascii=False, indent=2)
@@ -49,8 +53,9 @@ class GeminiClient:
         north_funds = market_data.get('north_funds', 0.0)
         portfolio = market_data.get('stocks', [])
         indices = market_data.get('indices', {})
+        macro_news = market_data.get('macro_news', {})
         
-        context_json = self._build_context(market_breadth, north_funds, indices, portfolio)
+        context_json = self._build_context(market_breadth, north_funds, indices, macro_news, portfolio)
         
         # Load Prompt Template
         # Using the midday focus from config
@@ -64,6 +69,34 @@ class GeminiClient:
 {context_json}
 """
         logger.info("Sending request to Gemini...")
+        try:
+            response = self.model.generate_content(full_prompt)
+            return self._parse_response(response.text)
+            
+        except Exception as e:
+            logger.error(f"Gemini API call failed: {e}")
+            raise
+
+    def analyze_with_prompt(self, market_data: Dict[str, Any], system_prompt: str) -> Dict[str, Any]:
+        """
+        Analyze with a custom system prompt (for close mode, etc.).
+        """
+        market_breadth = market_data.get('market_breadth', "Unknown")
+        north_funds = market_data.get('north_funds', 0.0)
+        portfolio = market_data.get('stocks', [])
+        indices = market_data.get('indices', {})
+        macro_news = market_data.get('macro_news', {})
+        
+        context_json = self._build_context(market_breadth, north_funds, indices, macro_news, portfolio)
+        
+        full_prompt = f"""
+{system_prompt}
+
+---
+[REAL-TIME DATA CONTEXT]
+{context_json}
+"""
+        logger.info("Sending request to Gemini (custom prompt)...")
         try:
             response = self.model.generate_content(full_prompt)
             return self._parse_response(response.text)

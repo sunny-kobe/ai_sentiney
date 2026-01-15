@@ -170,16 +170,57 @@ class DataCollector:
             logger.error(f"Failed to fetch indices: {e}")
             return {}
 
+    async def get_macro_news(self) -> Dict[str, List[str]]:
+        """
+        Fetches macro news from multiple sources:
+        1. CCTV News (via ak.news_cctv) - general macro news
+        2. AI/Tech sector keywords filtering
+        Returns: {"telegraph": [...], "ai_tech": [...]}
+        """
+        logger.info("Fetching macro news...")
+        result = {"telegraph": [], "ai_tech": []}
+        
+        # 1. CCTV News (央视新闻) - alternative to 财联社
+        try:
+            from datetime import datetime
+            today = datetime.now().strftime('%Y%m%d')
+            df_news = await self._run_blocking(ak.news_cctv, date=today)
+            if not df_news.empty:
+                # Get latest 10 headlines
+                result["telegraph"] = df_news.head(10)['title'].tolist()
+        except Exception as e:
+            logger.warning(f"Failed to fetch CCTV news: {e}")
+            # Fallback: try stock_info_global_em for global financial news
+            try:
+                df_global = await self._run_blocking(ak.stock_info_global_em)
+                if not df_global.empty:
+                    result["telegraph"] = df_global.head(10)['标题'].tolist()
+            except Exception as e2:
+                logger.warning(f"Failed to fetch global news: {e2}")
+        
+        # 2. AI/Tech sector news (filter from telegraph or general news)
+        ai_keywords = ['人工智能', 'AI', '芯片', '半导体', '算力', '大模型', 'GPU', '英伟达', '华为', '科技']
+        try:
+            # Filter telegraph for AI/Tech related news
+            if result["telegraph"]:
+                ai_news = [n for n in result["telegraph"] if any(kw in n for kw in ai_keywords)]
+                result["ai_tech"] = ai_news[:5]  # Top 5 AI/Tech related
+        except Exception as e:
+            logger.warning(f"Failed to filter AI/Tech news: {e}")
+        
+        return result
+
     async def collect_all(self, portfolio: List[Dict]):
         """
         Main entry point to collect everything in parallel.
         """
         logger.info("Starting Batch Data Collection...")
         
-        # 1. Fetch Global Market Data (Breadth, North, Indices)
+        # 1. Fetch Global Market Data (Breadth, North, Indices, Macro News)
         task_breadth = asyncio.create_task(self.get_market_breadth())
         task_north = asyncio.create_task(self.get_north_funds())
         task_indices = asyncio.create_task(self.get_indices())
+        task_macro_news = asyncio.create_task(self.get_macro_news())
         
         # 2. Fetch Stock Data (Optimized)
         try:
@@ -206,13 +247,16 @@ class DataCollector:
             stock_tasks.append(self._fetch_individual_stock_extras(code, df_all_spot))
             
         # Wait for all
-        market_breadth, north_funds, indices = await asyncio.gather(task_breadth, task_north, task_indices)
+        market_breadth, north_funds, indices, macro_news = await asyncio.gather(
+            task_breadth, task_north, task_indices, task_macro_news
+        )
         stock_results = await asyncio.gather(*stock_tasks)
         
         return {
             "market_breadth": market_breadth,
             "north_funds": north_funds,
             "indices": indices,
+            "macro_news": macro_news,
             "stocks": stock_results
         }
 
@@ -257,10 +301,10 @@ class DataCollector:
             if not df_hist.empty:
                 df_hist = df_hist.tail(30)
             
-            # News
+            # News (increased to 5 items)
             try:
                 df_news = await self._run_blocking(ak.stock_news_em, symbol=code)
-                news = df_news.head(3)['新闻标题'].tolist() if not df_news.empty else []
+                news = df_news.head(5)['新闻标题'].tolist() if not df_news.empty else []
             except:
                 news = []
 
