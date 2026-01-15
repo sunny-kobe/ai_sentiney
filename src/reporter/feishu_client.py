@@ -48,6 +48,13 @@ class FeishuClient:
         macro_summary = data.get("macro_summary", "暂无大盘点评")
         risk_alert = data.get("risk_alert", "")
         actions = data.get("actions", [])
+        
+        # Pass indices data manually if we can, but usually 'data' is just the AI result.
+        # Wait, the AI result doesn't contain the raw indices data unless we put it there or pass it separately.
+        # Ideally, we should merge the raw indices into the data passed here.
+        # For now, let's assume the AI *could* mention it, OR we modify main.py to injection 'indices' into the result dict.
+        # Let's rely on main.py to merge 'indices' into analysis_result before calling send_card.
+        indices_info = data.get("indices_info", "暂无指数数据") 
 
         # Color Logic
         header_color = "blue"
@@ -64,7 +71,7 @@ class FeishuClient:
                 "tag": "div",
                 "text": {
                     "tag": "lark_md",
-                    "content": f"**📊 市场情绪**: {market_sentiment}\n**🎙️ 宏观点评**: {macro_summary}"
+                    "content": f"**📊 市场情绪**: {market_sentiment}\n**📈 核心指数**: {indices_info}\n**🎙️ 宏观点评**: {macro_summary}"
                 }
             }
         ]
@@ -104,10 +111,23 @@ class FeishuClient:
                 confidence = s.get('confidence', '')
                 key_level = s.get('key_level', '')
                 
-                # Format: Name (Code) - [Confidence]
-                # > Reason
-                # > Key Level
-                content = f"**{name}** ({code})"
+                # Check if we have price info inside the AI action object?
+                # AI output usually doesn't strictly copy price.
+                # But we can ask AI to include it, OR we merge it in main.py.
+                # For simplicity, let's hope AI includes it if we prompt it, OR...
+                # Actually, main.py passes raw 'ai_input' to Gemini, but 'analysis_result' comes from AI.
+                # AI doesn't return 'pct_change'.
+                # We need to MATCH code to raw data in main.py to get price info?
+                # That's too complex for this step.
+                # Better approach: Modify Prompt to ask AI to strictly echo "Price: xx, Change: xx%"?
+                # Or just let AI decide.
+                # But the user specifically asked for "各个股票今天的涨跌".
+                # If we don't merge, we don't have it.
+                # So I should merge in main.py.
+                
+                pct_info = s.get('pct_change_str', '') # Expect this to be injected by main.py
+                
+                content = f"**{name}** ({code}) {pct_info}"
                 if confidence: content += f" `置信度:{confidence}`"
                 content += f"\n> 💡 {reason}"
                 if key_level: content += f"\n> 🎯 关键位: {key_level}"

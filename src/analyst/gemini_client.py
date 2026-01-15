@@ -16,7 +16,7 @@ class GeminiClient:
         genai.configure(api_key=self.api_key)
         self.model = genai.GenerativeModel('gemini-3-pro-preview')
 
-    def _build_context(self, market_breadth: str, north_funds: float, portfolio: List[Dict]) -> str:
+    def _build_context(self, market_breadth: str, north_funds: float, indices: Dict, portfolio: List[Dict]) -> str:
         """Constructs the prompt context."""
         
         # Simplify portfolio data for AI to save tokens and focus attention
@@ -26,6 +26,7 @@ class GeminiClient:
                 "Code": stock['code'],
                 "Name": stock['name'],
                 "Price": stock['current_price'],
+                "Change": f"{stock.get('pct_change', 0)}%",
                 "MA20": stock['ma20'],
                 "Signal": stock.get('signal', 'N/A'),
                 "News": stock.get('news', [])
@@ -34,6 +35,7 @@ class GeminiClient:
         context = {
             "Market_Breadth": market_breadth,
             "North_Money": f"{north_funds} Billion",
+            "Indices": indices,
             "Portfolio": portfolio_summary
         }
         return json.dumps(context, ensure_ascii=False, indent=2)
@@ -46,8 +48,9 @@ class GeminiClient:
         market_breadth = market_data.get('market_breadth', "Unknown")
         north_funds = market_data.get('north_funds', 0.0)
         portfolio = market_data.get('stocks', [])
+        indices = market_data.get('indices', {})
         
-        context_json = self._build_context(market_breadth, north_funds, portfolio)
+        context_json = self._build_context(market_breadth, north_funds, indices, portfolio)
         
         # Load Prompt Template
         # Using the midday focus from config
@@ -63,15 +66,35 @@ class GeminiClient:
         logger.info("Sending request to Gemini...")
         try:
             response = self.model.generate_content(full_prompt)
-            # Gemini sometimes wraps JSON in markdown blocks like ```json ... ```
-            text = response.text
-            clean_text = text.replace('```json', '').replace('```', '').strip()
+            return self._parse_response(response.text)
             
-            return json.loads(clean_text)
-            
-        except json.JSONDecodeError:
-            logger.error("Failed to parse Gemini response as JSON. Raw text: " + text)
-            return {"error": "Invalid JSON response", "raw": text}
         except Exception as e:
             logger.error(f"Gemini API call failed: {e}")
             raise
+
+    def _parse_response(self, text: str) -> Dict[str, Any]:
+        """
+        Robustly parses JSON from the AI response, handling potential MD/text noise.
+        """
+        try:
+            # 1. Try direct parsing
+            return json.loads(text)
+        except json.JSONDecodeError:
+            # 2. Extract JSON block if surrounded by text
+            try:
+                # Find the first '{' and the last '}'
+                start = text.find('{')
+                end = text.rfind('}') + 1
+                if start != -1 and end != 0:
+                    json_str = text[start:end]
+                    return json.loads(json_str)
+            except Exception as e:
+                logger.error(f"Failed to extract JSON from text: {e}")
+        
+        # 3. Fallback: Return raw text wrapped in a safe dict, or raise error
+        logger.error(f"Failed to parse Gemini response as JSON. Raw text: {text}")
+        return {
+            "market_sentiment": "Parse Error", 
+            "summary": "AI output format invalid.", 
+            "actions": []
+        }

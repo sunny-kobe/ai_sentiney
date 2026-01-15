@@ -136,35 +136,60 @@ class DataCollector:
             logger.error(f"Error fetching stock data for {code}: {e}")
             return {}
 
+    async def get_indices(self) -> Dict[str, Dict]:
+        """
+        Fetches major indices: 000001 (ShangZheng), 399001 (ShenZheng), 399006 (ChiNext).
+        Returns: {'上证指数': {'current': ..., 'change_pct': ...}, ...}
+        """
+        try:
+             # Use stock_zh_index_spot_sina for real-time index data
+             # Note: This returns a large DF. We filter by code.
+             df = await self._run_blocking(ak.stock_zh_index_spot_sina)
+             
+             targets = {
+                 "sh000001": "上证指数",
+                 "br000300": "沪深300", # Better to use common ones if available. 
+                 # Let's check typical codes in this API. 
+                 # Usually it returns '代码' like 'sh000001'.
+             }
+             
+             results = {}
+             target_names = ["上证指数", "深证成指", "创业板指"]
+             
+             for name in target_names:
+                 row = df[df['名称'] == name]
+                 if not row.empty:
+                     current = float(row.iloc[0]['最新价'])
+                     change_pct = float(row.iloc[0]['涨跌幅'])
+                     results[name] = {
+                         "current": current,
+                         "change_pct": change_pct
+                     }
+             return results
+        except Exception as e:
+            logger.error(f"Failed to fetch indices: {e}")
+            return {}
+
     async def collect_all(self, portfolio: List[Dict]):
         """
         Main entry point to collect everything in parallel.
         """
         logger.info("Starting Batch Data Collection...")
         
-        # 1. Fetch Global Market Data (Breadth & North)
+        # 1. Fetch Global Market Data (Breadth, North, Indices)
         task_breadth = asyncio.create_task(self.get_market_breadth())
         task_north = asyncio.create_task(self.get_north_funds())
+        task_indices = asyncio.create_task(self.get_indices())
         
         # 2. Fetch Stock Data (Optimized)
-        # Instead of calling stock_spot N times, call it ONCE.
-        # FIX: Also fetch ETF data since user has ETFs
-        
-        # Let's fetch strictly what we need. 
-        # If we can't be sure about column alignment, we might need to handle separately.
-        # But commonly they align on '代码', '名称', '最新价'.
-        
         try:
              df_stocks = await self._run_blocking(ak.stock_zh_a_spot_em)
         except:
              df_stocks = pd.DataFrame()
              
         try:
-            # Note: ak.fund_etf_spot_em() might be the name
             df_etfs = await self._run_blocking(ak.fund_etf_spot_em)
         except:
-             # Try fallback if that fails? 
-             # Maybe the API is 'fund_etf_spot_em'
              df_etfs = pd.DataFrame()
         
         # Merge
@@ -178,17 +203,16 @@ class DataCollector:
         stock_tasks = []
         for stock in portfolio:
             code = stock['code']
-            # Create a specialized task that uses the pre-fetched spot data
-            # But we still need History and News which are per-stock.
             stock_tasks.append(self._fetch_individual_stock_extras(code, df_all_spot))
             
         # Wait for all
-        market_breadth, north_funds = await asyncio.gather(task_breadth, task_north)
+        market_breadth, north_funds, indices = await asyncio.gather(task_breadth, task_north, task_indices)
         stock_results = await asyncio.gather(*stock_tasks)
         
         return {
             "market_breadth": market_breadth,
             "north_funds": north_funds,
+            "indices": indices,
             "stocks": stock_results
         }
 
@@ -198,20 +222,18 @@ class DataCollector:
         """
         try:
             # Extract Spot
-            # AkShare code usually 6 digits. df_all_spot '代码' column.
-            # Ensure code format matches.
             spot_row = df_all_spot[df_all_spot['代码'] == code]
             if spot_row.empty:
                 logger.warning(f"Code {code} not found in spot data.")
                 current_price = 0.0
+                pct_change = 0.0
                 name = "Unknown"
             else:
                 current_price = float(spot_row.iloc[0]['最新价'])
+                pct_change = float(spot_row.iloc[0]['涨跌幅'])
                 name = spot_row.iloc[0]['名称']
 
             # History (Daily) - Need last ~30 days for MA20
-            # Detect if it's an ETF or Stock
-            # A-share ETFs usually start with: 15, 50, 51, 56, 57, 58
             is_etf = code.startswith(('15', '50', '51', '56', '57', '58'))
             
             if is_etf:
@@ -232,7 +254,6 @@ class DataCollector:
                     start_date="20240101", # Fetch enough
                     adjust="qfq"
                 )
-            # Optimization: slice only necessary rows to save memory?
             if not df_hist.empty:
                 df_hist = df_hist.tail(30)
             
@@ -247,6 +268,7 @@ class DataCollector:
                 "code": code,
                 "name": name,
                 "current_price": current_price,
+                "pct_change": pct_change,
                 "history": df_hist, # DataFrame
                 "news": news
             }

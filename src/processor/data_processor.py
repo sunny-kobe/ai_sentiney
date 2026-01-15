@@ -65,6 +65,7 @@ class DataProcessor:
                 "code": code,
                 "name": name,
                 "current_price": round(current_price, 2),
+                "pct_change": stock_d.get('pct_change', 0.0),
                 "ma20": round(realtime_ma20, 2),
                 "bias_pct": round(bias_pct, 4), # e.g. 0.0512 = 5.12%
                 "news": stock_d.get('news', [])
