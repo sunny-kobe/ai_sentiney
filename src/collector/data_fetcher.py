@@ -148,7 +148,32 @@ class DataCollector:
         
         # 2. Fetch Stock Data (Optimized)
         # Instead of calling stock_spot N times, call it ONCE.
-        df_all_spot = await self._run_blocking(ak.stock_zh_a_spot_em)
+        # FIX: Also fetch ETF data since user has ETFs
+        
+        # Let's fetch strictly what we need. 
+        # If we can't be sure about column alignment, we might need to handle separately.
+        # But commonly they align on '代码', '名称', '最新价'.
+        
+        try:
+             df_stocks = await self._run_blocking(ak.stock_zh_a_spot_em)
+        except:
+             df_stocks = pd.DataFrame()
+             
+        try:
+            # Note: ak.fund_etf_spot_em() might be the name
+            df_etfs = await self._run_blocking(ak.fund_etf_spot_em)
+        except:
+             # Try fallback if that fails? 
+             # Maybe the API is 'fund_etf_spot_em'
+             df_etfs = pd.DataFrame()
+        
+        # Merge
+        if not df_stocks.empty and not df_etfs.empty:
+             df_all_spot = pd.concat([df_stocks, df_etfs], ignore_index=True)
+        elif not df_etfs.empty:
+             df_all_spot = df_etfs
+        else:
+             df_all_spot = df_stocks
         
         stock_tasks = []
         for stock in portfolio:
@@ -185,13 +210,28 @@ class DataCollector:
                 name = spot_row.iloc[0]['名称']
 
             # History (Daily) - Need last ~30 days for MA20
-            # Calculation logic needs 'Close' of previous days.
-            df_hist = await self._run_blocking(
-                ak.stock_zh_a_hist, 
-                symbol=code, 
-                period="daily", 
-                adjust="qfq"
-            )
+            # Detect if it's an ETF or Stock
+            # A-share ETFs usually start with: 15, 50, 51, 56, 57, 58
+            is_etf = code.startswith(('15', '50', '51', '56', '57', '58'))
+            
+            if is_etf:
+                # ETF History
+                df_hist = await self._run_blocking(
+                    ak.fund_etf_hist_em,
+                    symbol=code,
+                    period="daily",
+                    start_date="20240101",
+                    adjust="qfq"
+                )
+            else:
+                # Stock History
+                df_hist = await self._run_blocking(
+                    ak.stock_zh_a_hist, 
+                    symbol=code, 
+                    period="daily", 
+                    start_date="20240101", # Fetch enough
+                    adjust="qfq"
+                )
             # Optimization: slice only necessary rows to save memory?
             if not df_hist.empty:
                 df_hist = df_hist.tail(30)

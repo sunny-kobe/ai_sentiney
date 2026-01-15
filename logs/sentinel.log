@@ -66,3 +66,103 @@
 2026-01-14 09:40:20,716 - [ERROR] - sentinel - feishu_client.py:13 - Feishu Webhook URL is missing!
 2026-01-14 09:40:20,716 - [INFO] - sentinel - main.py:73 - Dry Run Mode: Skipping Feishu Push.
 2026-01-14 09:40:20,716 - [INFO] - sentinel - main.py:79 - === Sentinel Check Finished ===
+2026-01-15 09:57:15,932 - [INFO] - sentinel - main.py:12 - === Starting Sentinel Midday Check ===
+2026-01-15 09:57:15,935 - [INFO] - sentinel - config_loader.py:42 - Configuration loaded successfully.
+2026-01-15 09:57:15,935 - [INFO] - sentinel - data_fetcher.py:143 - Starting Batch Data Collection...
+2026-01-15 09:57:15,935 - [INFO] - sentinel - data_fetcher.py:29 - Fetching market breadth...
+2026-01-15 09:57:15,936 - [INFO] - sentinel - data_fetcher.py:57 - Fetching Northbound funds...
+2026-01-15 09:57:16,048 - [INFO] - sentinel - data_fetcher.py:93 - North Funds: 0.0 亿
+2026-01-15 10:02:26,699 - [INFO] - sentinel - data_fetcher.py:47 - Market Breadth: 涨: 2688 / 跌: 2547 (平: 222)
+2026-01-15 10:02:26,701 - [WARNING] - sentinel - data_fetcher.py:180 - Code 510500 not found in spot data.
+2026-01-15 10:02:26,701 - [WARNING] - sentinel - data_fetcher.py:180 - Code 512480 not found in spot data.
+2026-01-15 10:02:26,702 - [WARNING] - sentinel - data_fetcher.py:180 - Code 588760 not found in spot data.
+2026-01-15 10:02:26,703 - [WARNING] - sentinel - data_fetcher.py:180 - Code 563300 not found in spot data.
+2026-01-15 10:02:26,704 - [WARNING] - sentinel - data_fetcher.py:180 - Code 159819 not found in spot data.
+2026-01-15 10:02:26,705 - [WARNING] - sentinel - data_fetcher.py:180 - Code 159934 not found in spot data.
+2026-01-15 10:02:26,705 - [WARNING] - sentinel - data_fetcher.py:180 - Code 510300 not found in spot data.
+2026-01-15 10:02:26,706 - [WARNING] - sentinel - data_fetcher.py:180 - Code 159338 not found in spot data.
+2026-01-15 10:02:26,706 - [WARNING] - sentinel - data_fetcher.py:180 - Code 560780 not found in spot data.
+2026-01-15 10:02:26,707 - [WARNING] - sentinel - data_fetcher.py:180 - Code 510980 not found in spot data.
+2026-01-15 10:02:26,707 - [WARNING] - sentinel - data_fetcher.py:180 - Code 563360 not found in spot data.
+2026-01-15 10:02:26,708 - [WARNING] - sentinel - data_fetcher.py:180 - Code 520890 not found in spot data.
+2026-01-15 10:02:26,708 - [WARNING] - sentinel - data_fetcher.py:180 - Code 515710 not found in spot data.
+2026-01-15 10:03:09,558 - [INFO] - sentinel - main.py:12 - === Starting Sentinel Midday Check ===
+2026-01-15 10:03:09,561 - [INFO] - sentinel - config_loader.py:42 - Configuration loaded successfully.
+2026-01-15 10:03:09,561 - [INFO] - sentinel - data_fetcher.py:143 - Starting Batch Data Collection...
+2026-01-15 10:03:09,561 - [INFO] - sentinel - data_fetcher.py:29 - Fetching market breadth...
+2026-01-15 10:03:09,562 - [INFO] - sentinel - data_fetcher.py:57 - Fetching Northbound funds...
+2026-01-15 10:03:09,702 - [INFO] - sentinel - data_fetcher.py:93 - North Funds: 0.0 亿
+2026-01-15 10:08:18,344 - [INFO] - sentinel - data_fetcher.py:47 - Market Breadth: 涨: 2224 / 跌: 3061 (平: 172)
+2026-01-15 10:10:02,668 - [INFO] - sentinel - main.py:30 - Data Collected. Market Breadth: 涨: 2224 / 跌: 3061 (平: 172), North Funds: 0.0
+2026-01-15 10:10:02,669 - [WARNING] - sentinel - data_processor.py:23 - Insufficient data for 510500 to calculate indicators.
+2026-01-15 10:10:02,669 - [WARNING] - sentinel - data_processor.py:23 - Insufficient data for 512480 to calculate indicators.
+2026-01-15 10:10:02,669 - [WARNING] - sentinel - data_processor.py:23 - Insufficient data for 588760 to calculate indicators.
+2026-01-15 10:10:02,669 - [WARNING] - sentinel - data_processor.py:23 - Insufficient data for 563300 to calculate indicators.
+2026-01-15 10:10:02,671 - [WARNING] - sentinel - data_processor.py:23 - Insufficient data for 510300 to calculate indicators.
+2026-01-15 10:10:02,671 - [WARNING] - sentinel - data_processor.py:23 - Insufficient data for 560780 to calculate indicators.
+2026-01-15 10:10:02,671 - [WARNING] - sentinel - data_processor.py:23 - Insufficient data for 510980 to calculate indicators.
+2026-01-15 10:10:02,671 - [WARNING] - sentinel - data_processor.py:23 - Insufficient data for 563360 to calculate indicators.
+2026-01-15 10:10:02,671 - [WARNING] - sentinel - data_processor.py:23 - Insufficient data for 520890 to calculate indicators.
+2026-01-15 10:10:02,671 - [WARNING] - sentinel - data_processor.py:23 - Insufficient data for 515710 to calculate indicators.
+2026-01-15 10:10:02,672 - [INFO] - sentinel - gemini_client.py:63 - Sending request to Gemini...
+2026-01-15 10:10:03,027 - [ERROR] - sentinel - gemini_client.py:76 - Gemini API call failed: 404 models/gemini-pro is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+2026-01-15 10:10:05,031 - [INFO] - sentinel - gemini_client.py:63 - Sending request to Gemini...
+2026-01-15 10:10:05,100 - [ERROR] - sentinel - gemini_client.py:76 - Gemini API call failed: 404 models/gemini-pro is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+2026-01-15 10:10:07,102 - [INFO] - sentinel - gemini_client.py:63 - Sending request to Gemini...
+2026-01-15 10:10:07,180 - [ERROR] - sentinel - gemini_client.py:76 - Gemini API call failed: 404 models/gemini-pro is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+2026-01-15 10:10:07,181 - [ERROR] - sentinel - main.py:67 - AI Analysis Failed: RetryError[<Future at 0x10ec4f250 state=finished raised NotFound>]
+2026-01-15 10:16:14,060 - [INFO] - sentinel - main.py:12 - === Starting Sentinel Midday Check ===
+2026-01-15 10:16:14,063 - [INFO] - sentinel - config_loader.py:42 - Configuration loaded successfully.
+2026-01-15 10:16:14,063 - [INFO] - sentinel - data_fetcher.py:143 - Starting Batch Data Collection...
+2026-01-15 10:16:14,063 - [INFO] - sentinel - data_fetcher.py:29 - Fetching market breadth...
+2026-01-15 10:16:14,064 - [INFO] - sentinel - data_fetcher.py:57 - Fetching Northbound funds...
+2026-01-15 10:16:14,178 - [INFO] - sentinel - data_fetcher.py:93 - North Funds: 0.0 亿
+2026-01-15 10:17:27,903 - [INFO] - sentinel - data_fetcher.py:47 - Market Breadth: 涨: 2216 / 跌: 3079 (平: 162)
+2026-01-15 10:19:17,761 - [INFO] - sentinel - main.py:30 - Data Collected. Market Breadth: 涨: 2216 / 跌: 3079 (平: 162), North Funds: 0.0
+2026-01-15 10:19:17,766 - [WARNING] - sentinel - data_processor.py:23 - Insufficient data for 520890 to calculate indicators.
+2026-01-15 10:19:17,767 - [INFO] - sentinel - gemini_client.py:63 - Sending request to Gemini...
+2026-01-15 10:19:18,037 - [ERROR] - sentinel - gemini_client.py:76 - Gemini API call failed: 404 models/gemini-1.5-flash is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+2026-01-15 10:19:20,038 - [INFO] - sentinel - gemini_client.py:63 - Sending request to Gemini...
+2026-01-15 10:19:20,105 - [ERROR] - sentinel - gemini_client.py:76 - Gemini API call failed: 404 models/gemini-1.5-flash is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+2026-01-15 10:19:22,107 - [INFO] - sentinel - gemini_client.py:63 - Sending request to Gemini...
+2026-01-15 10:19:22,178 - [ERROR] - sentinel - gemini_client.py:76 - Gemini API call failed: 404 models/gemini-1.5-flash is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.
+2026-01-15 10:19:22,178 - [ERROR] - sentinel - main.py:67 - AI Analysis Failed: RetryError[<Future at 0x11f0a8550 state=finished raised NotFound>]
+2026-01-15 10:20:05,044 - [INFO] - sentinel - main.py:12 - === Starting Sentinel Midday Check ===
+2026-01-15 10:20:05,047 - [INFO] - sentinel - config_loader.py:42 - Configuration loaded successfully.
+2026-01-15 10:20:05,047 - [INFO] - sentinel - data_fetcher.py:143 - Starting Batch Data Collection...
+2026-01-15 10:20:05,048 - [INFO] - sentinel - data_fetcher.py:29 - Fetching market breadth...
+2026-01-15 10:20:05,048 - [INFO] - sentinel - data_fetcher.py:57 - Fetching Northbound funds...
+2026-01-15 10:20:05,151 - [INFO] - sentinel - data_fetcher.py:93 - North Funds: 0.0 亿
+2026-01-15 10:21:05,936 - [INFO] - sentinel - data_fetcher.py:47 - Market Breadth: 涨: 2021 / 跌: 3270 (平: 166)
+2026-01-15 10:23:01,491 - [INFO] - sentinel - main.py:30 - Data Collected. Market Breadth: 涨: 2021 / 跌: 3270 (平: 166), North Funds: 0.0
+2026-01-15 10:23:01,495 - [WARNING] - sentinel - data_processor.py:23 - Insufficient data for 520890 to calculate indicators.
+2026-01-15 10:23:01,495 - [INFO] - sentinel - gemini_client.py:63 - Sending request to Gemini...
+2026-01-15 10:23:07,057 - [INFO] - sentinel - main.py:63 - AI Analysis Completed.
+2026-01-15 10:23:07,429 - [INFO] - sentinel - feishu_client.py:38 - Feishu notification sent successfully.
+2026-01-15 10:23:07,430 - [INFO] - sentinel - main.py:79 - === Sentinel Check Finished ===
+2026-01-15 10:27:20,077 - [INFO] - sentinel - main.py:12 - === Starting Sentinel Midday Check ===
+2026-01-15 10:27:20,080 - [INFO] - sentinel - config_loader.py:42 - Configuration loaded successfully.
+2026-01-15 10:27:20,080 - [INFO] - sentinel - data_fetcher.py:143 - Starting Batch Data Collection...
+2026-01-15 10:27:20,081 - [INFO] - sentinel - data_fetcher.py:29 - Fetching market breadth...
+2026-01-15 10:27:20,081 - [INFO] - sentinel - data_fetcher.py:57 - Fetching Northbound funds...
+2026-01-15 10:27:20,202 - [INFO] - sentinel - data_fetcher.py:93 - North Funds: 0.0 亿
+2026-01-15 10:28:41,038 - [INFO] - sentinel - data_fetcher.py:47 - Market Breadth: 涨: 1906 / 跌: 3416 (平: 135)
+2026-01-15 10:30:28,369 - [INFO] - sentinel - main.py:30 - Data Collected. Market Breadth: 涨: 1906 / 跌: 3416 (平: 135), North Funds: 0.0
+2026-01-15 10:30:28,372 - [WARNING] - sentinel - data_processor.py:23 - Insufficient data for 520890 to calculate indicators.
+2026-01-15 10:30:28,373 - [INFO] - sentinel - gemini_client.py:63 - Sending request to Gemini...
+2026-01-15 10:31:01,482 - [INFO] - sentinel - main.py:63 - AI Analysis Completed.
+2026-01-15 10:31:02,231 - [INFO] - sentinel - feishu_client.py:38 - Feishu notification sent successfully.
+2026-01-15 10:31:02,233 - [INFO] - sentinel - main.py:79 - === Sentinel Check Finished ===
+2026-01-15 10:53:54,167 - [INFO] - sentinel - main.py:12 - === Starting Sentinel Midday Check ===
+2026-01-15 10:53:54,170 - [INFO] - sentinel - config_loader.py:42 - Configuration loaded successfully.
+2026-01-15 10:53:54,170 - [INFO] - sentinel - data_fetcher.py:143 - Starting Batch Data Collection...
+2026-01-15 10:53:54,170 - [INFO] - sentinel - data_fetcher.py:29 - Fetching market breadth...
+2026-01-15 10:53:54,171 - [INFO] - sentinel - data_fetcher.py:57 - Fetching Northbound funds...
+2026-01-15 10:53:54,916 - [INFO] - sentinel - data_fetcher.py:93 - North Funds: 0.0 亿
+2026-01-15 10:58:17,820 - [INFO] - sentinel - data_fetcher.py:47 - Market Breadth: 涨: 1995 / 跌: 3337 (平: 125)
+2026-01-15 11:00:11,457 - [INFO] - sentinel - main.py:30 - Data Collected. Market Breadth: 涨: 1995 / 跌: 3337 (平: 125), North Funds: 0.0
+2026-01-15 11:00:11,460 - [WARNING] - sentinel - data_processor.py:23 - Insufficient data for 520890 to calculate indicators.
+2026-01-15 11:00:11,462 - [INFO] - sentinel - gemini_client.py:63 - Sending request to Gemini...
+2026-01-15 11:00:39,673 - [INFO] - sentinel - main.py:63 - AI Analysis Completed.
+2026-01-15 11:00:40,158 - [INFO] - sentinel - feishu_client.py:38 - Feishu notification sent successfully.
+2026-01-15 11:00:40,161 - [INFO] - sentinel - main.py:79 - === Sentinel Check Finished ===
