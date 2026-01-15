@@ -1,0 +1,68 @@
+2026-01-13 20:18:55,335 - [INFO] - sentinel - main.py:12 - === Starting Sentinel Midday Check ===
+2026-01-13 20:18:55,337 - [INFO] - sentinel - config_loader.py:38 - Configuration loaded successfully.
+2026-01-13 20:18:55,337 - [INFO] - sentinel - data_fetcher.py:137 - Starting Batch Data Collection...
+2026-01-13 20:18:55,338 - [INFO] - sentinel - data_fetcher.py:26 - Fetching market breadth...
+2026-01-13 20:18:55,338 - [INFO] - sentinel - data_fetcher.py:54 - Fetching Northbound funds...
+2026-01-13 20:18:55,338 - [ERROR] - sentinel - data_fetcher.py:91 - Error fetching North funds: module 'akshare' has no attribute 'stock_hsgt_north_net_flow_in_em'
+2026-01-13 20:19:41,813 - [INFO] - sentinel - main.py:12 - === Starting Sentinel Midday Check ===
+2026-01-13 20:19:41,815 - [INFO] - sentinel - config_loader.py:38 - Configuration loaded successfully.
+2026-01-13 20:19:41,815 - [INFO] - sentinel - data_fetcher.py:140 - Starting Batch Data Collection...
+2026-01-13 20:19:41,815 - [INFO] - sentinel - data_fetcher.py:26 - Fetching market breadth...
+2026-01-13 20:19:41,816 - [INFO] - sentinel - data_fetcher.py:54 - Fetching Northbound funds...
+2026-01-13 20:19:41,987 - [INFO] - sentinel - data_fetcher.py:90 - North Funds: 0.0 亿
+2026-01-13 20:20:34,327 - [INFO] - sentinel - data_fetcher.py:44 - Market Breadth: 涨: 1622 / 跌: 3729 (平: 101)
+2026-01-13 20:20:34,329 - [ERROR] - sentinel - data_fetcher.py:209 - Failed individual fetch for 600519: DataCollector._run_blocking() got an unexpected keyword argument 'symbol'
+2026-01-13 20:20:34,330 - [ERROR] - sentinel - data_fetcher.py:209 - Failed individual fetch for 300750: DataCollector._run_blocking() got an unexpected keyword argument 'symbol'
+2026-01-13 20:20:34,330 - [INFO] - sentinel - main.py:30 - Data Collected. Market Breadth: 涨: 1622 / 跌: 3729 (平: 101), North Funds: 0.0
+2026-01-13 20:20:34,330 - [WARNING] - sentinel - data_processor.py:23 - Insufficient data for 600519 to calculate indicators.
+2026-01-13 20:20:34,330 - [WARNING] - sentinel - data_processor.py:23 - Insufficient data for 300750 to calculate indicators.
+2026-01-13 20:20:34,330 - [WARNING] - sentinel - gemini_client.py:14 - Gemini API Key is missing!
+2026-01-13 20:20:34,330 - [INFO] - sentinel - main.py:54 - Dry Run Mode: Skipping actual Gemini API call (Mocking response).
+2026-01-13 20:20:34,330 - [INFO] - sentinel - main.py:63 - AI Analysis Completed.
+2026-01-13 20:20:34,330 - [ERROR] - sentinel - feishu_client.py:13 - Feishu Webhook URL is missing!
+2026-01-13 20:20:34,330 - [INFO] - sentinel - main.py:73 - Dry Run Mode: Skipping Feishu Push.
+2026-01-13 20:20:34,330 - [INFO] - sentinel - main.py:79 - === Sentinel Check Finished ===
+2026-01-13 20:21:19,612 - [INFO] - sentinel - data_fetcher.py:44 - Market Breadth: 涨: 1622 / 跌: 3729 (平: 101)
+2026-01-13 20:21:19,615 - [ERROR] - sentinel - data_fetcher.py:212 - Failed individual fetch for 600519: DataCollector._run_blocking() got an unexpected keyword argument 'symbol'
+2026-01-13 20:21:19,615 - [ERROR] - sentinel - data_fetcher.py:212 - Failed individual fetch for 300750: DataCollector._run_blocking() got an unexpected keyword argument 'symbol'
+2026-01-13 20:21:19,615 - [INFO] - sentinel - main.py:30 - Data Collected. Market Breadth: 涨: 1622 / 跌: 3729 (平: 101), North Funds: 0.0
+2026-01-13 20:21:19,616 - [WARNING] - sentinel - data_processor.py:23 - Insufficient data for 600519 to calculate indicators.
+2026-01-13 20:21:19,616 - [WARNING] - sentinel - data_processor.py:23 - Insufficient data for 300750 to calculate indicators.
+2026-01-13 20:21:19,616 - [WARNING] - sentinel - gemini_client.py:14 - Gemini API Key is missing!
+2026-01-13 20:21:19,616 - [INFO] - sentinel - main.py:54 - Dry Run Mode: Skipping actual Gemini API call (Mocking response).
+2026-01-13 20:21:19,616 - [INFO] - sentinel - main.py:63 - AI Analysis Completed.
+2026-01-13 20:21:19,616 - [ERROR] - sentinel - feishu_client.py:13 - Feishu Webhook URL is missing!
+2026-01-13 20:21:19,616 - [INFO] - sentinel - main.py:73 - Dry Run Mode: Skipping Feishu Push.
+2026-01-13 20:21:19,616 - [INFO] - sentinel - main.py:79 - === Sentinel Check Finished ===
+2026-01-14 09:36:22,119 - [INFO] - sentinel - main.py:12 - === Starting Sentinel Midday Check ===
+2026-01-14 09:36:22,120 - [INFO] - sentinel - config_loader.py:38 - Configuration loaded successfully.
+2026-01-14 09:36:22,121 - [INFO] - sentinel - data_fetcher.py:140 - Starting Batch Data Collection...
+2026-01-14 09:36:22,121 - [INFO] - sentinel - data_fetcher.py:26 - Fetching market breadth...
+2026-01-14 09:36:22,121 - [INFO] - sentinel - data_fetcher.py:54 - Fetching Northbound funds...
+2026-01-14 09:36:22,335 - [INFO] - sentinel - data_fetcher.py:90 - North Funds: 0.0 亿
+2026-01-14 09:37:34,145 - [INFO] - sentinel - data_fetcher.py:44 - Market Breadth: 涨: 3176 / 跌: 1988 (平: 290)
+2026-01-14 09:37:34,146 - [ERROR] - sentinel - data_fetcher.py:212 - Failed individual fetch for 600519: DataCollector._run_blocking() got an unexpected keyword argument 'symbol'
+2026-01-14 09:37:34,147 - [ERROR] - sentinel - data_fetcher.py:212 - Failed individual fetch for 300750: DataCollector._run_blocking() got an unexpected keyword argument 'symbol'
+2026-01-14 09:37:34,147 - [INFO] - sentinel - main.py:30 - Data Collected. Market Breadth: 涨: 3176 / 跌: 1988 (平: 290), North Funds: 0.0
+2026-01-14 09:37:34,147 - [WARNING] - sentinel - data_processor.py:23 - Insufficient data for 600519 to calculate indicators.
+2026-01-14 09:37:34,147 - [WARNING] - sentinel - data_processor.py:23 - Insufficient data for 300750 to calculate indicators.
+2026-01-14 09:37:34,147 - [WARNING] - sentinel - gemini_client.py:14 - Gemini API Key is missing!
+2026-01-14 09:37:34,147 - [INFO] - sentinel - main.py:54 - Dry Run Mode: Skipping actual Gemini API call (Mocking response).
+2026-01-14 09:37:34,147 - [INFO] - sentinel - main.py:63 - AI Analysis Completed.
+2026-01-14 09:37:34,147 - [ERROR] - sentinel - feishu_client.py:13 - Feishu Webhook URL is missing!
+2026-01-14 09:37:34,147 - [INFO] - sentinel - main.py:73 - Dry Run Mode: Skipping Feishu Push.
+2026-01-14 09:37:34,147 - [INFO] - sentinel - main.py:79 - === Sentinel Check Finished ===
+2026-01-14 09:38:39,022 - [INFO] - sentinel - main.py:12 - === Starting Sentinel Midday Check ===
+2026-01-14 09:38:39,024 - [INFO] - sentinel - config_loader.py:38 - Configuration loaded successfully.
+2026-01-14 09:38:39,024 - [INFO] - sentinel - data_fetcher.py:143 - Starting Batch Data Collection...
+2026-01-14 09:38:39,025 - [INFO] - sentinel - data_fetcher.py:29 - Fetching market breadth...
+2026-01-14 09:38:39,025 - [INFO] - sentinel - data_fetcher.py:57 - Fetching Northbound funds...
+2026-01-14 09:38:39,148 - [INFO] - sentinel - data_fetcher.py:93 - North Funds: 0.0 亿
+2026-01-14 09:39:49,076 - [INFO] - sentinel - data_fetcher.py:47 - Market Breadth: 涨: 3505 / 跌: 1713 (平: 236)
+2026-01-14 09:40:20,711 - [INFO] - sentinel - main.py:30 - Data Collected. Market Breadth: 涨: 3505 / 跌: 1713 (平: 236), North Funds: 0.0
+2026-01-14 09:40:20,715 - [WARNING] - sentinel - gemini_client.py:14 - Gemini API Key is missing!
+2026-01-14 09:40:20,716 - [INFO] - sentinel - main.py:54 - Dry Run Mode: Skipping actual Gemini API call (Mocking response).
+2026-01-14 09:40:20,716 - [INFO] - sentinel - main.py:63 - AI Analysis Completed.
+2026-01-14 09:40:20,716 - [ERROR] - sentinel - feishu_client.py:13 - Feishu Webhook URL is missing!
+2026-01-14 09:40:20,716 - [INFO] - sentinel - main.py:73 - Dry Run Mode: Skipping Feishu Push.
+2026-01-14 09:40:20,716 - [INFO] - sentinel - main.py:79 - === Sentinel Check Finished ===

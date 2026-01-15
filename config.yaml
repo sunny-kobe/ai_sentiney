@@ -1,0 +1,116 @@
+system:
+  log_level: INFO
+  retry_count: 3
+  timeout_seconds: 10
+  timezone: "Asia/Shanghai"
+
+api_keys:
+  # Using env vars is recommended, but supporting config file for ease of use in local env
+  gemini_api_key: "${GEMINI_API_KEY}"
+  feishu_webhook: "${FEISHU_WEBHOOK}"
+
+portfolio:
+  - code: "510500"
+    name: "中证500ETF"
+    cost: 6.293
+    strategy: "trend"
+
+  - code: "512480"
+    name: "半导体ETF"
+    cost: 0.780
+    strategy: "trend"
+
+  - code: "588760"
+    name: "科创人工智能ETF"
+    cost: 0.553
+    strategy: "trend"
+
+  - code: "563300"
+    name: "中证2000ETF"
+    cost: 0.417
+    strategy: "trend"
+
+  - code: "159819"
+    name: "人工智能ETF"
+    cost: 0.906
+    strategy: "trend"
+
+  - code: "159934"
+    name: "黄金ETF"
+    cost: 7.928
+    strategy: "value"
+
+  - code: "510300"
+    name: "沪深300ETF"
+    cost: 4.033
+    strategy: "value"
+
+  - code: "159338"
+    name: "中证A500ETF"
+    cost: 0.972
+    strategy: "trend"
+
+  - code: "560780"
+    name: "半导体设备ETF"
+    cost: 1.141
+    strategy: "trend"
+
+  - code: "510980"
+    name: "上证指数ETF"
+    cost: 1.337
+    strategy: "value"
+
+  - code: "563360"
+    name: "A50ETF"
+    cost: 1.245
+    strategy: "value"
+
+  - code: "520890"
+    name: "红利低波ETF"
+    cost: 1.475
+    strategy: "value"
+
+  - code: "515710"
+    name: "食品饮料ETF"
+    cost: 0.653
+    strategy: "trend"
+
+risk_management:
+  stop_loss_pct: -0.05
+  ma_window: 20
+  north_money_threshold_billion: 30 # 30亿
+
+prompts:
+  midday_focus: |
+    你现在的身份是【高频交易员】，专注于【A股日内趋势判断】。
+
+    # 输入数据
+    你将接收到一个 JSON 对象，包含：
+    1. **Market_Breadth**: 市场整体涨跌家数比。
+    2. **North_Money**: 北向资金实时净流入（亿元）。
+    3. **Portfolio**: 我的持仓股列表，每只股票包含【现价】、【实时MA20】、【乖离率】、【当日新闻】。
+
+    # 判断逻辑 (Chain of Thought)
+    对于每一只持仓股票：
+    1. **趋势检查**: 现价 vs MA20。如果 `Price < MA20 * 0.995` 视为有效跌破。
+    2. **资金验证**: 
+       - 如果跌破且北向资金大幅流出 (< 0)，则大概率是真跌 -> 建议 `DANGER`。
+       - 如果跌破但北向资金大幅买入 (> 30亿)，可能是假摔洗盘 -> 建议 `WATCH`。
+       - 如果 `Price > MA20` -> 建议 `HOLD`。
+    3. **新闻过滤**: 检查该股票今日是否有【实质性】利空/利好新闻，排除蹭热点的无关新闻。
+
+    # 输出格式 (JSON Schema)
+    必须严格返回如下 JSON 格式，不要包含 Markdown 代码块标记（如 ```json）：
+    {
+      "market_sentiment": "string (e.g., 冰点/正常/亢奋)",
+      "summary": "string (一句话概括午间盘面)",
+      "actions": [
+        {
+          "code": "string",
+          "name": "string",
+          "action": "DANGER|WATCH|HOLD",
+          "reason": "string (简短理由，<15字)",
+          "news_impact": "string (可选，如有重大新闻则填写)"
+        }
+      ]
+    }
