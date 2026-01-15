@@ -9,7 +9,10 @@ import functools
 
 class DataCollector:
     def __init__(self):
-        self.executor = ThreadPoolExecutor(max_workers=5) # AkShare is synchronous, so we wrap in threads
+        # GitHub Actions runners typically have 2 vCPUs.
+        # AkShare is I/O bound (network requests).
+        # Increasing max_workers allows more overlapping requests during wait times.
+        self.executor = ThreadPoolExecutor(max_workers=32)
         self.config = ConfigLoader().config
 
     async def _run_blocking(self, func, *args, **kwargs):
