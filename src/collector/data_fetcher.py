@@ -1,50 +1,98 @@
 import asyncio
+import functools
+import re
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional
+
 import akshare as ak
 import pandas as pd
-from typing import List, Dict, Any, Optional
-from concurrent.futures import ThreadPoolExecutor
-from src.utils.logger import logger
+
 from src.utils.config_loader import ConfigLoader
-import functools
+from src.utils.logger import logger
+
+
+def with_retry(max_retries: int = 3, delay: float = 1.0):
+    """
+    Decorator: Simple retry mechanism for flaky API calls.
+    """
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            last_err = None
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    last_err = e
+                    logger.warning(f"Retry {attempt + 1}/{max_retries} for {func.__name__}: {e}")
+                    # In a sync wrapper inside thread pool, time.sleep is better, 
+                    # but here we rely on the executor not blocking the loop main thread.
+                    import time
+                    time.sleep(delay)
+            logger.error(f"Failed {func.__name__} after {max_retries} attempts.")
+            raise last_err
+        return wrapper
+    return decorator
+
 
 class DataCollector:
     def __init__(self):
-        # GitHub Actions runners typically have 2 vCPUs.
-        # AkShare is I/O bound (network requests).
-        # Increasing max_workers allows more overlapping requests during wait times.
-        self.executor = ThreadPoolExecutor(max_workers=32)
+        # GitHub Actions runners / Standard Cloud Instances (2-4 vCPUs)
+        # 32 workers is aggressive but acceptable for high-latency I/O (AkShare).
+        self.executor = ThreadPoolExecutor(max_workers=16)
         self.config = ConfigLoader().config
 
+        # Wrap blocking AK calls with retry logic dynamically or just use helper
+        # For simplicity, we implement retry inside the _run_blocking helper or specifically in logical blocks.
+
     async def _run_blocking(self, func, *args, **kwargs):
-        """Helper to run blocking AkShare calls in a thread executor."""
+        """
+        Helper to run blocking AkShare calls in a thread executor with retry logic.
+        """
         loop = asyncio.get_running_loop()
-        if kwargs:
-            func = functools.partial(func, **kwargs)
-        return await loop.run_in_executor(self.executor, func, *args)
+        
+        # Apply retry logic to the function execution within the thread
+        @with_retry(max_retries=3, delay=1.0)
+        def retriable_func():
+            return func(*args, **kwargs)
+
+        try:
+            return await loop.run_in_executor(self.executor, retriable_func)
+        except Exception as e:
+            # Check if we should inhibit logs for specific harmless errors?
+            # For now, let the caller handle the final failure.
+            raise e
+
+    def _get_dynamic_start_date(self, days_lookback: int = 60) -> str:
+        """
+        Calculates start date string (YYYYMMDD) dynamically.
+        MA20 requires at least 20 trading days. 60 calendar days is a safe buffer.
+        """
+        return (datetime.now() - timedelta(days=days_lookback)).strftime("%Y%m%d")
 
     async def get_market_breadth(self) -> str:
         """
         Fetches market breadth (Rise/Fall ratio).
-        Uses 'ak.stock_zh_a_spot_em()' roughly or a specific index API if available.
-        For speed, we might just sample specific indices or use a summary API.
-        Here we use the spot API but summarize it.
+        Strategy: Use 'stock_zh_a_spot_em' to get a full market snapshot.
         """
         logger.info("Fetching market breadth...")
         try:
-            # Getting full market spot data is heavy, usually better to get index summary
-            # But specific rise/fall count usually requires full list or a specific dashboard API.
-            # Let's try 'stock_zh_a_spot_em' but be mindful of data size (~5000 rows).
-            # Optimization: Just get the Shanghai & Shenzhen Index movement for now to be fast?
-            # User wants "Rise 4000/Fall 500". Full spot is needed or a different specific API.
-            # ak.stock_zh_a_spot_em() is reliable but heavy.
-            
+            # This is a heavy call (~5000 rows), but provides the most accurate "Temperature".
             df = await self._run_blocking(ak.stock_zh_a_spot_em)
             if df is None or df.empty:
                 return "Unknown"
             
-            rise = len(df[df['涨跌幅'] > 0])
-            fall = len(df[df['涨跌幅'] < 0])
-            flat = len(df[df['涨跌幅'] == 0])
+            # Using vectorization for speed
+            # '涨跌幅' column usually exists independently of column naming changes in AkShare 
+            # (Akshare standardizes to中文 columns mostly).
+            if '涨跌幅' not in df.columns:
+                logger.error("Column '涨跌幅' not found in market spot data.")
+                return "Data Error"
+
+            rise = (df['涨跌幅'] > 0).sum()
+            fall = (df['涨跌幅'] < 0).sum()
+            flat = (df['涨跌幅'] == 0).sum()
             
             ratio = f"涨: {rise} / 跌: {fall} (平: {flat})"
             logger.info(f"Market Breadth: {ratio}")
@@ -56,118 +104,90 @@ class DataCollector:
     async def get_north_funds(self) -> float:
         """
         Fetches Real-time Northbound Fund Net Inflow (Unit: 100 million).
+        Robustly parses 'stock_hsgt_fund_flow_summary_em'.
         """
         logger.info("Fetching Northbound funds...")
         try:
-            # Using 'stock_hsgt_fund_flow_summary_em' for realtime summary
-            # Columns: 只要, 北向资金, 南向资金...
-            df_summary = await self._run_blocking(ak.stock_hsgt_fund_flow_summary_em)
-            # Typically row 0 is Northbound
-            # Structure needs check, but usually it has '北向资金' in a column.
-            # Let's simple try iterating or finding the value.
-            # Assuming row with index or label.
-            # Actually this API returns a small DF.
-            
-            # Implementation for stability:
-            # Try to get value from the specific row/column
-            # Example response:
-            #      板块   净流入   ...
-            # 0  北向资金  12.34   ...
-            
-            north_row = df_summary[df_summary.iloc[:, 0].astype(str).str.contains("北向")]
-            if not north_row.empty:
-                # Value might be string "12.34 亿元" or float. Akshare cleans it usually.
-                raw_val = north_row.iloc[0, 1] # 2nd column '净流入'
-                # Parse
-                if isinstance(raw_val, str):
-                    # Remove '亿元' etc
-                    import re
-                    val_str = re.sub(r'[^\d\.\-]', '', raw_val)
-                    north_money = float(val_str)
-                else:
-                    north_money = float(raw_val)
-                
-                # If API returns unit in Yi already? safely assume it is consistent.
-                # Usually summary APIs are in Yi or Wan.
-                # Let's assume it is "Yi" (Billions) based on common display.
-            else:
-                 north_money = 0.0
+            df = await self._run_blocking(ak.stock_hsgt_fund_flow_summary_em)
+            if df is None or df.empty:
+                return 0.0
 
-            logger.info(f"North Funds: {north_money} 亿")
+            # Debugging column names if API changes
+            # Expected columns usually relate to板块, 净流入 etc.
+            # We look for the row containing "北向" in any column.
+            
+            # Convert entire DF to string to search safely
+            mask = df.astype(str).apply(lambda x: x.str.contains('北向')).any(axis=1)
+            north_rows = df[mask]
+            
+            if north_rows.empty:
+                return 0.0
+            
+            # Extract the value. Usually in a column named '净流入' or similar.
+            # We look for a column that looks like a number.
+            # Heuristic: Find the column with '净流入' in name.
+            value_col = None
+            for col in df.columns:
+                if '净流入' in str(col):
+                    value_col = col
+                    break
+            
+            if not value_col:
+                # Fallback: assume the 2nd column (index 1) is the value
+                raw_val = north_rows.iloc[0, 1]
+            else:
+                raw_val = north_rows.iloc[0][value_col]
+
+            # Clean and Parse
+            # Usually format is like "12.34" or "12.34亿元"
+            val_str = str(raw_val)
+            # Remove Chinese characters and keep numbers, dot, minus
+            val_clean = re.sub(r'[^\d\.\-]', '', val_str)
+            
+            try:
+                north_money = float(val_clean)
+            except ValueError:
+                logger.warning(f"Failed to parse North Money value: {val_str}")
+                return 0.0
+
+            # Unit standardization: AkShare usually uses existing units or 'Yi'.
+            # Based on standard EastMoney display, this is usually in "Yi" (Billions) or "Wan".
+            # CAUTION: Check API docs. 'stock_hsgt_fund_flow_summary_em' typically returns Yi.
+            # We assume it is Yuan (Billions) consistent with common dashboards.
+            
             return round(north_money, 2)
 
         except Exception as e:
             logger.error(f"Error fetching North funds: {e}")
-            # Fallback for now
             return 0.0
-
-    async def get_stock_data(self, code: str) -> Dict[str, Any]:
-        """
-        Fetches price and news for a single stock.
-        """
-        logger.info(f"Fetching data for {code}...")
-        try:
-            # 1. Price Data (Spot)
-            # Use spot_em for latest info
-            df_spot = await self._run_blocking(ak.stock_zh_a_spot_em)
-            # Filter for specific code. This is inefficient if called N times for N stocks.
-            # Optimization: Fetch spot ONCE globally in 'get_market_breadth' or 'fetch_all_prices', then filter.
-            # But for cleaner code structure locally, let's assume we do it optimized in 'collect_all'.
-            
-            # 2. Historical Data (for MA20)
-            df_hist_daily = await self._run_blocking(
-                ak.stock_zh_a_hist, 
-                symbol=code, 
-                period="daily", 
-                start_date="20240101", # Fetch enough for MA20
-                adjust="qfq"
-            )
-            
-            # 3. News
-            df_news = await self._run_blocking(ak.stock_news_em, symbol=code)
-            latest_news = []
-            if not df_news.empty:
-                latest_news = df_news.head(3)['title'].tolist()
-
-            return {
-                "code": code,
-                "history": df_hist_daily,
-                "news": latest_news
-            }
-
-        except Exception as e:
-            logger.error(f"Error fetching stock data for {code}: {e}")
-            return {}
 
     async def get_indices(self) -> Dict[str, Dict]:
         """
-        Fetches major indices: 000001 (ShangZheng), 399001 (ShenZheng), 399006 (ChiNext).
-        Returns: {'上证指数': {'current': ..., 'change_pct': ...}, ...}
+        Fetches major indices: ShangZheng, ShenZheng, ChiNext.
         """
         try:
-             # Use stock_zh_index_spot_sina for real-time index data
-             # Note: This returns a large DF. We filter by code.
+             # Use stock_zh_index_spot_sina for fast real-time data
              df = await self._run_blocking(ak.stock_zh_index_spot_sina)
              
-             targets = {
-                 "sh000001": "上证指数",
-                 "br000300": "沪深300", # Better to use common ones if available. 
-                 # Let's check typical codes in this API. 
-                 # Usually it returns '代码' like 'sh000001'.
+             # Map standard names to what we want
+             target_map = {
+                 "上证指数": "sh000001",
+                 "深证成指": "sz399001", 
+                 "创业板指": "sz399006"
              }
              
              results = {}
-             target_names = ["上证指数", "深证成指", "创业板指"]
-             
-             for name in target_names:
+             # Vectorized lookup is overkill for 3 items, loop is fine.
+             for name in target_map.keys():
                  row = df[df['名称'] == name]
                  if not row.empty:
-                     current = float(row.iloc[0]['最新价'])
-                     change_pct = float(row.iloc[0]['涨跌幅'])
-                     results[name] = {
-                         "current": current,
-                         "change_pct": change_pct
-                     }
+                     try:
+                         results[name] = {
+                             "current": float(row.iloc[0]['最新价']),
+                             "change_pct": float(row.iloc[0]['涨跌幅'])
+                         }
+                     except (ValueError, KeyError):
+                         continue
              return results
         except Exception as e:
             logger.error(f"Failed to fetch indices: {e}")
@@ -175,148 +195,163 @@ class DataCollector:
 
     async def get_macro_news(self) -> Dict[str, List[str]]:
         """
-        Fetches macro news from multiple sources:
-        1. CCTV News (via ak.news_cctv) - general macro news
-        2. AI/Tech sector keywords filtering
-        Returns: {"telegraph": [...], "ai_tech": [...]}
+        Fetches macro news using robust logic.
         """
         logger.info("Fetching macro news...")
         result = {"telegraph": [], "ai_tech": []}
         
-        # 1. CCTV News (央视新闻) - alternative to 财联社
         try:
-            from datetime import datetime
-            today = datetime.now().strftime('%Y%m%d')
-            df_news = await self._run_blocking(ak.news_cctv, date=today)
+            # 1. CCTV News (Robust source)
+            today_str = datetime.now().strftime('%Y%m%d')
+            df_news = await self._run_blocking(ak.news_cctv, date=today_str)
+            
+            # Fallback to previous day if today is empty (e.g. morning before news)
+            if df_news.empty:
+                 yesterday_str = (datetime.now() - timedelta(days=1)).strftime('%Y%m%d')
+                 df_news = await self._run_blocking(ak.news_cctv, date=yesterday_str)
+
             if not df_news.empty:
-                # Get latest 10 headlines
                 result["telegraph"] = df_news.head(10)['title'].tolist()
-        except Exception as e:
-            logger.warning(f"Failed to fetch CCTV news: {e}")
-            # Fallback: try stock_info_global_em for global financial news
-            try:
+            else:
+                # Secondary Fallback: Global financial news
                 df_global = await self._run_blocking(ak.stock_info_global_em)
                 if not df_global.empty:
                     result["telegraph"] = df_global.head(10)['标题'].tolist()
-            except Exception as e2:
-                logger.warning(f"Failed to fetch global news: {e2}")
-        
-        # 2. AI/Tech sector news (filter from telegraph or general news)
-        ai_keywords = ['人工智能', 'AI', '芯片', '半导体', '算力', '大模型', 'GPU', '英伟达', '华为', '科技']
-        try:
-            # Filter telegraph for AI/Tech related news
-            if result["telegraph"]:
-                ai_news = [n for n in result["telegraph"] if any(kw in n for kw in ai_keywords)]
-                result["ai_tech"] = ai_news[:5]  # Top 5 AI/Tech related
+
         except Exception as e:
-            logger.warning(f"Failed to filter AI/Tech news: {e}")
+            logger.warning(f"Failed to fetch macro news: {e}")
+        
+        # 2. Tech News Filtering
+        ai_keywords = ['人工智能', 'AI', '芯片', '半导体', '算力', '大模型', 'GPU', '英伟达', '华为', '科技', '机器']
+        if result["telegraph"]:
+            # List comprehension with early exit logic is efficient enough here
+            result["ai_tech"] = [
+                n for n in result["telegraph"] 
+                if any(k in n for k in ai_keywords)
+            ][:5]
         
         return result
 
     async def collect_all(self, portfolio: List[Dict]):
         """
-        Main entry point to collect everything in parallel.
+        Main entry point. Orchestrates parallel data fetching.
         """
         logger.info("Starting Batch Data Collection...")
         
-        # 1. Fetch Global Market Data (Breadth, North, Indices, Macro News)
-        task_breadth = asyncio.create_task(self.get_market_breadth())
-        task_north = asyncio.create_task(self.get_north_funds())
-        task_indices = asyncio.create_task(self.get_indices())
-        task_macro_news = asyncio.create_task(self.get_macro_news())
+        # 1. Global Market Data
+        # We launch these first as they are independent of portfolio
+        global_tasks = [
+            self.get_market_breadth(),
+            self.get_north_funds(),
+            self.get_indices(),
+            self.get_macro_news()
+        ]
         
-        # 2. Fetch Stock Data (Optimized)
+        # 2. Pre-fetch Spot Data for ALL stocks to minimize requests
+        # Instead of calling 'get_individual_stock' N times for spot, we get it once.
         try:
-             df_stocks = await self._run_blocking(ak.stock_zh_a_spot_em)
-        except:
-             df_stocks = pd.DataFrame()
-             
+            df_stocks = await self._run_blocking(ak.stock_zh_a_spot_em)
+        except Exception:
+            logger.warning("Failed to bulk fetch stock spot data.")
+            df_stocks = pd.DataFrame()
+
         try:
             df_etfs = await self._run_blocking(ak.fund_etf_spot_em)
-        except:
-             df_etfs = pd.DataFrame()
+        except Exception:
+            logger.warning("Failed to bulk fetch ETF spot data.")
+            df_etfs = pd.DataFrame()
         
-        # Merge
-        if not df_stocks.empty and not df_etfs.empty:
-             df_all_spot = pd.concat([df_stocks, df_etfs], ignore_index=True)
-        elif not df_etfs.empty:
-             df_all_spot = df_etfs
-        else:
-             df_all_spot = df_stocks
+        # Merge spot data simply
+        df_all_spot = pd.concat([df_stocks, df_etfs], ignore_index=True) if not df_stocks.empty or not df_etfs.empty else pd.DataFrame()
         
+        # 3. Portfolio Level Fetching (History & News need individual calls)
         stock_tasks = []
         for stock in portfolio:
             code = stock['code']
             stock_tasks.append(self._fetch_individual_stock_extras(code, df_all_spot))
             
-        # Wait for all
-        market_breadth, north_funds, indices, macro_news = await asyncio.gather(
-            task_breadth, task_north, task_indices, task_macro_news
-        )
-        stock_results = await asyncio.gather(*stock_tasks)
+        # Await all
+        global_results = await asyncio.gather(*global_tasks, return_exceptions=True)
+        stock_results = await asyncio.gather(*stock_tasks, return_exceptions=True)
         
+        # Unpack Global Results (Handling Exceptions safely)
+        market_breadth = global_results[0] if not isinstance(global_results[0], Exception) else "Error"
+        north_funds = global_results[1] if not isinstance(global_results[1], Exception) else 0.0
+        indices = global_results[2] if not isinstance(global_results[2], Exception) else {}
+        macro_news = global_results[3] if not isinstance(global_results[3], Exception) else {"telegraph": [], "ai_tech": []}
+        
+        # Filter valid stock results
+        valid_stocks = [res for res in stock_results if not isinstance(res, Exception) and "error" not in res]
+
         return {
             "market_breadth": market_breadth,
             "north_funds": north_funds,
             "indices": indices,
             "macro_news": macro_news,
-            "stocks": stock_results
+            "stocks": valid_stocks
         }
 
     async def _fetch_individual_stock_extras(self, code: str, df_all_spot: pd.DataFrame) -> Dict:
         """
-        Helper: extracts spot from global DF, then fetches Hist + News.
+        Fetches History and News for a specific stock.
+        Uses cached spot data `df_all_spot` to avoid N spot requests.
         """
         try:
-            # Extract Spot
-            spot_row = df_all_spot[df_all_spot['代码'] == code]
-            if spot_row.empty:
-                logger.warning(f"Code {code} not found in spot data.")
-                current_price = 0.0
-                pct_change = 0.0
-                name = "Unknown"
-            else:
-                current_price = float(spot_row.iloc[0]['最新价'])
-                pct_change = float(spot_row.iloc[0]['涨跌幅'])
-                name = spot_row.iloc[0]['名称']
-
-            # History (Daily) - Need last ~30 days for MA20
-            is_etf = code.startswith(('15', '50', '51', '56', '57', '58'))
+            # 1. Extract Spot Data from Bulk DataFrame
+            current_price = 0.0
+            pct_change = 0.0
+            name = "Unknown"
             
-            if is_etf:
-                # ETF History
+            if not df_all_spot.empty:
+                # Vectorized search
+                # Assuming '代码' column. Akshare usually return 6 digit string.
+                spot_row = df_all_spot[df_all_spot['代码'] == code]
+                if not spot_row.empty:
+                    try:
+                        current_price = float(spot_row.iloc[0]['最新价'])
+                        pct_change = float(spot_row.iloc[0]['涨跌幅'])
+                        name = spot_row.iloc[0]['名称']
+                    except (ValueError, KeyError, IndexError):
+                        pass
+
+            # 2. Fetch History (Dynamic Date)
+            is_etf = code.startswith(('15', '50', '51', '56', '57', '58'))
+            start_date = self._get_dynamic_start_date(days_lookback=60)
+            
+            fetch_func = ak.fund_etf_hist_em if is_etf else ak.stock_zh_a_hist
+            
+            try:
                 df_hist = await self._run_blocking(
-                    ak.fund_etf_hist_em,
-                    symbol=code,
-                    period="daily",
-                    start_date="20240101",
-                    adjust="qfq"
-                )
-            else:
-                # Stock History
-                df_hist = await self._run_blocking(
-                    ak.stock_zh_a_hist, 
+                    fetch_func,
                     symbol=code, 
                     period="daily", 
-                    start_date="20240101", # Fetch enough
+                    start_date=start_date,
                     adjust="qfq"
                 )
+            except Exception as e:
+                logger.warning(f"History fetch failed for {code}: {e}")
+                df_hist = pd.DataFrame()
+
+            # Keep only last 30 for calculations
             if not df_hist.empty:
                 df_hist = df_hist.tail(30)
             
-            # News (increased to 5 items)
+            # 3. Fetch Specific Stock News
+            # This is low priority, silence errors
+            news = []
             try:
                 df_news = await self._run_blocking(ak.stock_news_em, symbol=code)
-                news = df_news.head(5)['新闻标题'].tolist() if not df_news.empty else []
-            except:
-                news = []
+                if not df_news.empty:
+                    news = df_news.head(5)['新闻标题'].tolist()
+            except Exception:
+                pass
 
             return {
                 "code": code,
                 "name": name,
                 "current_price": current_price,
                 "pct_change": pct_change,
-                "history": df_hist, # DataFrame
+                "history": df_hist,
                 "news": news
             }
             
@@ -325,14 +360,19 @@ class DataCollector:
             return {"code": code, "error": str(e)}
 
 if __name__ == "__main__":
-    # Test run
-    # Mock config for test
+    # Smoke Test
     class MockConfig:
-        config = {'portfolio': [{'code': '600519'}, {'code': '300750'}]}
+        config = {'portfolio': [{'code': '600519', 'name': '茅台'}]}
     
+    start_t = datetime.now()
     collector = DataCollector()
-    loop = asyncio.get_event_loop()
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     result = loop.run_until_complete(collector.collect_all(MockConfig.config['portfolio']))
-    print(result['market_breadth'])
-    print(result['north_funds'])
-    print(len(result['stocks']))
+    
+    print(f"Time taken: {datetime.now() - start_t}")
+    print(f"Market Breadth: {result['market_breadth']}")
+    print(f"North Funds: {result['north_funds']}")
+    if result['stocks']:
+        print(f"Sample Stock Price: {result['stocks'][0]['current_price']}")
+        print(f"Sample Hist Shape: {result['stocks'][0]['history'].shape}")

@@ -18,6 +18,7 @@ async def main_midday_check(dry_run: bool = False, replay: bool = False):
     config = ConfigLoader().config
     portfolio = config.get('portfolio', [])
     data_path = Path("data/latest_context.json")
+    data_path.parent.mkdir(parents=True, exist_ok=True)
     
     # Replay Mode: Skip Fetching
     if replay:
