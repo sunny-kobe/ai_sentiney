@@ -14,7 +14,10 @@ class GeminiClient:
             logger.warning("Gemini API Key is missing!")
         
         genai.configure(api_key=self.api_key)
-        self.model = genai.GenerativeModel('gemini-3-pro-preview')
+        
+        model_name = self.config.get('ai', {}).get('model_name', 'gemini-pro')
+        logger.info(f"Initializing Gemini Client with model: {model_name}")
+        self.model = genai.GenerativeModel(model_name)
 
     def _build_context(self, market_breadth: str, north_funds: float, indices: Dict, macro_news: Dict, portfolio: List[Dict]) -> str:
         """Constructs the prompt context."""

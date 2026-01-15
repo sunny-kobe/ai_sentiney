@@ -4,3 +4,5 @@ PyYAML>=6.0
 python-dotenv>=1.0.0
 colorlog>=6.7.0
 requests>=2.31.0
+google-generativeai>=0.3.0
+tenacity>=8.2.0

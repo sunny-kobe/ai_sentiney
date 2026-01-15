@@ -4,6 +4,9 @@ system:
   timeout_seconds: 10
   timezone: "Asia/Shanghai"
 
+ai:
+  model_name: "gemini-pro" # Or gemini-1.5-flash, gemini-1.5-pro
+
 api_keys:
   # Using env vars is recommended, but supporting config file for ease of use in local env
   gemini_api_key: "${GEMINI_API_KEY}"
