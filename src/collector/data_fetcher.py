@@ -12,28 +12,13 @@ from src.utils.config_loader import ConfigLoader
 from src.utils.logger import logger
 
 
-def with_retry(max_retries: int = 3, delay: float = 1.0):
-    """
-    Decorator: Simple retry mechanism for flaky API calls.
-    """
-    def decorator(func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            last_err = None
-            for attempt in range(max_retries):
-                try:
-                    return func(*args, **kwargs)
-                except Exception as e:
-                    last_err = e
-                    logger.warning(f"Retry {attempt + 1}/{max_retries} for {func.__name__}: {e}")
-                    # In a sync wrapper inside thread pool, time.sleep is better, 
-                    # but here we rely on the executor not blocking the loop main thread.
-                    import time
-                    time.sleep(delay)
-            logger.error(f"Failed {func.__name__} after {max_retries} attempts.")
-            raise last_err
-        return wrapper
-    return decorator
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+import time
+
+# Custom exception for clean retry filtering if needed, though generic Exception is fine for now
+class FetchError(Exception):
+    pass
+
 
 
 class DataCollector:
@@ -48,21 +33,32 @@ class DataCollector:
 
     async def _run_blocking(self, func, *args, **kwargs):
         """
-        Helper to run blocking AkShare calls in a thread executor with retry logic.
+        Helper to run blocking AkShare calls in a thread executor with smart retry logic.
+        Uses tenacity to retry on exceptions with exponential backoff.
         """
         loop = asyncio.get_running_loop()
         
-        # Apply retry logic to the function execution within the thread
-        @with_retry(max_retries=3, delay=1.0)
+        # Define the retry policy: 
+        # Stop after 3 attempts
+        # Wait 2^x * 1 second between retries (1s, 2s, 4s...)
+        @retry(
+            stop=stop_after_attempt(3), 
+            wait=wait_exponential(multiplier=1, min=1, max=10),
+            reraise=True
+        )
         def retriable_func():
-            return func(*args, **kwargs)
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                logger.warning(f"API Call {func.__name__} failed: {e}. Retrying...")
+                raise e
 
         try:
             return await loop.run_in_executor(self.executor, retriable_func)
         except Exception as e:
-            # Check if we should inhibit logs for specific harmless errors?
-            # For now, let the caller handle the final failure.
+            logger.error(f"Command {func.__name__} failed definitively after retries.")
             raise e
+
 
     def _get_dynamic_start_date(self, days_lookback: int = 60) -> str:
         """

@@ -7,6 +7,7 @@ from src.collector.data_fetcher import DataCollector
 from src.processor.data_processor import DataProcessor
 from src.analyst.gemini_client import GeminiClient
 from src.reporter.feishu_client import FeishuClient
+from src.storage.database import SentinelDB
 
 import json
 from pathlib import Path
@@ -22,12 +23,20 @@ async def main_midday_check(dry_run: bool = False, replay: bool = False):
     
     # Replay Mode: Skip Fetching
     if replay:
-        if not data_path.exists():
-             logger.error("No historical data found for replay. Run normal mode first.")
+        # Replay Mode: Try to load from DB first, then fallback to JSON file for backward compatibility
+        db = SentinelDB()
+        latest_record = db.get_latest_record(mode='midday')
+        
+        if latest_record:
+            logger.info("Replay Mode: Loading data from SQLite DB...")
+            ai_input = latest_record
+        elif data_path.exists():
+            logger.info("Replay Mode: Loading data from local JSON file (Legacy)...")
+            with open(data_path, 'r', encoding='utf-8') as f:
+                ai_input = json.load(f)
+        else:
+             logger.error("No historical data found for replay (checked DB and JSON). Run normal mode first.")
              return
-        logger.info("Replay Mode: Loading data from local file...")
-        with open(data_path, 'r', encoding='utf-8') as f:
-            ai_input = json.load(f)
         
         # EXTRACT data needed for post-processing from saved context
         indices = ai_input.get('indices', {})
@@ -71,11 +80,18 @@ async def main_midday_check(dry_run: bool = False, replay: bool = False):
             "stocks": processed_stocks
         }
         
-        # SAVE Context for Replay
+        # SAVE Context for Replay (DB + JSON as backup)
         try:
+            # 1. Save to DB (Robust)
+            db = SentinelDB()
+            # We will update the 'ai_summary' later after AI analysis, but for now we don't have it.
+            # Actually, the DB save happens AFTER AI usually if we want the result.
+            # But the current architecture splits "Prepare Input" and "AI Analysis".
+            # Let's keep the JSON save here as 'checkpoint' and save to DB at the end.
+            
             with open(data_path, 'w', encoding='utf-8') as f:
                 json.dump(ai_input, f, ensure_ascii=False, indent=2)
-            logger.info(f"Context saved to {data_path}")
+            logger.info(f"Context saved to {data_path} (Legacy)")
         except Exception as e:
             logger.warning(f"Failed to save context context: {e}")
 
@@ -141,6 +157,15 @@ async def main_midday_check(dry_run: bool = False, replay: bool = False):
         print(reporter._construct_card(analysis_result))
     else:
         reporter.send_card(analysis_result)
+
+    # 5. Persistence (Save Full Record to DB)
+    if not dry_run or (dry_run and replay):
+        # Even in dry run, if we produced a result, we might want to save it if it's meaningful?
+        # Usually dry-run implies "don't touch prod state".
+        # But for 'replay' we might be testing DB.
+        # Let's only save in non-dry-run for safety.
+        if not dry_run:
+            SentinelDB().save_record(mode='midday', ai_input=ai_input, ai_analysis=analysis_result)
 
     logger.info("=== Sentinel Check Finished ===")
 
@@ -209,6 +234,10 @@ async def main_close_check(dry_run: bool = False):
         print(reporter._construct_close_card(analysis_result))
     else:
         reporter.send_close_card(analysis_result)
+
+    # 5. Persistence
+    if not dry_run:
+        SentinelDB().save_record(mode='close', ai_input=ai_input, ai_analysis=analysis_result)
 
     logger.info("=== Sentinel Close Review Finished ===")
 

@@ -1,0 +1,73 @@
+name: Sentinel Daily Briefing
+
+on:
+  schedule:
+    # UTC Time!
+    # China is UTC+8.
+    # Midday 11:40 CST = 03:40 UTC
+    # Close 15:10 CST = 07:10 UTC
+    - cron: "40 3 * * 1-5" # Midday Check
+    - cron: "10 7 * * 1-5" # Close Review
+  workflow_dispatch: # Allow manual button click test
+
+jobs:
+  run-sentinel:
+    runs-on: ubuntu-latest
+
+    # Permission to commit back to repo
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.9"
+          cache: "pip"
+
+      - name: Install Dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run Sentinel (Auto Detect Mode)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+        run: |
+          # Determine mode based on time or input?
+          # A simple way is to check the current hour (UTC)
+          # 03:00 - 05:00 UTC -> Midday
+          # 06:00 - 09:00 UTC -> Close
+
+          current_hour=$(date -u +%H)
+          echo "Current UTC Hour: $current_hour"
+
+          if [ "$current_hour" -lt 6 ]; then
+            echo "Running Midday Check..."
+            python src/main.py --mode midday
+          else
+            echo "Running Close Review..."
+            python src/main.py --mode close
+          fi
+
+      - name: Commit Database Changes (Persistence)
+        # Only commit if we are not in a PR and the run succeeded
+        if: success()
+        run: |
+          git config --global user.name 'Sentinel Bot'
+          git config --global user.email 'bot@sentinel.ai'
+
+          # Add the DB file (Make sure it is NOT in .gitignore if you use this method!)
+          # Or force add it
+          git add data/sentinel.db
+
+          # Check if there are changes
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "🤖 Update market data: $(date +'%Y-%m-%d')"
+            git push
+          fi
