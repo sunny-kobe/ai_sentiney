@@ -15,7 +15,7 @@ class GeminiClient:
         
         genai.configure(api_key=self.api_key)
         
-        model_name = self.config.get('ai', {}).get('model_name', 'gemini-3-pro')
+        model_name = self.config.get('ai', {}).get('model_name', 'gemini-3-pro-preview')
         logger.info(f"Initializing Gemini Client with model: {model_name}")
         self.model = genai.GenerativeModel(model_name)
 

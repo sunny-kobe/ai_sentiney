@@ -5,7 +5,7 @@ system:
   timezone: "Asia/Shanghai"
 
 ai:
-  model_name: "gemini-3-pro" # Updated to gemini-3-pro as requested
+  model_name: "gemini-3-pro-preview" # Corrected to available preview model
 
 api_keys:
   # Using env vars is recommended, but supporting config file for ease of use in local env
