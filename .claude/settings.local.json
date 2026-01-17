@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C /Users/lan/Desktop/code/ai_sentiney log --oneline -15)"
+    ]
+  }
+}

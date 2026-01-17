@@ -47,10 +47,10 @@ jobs:
 
           if [ "$current_hour" -lt 6 ]; then
             echo "Running Midday Check..."
-            python src/main.py --mode midday
+            python -m src.main --mode midday
           else
             echo "Running Close Review..."
-            python src/main.py --mode close
+            python -m src.main --mode close
           fi
 
       - name: Commit Database Changes (Persistence)
