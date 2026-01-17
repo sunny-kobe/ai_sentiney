@@ -146,7 +146,7 @@ async def main_midday_check(dry_run: bool = False, replay: bool = False):
         
     except Exception as e:
         logger.error(f"AI Analysis Failed: {e}")
-        return
+        sys.exit(1) # Ensure workflow fails
 
     # 4. Report
     reporter = FeishuClient()
@@ -225,7 +225,7 @@ async def main_close_check(dry_run: bool = False):
         
     except Exception as e:
         logger.error(f"Close Review Failed: {e}")
-        return
+        sys.exit(1) # Ensure workflow fails
 
     # 4. Report (using different card format for close review)
     reporter = FeishuClient()

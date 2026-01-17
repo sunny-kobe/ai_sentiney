@@ -3,7 +3,9 @@
     "allow": [
       "Bash(git -C /Users/lan/Desktop/code/ai_sentiney log --oneline -15)",
       "Bash(chmod:*)",
-      "Skill(superpowers:writing-skills)"
+      "Skill(superpowers:writing-skills)",
+      "Bash(cat:*)",
+      "Bash(wc:*)"
     ]
   }
 }
