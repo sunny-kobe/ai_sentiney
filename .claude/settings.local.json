@@ -5,7 +5,9 @@
       "Bash(chmod:*)",
       "Skill(superpowers:writing-skills)",
       "Bash(cat:*)",
-      "Bash(wc:*)"
+      "Bash(wc:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\ndocs: add CLAUDE.md with comprehensive project guidance for Claude Code\n\nAdd project documentation that provides:\n- Overview of Newsroom Model architecture\n- Common commands for running and testing the system\n- Detailed data flow pipeline explanation\n- Key MA20 stitching algorithm documentation\n- Configuration structure and environment setup\n- GitHub Actions automation schedule\n- Code conventions and patterns\n\nThis enables future Claude Code instances to understand the\ncodebase architecture and workflow more quickly.\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git push:*)"
     ]
   }
 }

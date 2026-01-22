@@ -24,6 +24,7 @@ logs/
 # 数据文件 (可能包含敏感信息)
 data/*.json
 data/*.db
+!data/sentinel.db  # 允许提交市场数据持久化DB
 
 # IDE 配置
 .idea/
