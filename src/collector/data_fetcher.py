@@ -194,7 +194,7 @@ class DataCollector:
         Fetches macro news using robust logic.
         """
         logger.info("Fetching macro news...")
-        result = {"telegraph": [], "ai_tech": []}
+        result: Dict[str, List[str]] = {"telegraph": [], "ai_tech": []}
         
         try:
             # 1. CCTV News (Robust source)
@@ -264,7 +264,7 @@ class DataCollector:
         stock_tasks = []
         for stock in portfolio:
             code = stock['code']
-            stock_tasks.append(self._fetch_individual_stock_extras(code, df_all_spot))
+            stock_tasks.append(self._fetch_individual_stock_extras(code, stock.get('name', 'Unknown'), df_all_spot))
             
         # Await all
         global_results = await asyncio.gather(*global_tasks, return_exceptions=True)
@@ -277,7 +277,7 @@ class DataCollector:
         macro_news = global_results[3] if not isinstance(global_results[3], Exception) else {"telegraph": [], "ai_tech": []}
         
         # Filter valid stock results
-        valid_stocks = [res for res in stock_results if not isinstance(res, Exception) and "error" not in res]
+        valid_stocks = [res for res in stock_results if not isinstance(res, Exception) and isinstance(res, dict) and "error" not in res]
 
         return {
             "market_breadth": market_breadth,
@@ -287,7 +287,7 @@ class DataCollector:
             "stocks": valid_stocks
         }
 
-    async def _fetch_individual_stock_extras(self, code: str, df_all_spot: pd.DataFrame) -> Dict:
+    async def _fetch_individual_stock_extras(self, code: str, stock_name: str, df_all_spot: pd.DataFrame) -> Dict:
         """
         Fetches History and News for a specific stock.
         Uses cached spot data `df_all_spot` to avoid N spot requests.
@@ -296,7 +296,8 @@ class DataCollector:
             # 1. Extract Spot Data from Bulk DataFrame
             current_price = 0.0
             pct_change = 0.0
-            name = "Unknown"
+            name = stock_name
+
             
             if not df_all_spot.empty:
                 # Vectorized search
@@ -330,6 +331,19 @@ class DataCollector:
 
             # Keep only last 30 for calculations
             if not df_hist.empty:
+                # Fallback for current_price if spot failed
+                if current_price == 0.0:
+                    try:
+                        # Use the latest 'Close' price as current price
+                        current_price = float(df_hist.iloc[-1]['收盘'])
+                        # Try to estimate pct_change if we have yesterday's close
+                        if len(df_hist) >= 2:
+                            prev_close = float(df_hist.iloc[-2]['收盘'])
+                            if prev_close > 0:
+                                pct_change = ((current_price - prev_close) / prev_close) * 100
+                    except Exception:
+                        pass # Keep as 0.0 if fallback fails
+
                 df_hist = df_hist.tail(30)
             
             # 3. Fetch Specific Stock News

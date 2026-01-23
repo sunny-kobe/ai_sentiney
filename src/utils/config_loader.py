@@ -10,7 +10,7 @@ load_dotenv()
 
 class ConfigLoader:
     _instance = None
-    _config = None
+    _config: Dict[str, Any] = {}
 
     def __new__(cls):
         if cls._instance is None:
@@ -38,7 +38,8 @@ class ConfigLoader:
             content = content.replace("${GEMINI_API_KEY}", gemini_key)
             content = content.replace("${FEISHU_WEBHOOK}", feishu_webhook)
             
-            self._config = yaml.safe_load(content)
+            self._config: Dict[str, Any] = {}
+            self._config.update(yaml.safe_load(content))
             logger.info("Configuration loaded successfully.")
             
         except Exception as e:

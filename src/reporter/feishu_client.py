@@ -66,29 +66,25 @@ class FeishuClient:
             header_color = "grey"
 
         # 1. Header Section
-        elements = [
+        elements: List[Dict[str, Any]] = [
             {
                 "tag": "div",
                 "text": {
                     "tag": "lark_md",
-                    "content": f"**📊 市场情绪**: {market_sentiment}\n**📈 核心指数**: {indices_info}\n**🎙️ 宏观点评**: {macro_summary}"
+                    "content": f"**📈 市场情绪**: {market_sentiment}\n{indices_info}"
                 }
-            }
-        ]
-        
-        if risk_alert:
-             elements.append({
+            },
+            {"tag": "hr"},
+             {
                 "tag": "div",
                 "text": {
                     "tag": "lark_md",
-                    "content": f"⚠️ **风险预警**: {risk_alert}"
+                    "content": f"**🌍 宏观/消息面**: \n{macro_summary}"
                 }
-            })
-
-        elements.append({"tag": "hr"})
-
-        # 2. Portfolio Grouping (Danger first)
-        grouped_actions = {"SELL": [], "WATCH": [], "HOLD": []}
+            },
+            {"tag": "hr"}
+        ] # 2. Portfolio Grouping (Danger first)
+        grouped_actions: Dict[str, List[Dict[str, Any]]] = {"SELL": [], "WATCH": [], "HOLD": []}
         for stock in actions:
             act = stock.get('action', 'HOLD').upper()
             if act not in grouped_actions: grouped_actions[act] = []
