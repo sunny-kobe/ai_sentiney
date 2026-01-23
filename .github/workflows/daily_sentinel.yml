@@ -62,7 +62,7 @@ jobs:
 
           # Add the DB file (Make sure it is NOT in .gitignore if you use this method!)
           # Or force add it
-          git add data/sentinel.db
+          git add -f data/sentinel.db
 
           # Check if there are changes
           if git diff --staged --quiet; then
