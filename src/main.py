@@ -67,13 +67,25 @@ def post_process_result(analysis_result: Dict, ai_input: Dict) -> Dict:
         code = action.get('code')
         name = action.get('name')
         
-        pct = None
-        if code in stock_map_by_code:
-            pct = stock_map_by_code[code]
-        elif name in stock_map_by_name:
-            pct = stock_map_by_name[name]
+        # Robust matching: try code first, then name
+        stock_obj = None
+        if code:
+            for s in processed_stocks:
+                if s['code'] == code:
+                    stock_obj = s
+                    break
+        
+        if not stock_obj and name:
+            for s in processed_stocks:
+                if s['name'] == name:
+                    stock_obj = s
+                    break
+        
+        if stock_obj:
+            pct = stock_obj.get('pct_change', 0.0)
+            current_price = stock_obj.get('current_price', 0.0)
+            action['current_price'] = current_price
             
-        if pct is not None:
             sign = "+" if pct > 0 else ""
             color = "🔴" if pct > 0 else "🟢" 
             action['pct_change_str'] = f"`{color} {sign}{pct}%`"

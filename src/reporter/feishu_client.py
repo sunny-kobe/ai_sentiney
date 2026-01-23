@@ -123,7 +123,11 @@ class FeishuClient:
                 
                 pct_info = s.get('pct_change_str', '') # Expect this to be injected by main.py
                 
-                content = f"**{name}** ({code}) {pct_info}"
+                # Modified content for midday report to include price
+                price = s.get('current_price', 0)
+                price_display = f" ¥{price}" if price else ""
+                
+                content = f"**{name}** ({code}){price_display} {pct_info}"
                 if confidence: content += f" `置信度:{confidence}`"
                 content += f"\n> 💡 {reason}"
                 if key_level: content += f"\n> 🎯 关键位: {key_level}"
@@ -241,7 +245,13 @@ class FeishuClient:
             support = s.get('support_level', 0)
             resistance = s.get('resistance_level', 0)
             
-            content = f"**{name}** ({code})"
+            # Enhanced Header with Price and Pct
+            price = s.get('current_price', 0)
+            pct_str = s.get('pct_change_str', '')
+            
+            price_display = f" ¥{price}" if price else ""
+            
+            content = f"**{name}** ({code}){price_display} {pct_str}"
             content += f"\n> 📋 **今日**: {today_review}"
             content += f"\n> 🎯 **明日**: {tomorrow_plan}"
             if support and resistance:
