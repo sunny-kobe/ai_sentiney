@@ -19,7 +19,7 @@ class GeminiClient:
         logger.info(f"Initializing Gemini Client with model: {model_name}")
         self.model = genai.GenerativeModel(model_name)
 
-    def _build_context(self, market_breadth: str, north_funds: float, indices: Dict, macro_news: Dict, portfolio: List[Dict]) -> str:
+    def _build_context(self, market_breadth: str, north_funds: float, indices: Dict, macro_news: Dict, portfolio: List[Dict], yesterday_context: Dict = None) -> str:
         """Constructs the prompt context."""
         
         # Simplify portfolio data for AI to save tokens and focus attention
@@ -45,6 +45,10 @@ class GeminiClient:
             },
             "Portfolio": portfolio_summary
         }
+        
+        if yesterday_context:
+            context["Yesterday_Plan"] = yesterday_context.get('actions', [])
+            
         return json.dumps(context, ensure_ascii=False, indent=2)
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
@@ -57,8 +61,9 @@ class GeminiClient:
         portfolio = market_data.get('stocks', [])
         indices = market_data.get('indices', {})
         macro_news = market_data.get('macro_news', {})
+        yesterday_context = market_data.get('yesterday_context')
         
-        context_json = self._build_context(market_breadth, north_funds, indices, macro_news, portfolio)
+        context_json = self._build_context(market_breadth, north_funds, indices, macro_news, portfolio, yesterday_context)
         
         # Load Prompt Template
         # Using the midday focus from config

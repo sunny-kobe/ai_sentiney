@@ -87,6 +87,10 @@ class FeishuClient:
         grouped_actions: Dict[str, List[Dict[str, Any]]] = {"SELL": [], "WATCH": [], "HOLD": []}
         for stock in actions:
             act = stock.get('action', 'HOLD').upper()
+            # Map Prompt 'DANGER' to Feishu 'SELL'
+            if act == 'DANGER':
+                act = 'SELL'
+            
             if act not in grouped_actions: grouped_actions[act] = []
             grouped_actions[act].append(stock)
 
@@ -128,6 +132,13 @@ class FeishuClient:
                 price_display = f" ¥{price}" if price else ""
                 
                 content = f"**{name}** ({code}){price_display} {pct_info}"
+                
+                # Highlight Operation Advice
+                operation = s.get('operation', '')
+                if operation:
+                    # Emphasize operation (e.g. 加仓/减仓)
+                    content += f"\n> 🔥 **建议**: {operation}"
+                    
                 if confidence: content += f" `置信度:{confidence}`"
                 content += f"\n> 💡 {reason}"
                 if key_level: content += f"\n> 🎯 关键位: {key_level}"

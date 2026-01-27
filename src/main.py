@@ -109,20 +109,21 @@ async def run_sentinel_check(mode: str, dry_run: bool = False, replay: bool = Fa
 
     # --- Step 1: Data Preparation ---
     if replay:
-        # Try DB first, then legacy JSON
-        db = SentinelDB()
-        latest_record = db.get_latest_record(mode=mode)
-        
-        if latest_record:
-            logger.info("Replay Mode: Loading data from SQLite DB...")
-            ai_input = latest_record
-        elif data_path.exists():
-            logger.info("Replay Mode: Loading data from local JSON file (Legacy)...")
+        # Prioritize local JSON for easier debugging/overriding, then DB
+        if data_path.exists():
+            logger.info("Replay Mode: Loading data from local JSON file...")
             with open(data_path, 'r', encoding='utf-8') as f:
                 ai_input = json.load(f)
         else:
-             logger.error("No historical data found for replay.")
-             return
+            db = SentinelDB()
+            latest_record = db.get_latest_record(mode=mode)
+            
+            if latest_record:
+                logger.info("Replay Mode: Loading data from SQLite DB...")
+                ai_input = latest_record
+            else:
+                 logger.error("No historical data found for replay.")
+                 return
     else:
         if not portfolio:
             logger.warning("Portfolio is empty. Exiting.")
@@ -153,6 +154,11 @@ async def run_sentinel_check(mode: str, dry_run: bool = False, replay: bool = Fa
             }
         else:
             if mode == 'midday':
+                # Fetch yesterday's close plan
+                db = SentinelDB()
+                last_close = db.get_last_close_analysis()
+                ai_input['yesterday_context'] = last_close
+                
                 analysis_result = analyst.analyze(ai_input)
             elif mode == 'close':
                 system_prompt = config['prompts'].get('close_review')

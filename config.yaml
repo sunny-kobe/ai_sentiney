@@ -97,6 +97,7 @@ prompts:
     1.  `Market_Breadth`: 市场整体涨跌家数比（判断情绪水位）。
     2.  `North_Money`: 北向资金实时净流入（单位：亿元）。
     3.  `Portfolio`: 持仓列表（含现价、MA20均线、乖离率、当日新闻）。
+    4.  `Yesterday_Plan`: 昨日收盘时制定的【明日计划】（用于对比今日走势是否符合预期）。
     </input_spec>
 
     <logic_core>
@@ -108,6 +109,9 @@ prompts:
 
     2.  **个股信号生成 (Signal Generation)**:
         *   **趋势初筛**: 对比 `Price` 与 `MA20`。阈值：`Price < MA20 * 0.995` 判定为有效破位。
+        *   **预期管理**:
+            *   若昨日计划是“减仓”，今日果然破位 -> 执行 `SELL`。
+            *   若昨日计划是“持有”，今日破位 -> 需判断是真跌还是洗盘 -> 给出一键 `operation` 建议。
         *   **资金验证 (真假摔过滤器)**:
             *   CASE A: 有效破位 AND 北向资金净流出 (< 0) -> 情绪共振，大概率真跌 -> 建议 `DANGER`。
             *   CASE B: 有效破位 BUT 北向资金大幅买入 (> 30) -> 资金背离，主力承接恐慌盘（假摔） -> 建议 `WATCH`。
@@ -129,7 +133,7 @@ prompts:
     3.  **博弈反思**: 
         *   “这只股票跌破MA20是主力在诱空吗？”
         *   “北向资金在这个位置买入的意图是什么？”
-    4.  **最终裁决**: 锁定 DANGER/WATCH/HOLD 状态。
+    4.  **最终裁决**: 锁定 DANGER/WATCH/HOLD 状态及具体操作动作。
     </thinking_process_protocol>
 
     <output_format>
@@ -146,6 +150,7 @@ prompts:
           "code": "string",
           "name": "string",
           "action": "DANGER|WATCH|HOLD",
+          "operation": "string (具体建议: 加仓/减仓/做T/观望/止损)",
           "reason": "string (30-50字，必须包含具体的技术/资金逻辑，拒绝废话)",
           "news_impact": "string (可选字段: 仅在有重大新闻时填写)"
         }

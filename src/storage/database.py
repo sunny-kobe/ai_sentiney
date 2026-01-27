@@ -15,7 +15,7 @@ class SentinelDB:
         return sqlite3.connect(self.db_path)
 
     def _init_db(self):
-        """Initialize the single table schema."""
+        """Initialize the single table schema and handle migrations."""
         create_table_sql = """
         CREATE TABLE IF NOT EXISTS daily_records (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -26,6 +26,7 @@ class SentinelDB:
             sentiment_score REAL,        -- Parsed from AI (future proof)
             ai_summary TEXT,             -- Full text
             raw_data JSON,               -- The entire context dump
+            ai_result JSON,              -- Stored AI output (Actionable Advice)
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
         """
@@ -35,6 +36,14 @@ class SentinelDB:
             with self._get_conn() as conn:
                 conn.execute(create_table_sql)
                 conn.execute(index_sql)
+                
+                # Auto-Migration: Check if ai_result exists
+                cursor = conn.execute("PRAGMA table_info(daily_records);")
+                columns = [info[1] for info in cursor.fetchall()]
+                if "ai_result" not in columns:
+                    conn.execute("ALTER TABLE daily_records ADD COLUMN ai_result JSON;")
+                    logger.info("Migrated DB: Added ai_result column.")
+                    
         except Exception as e:
             logger.error(f"DB Initialization failed: {e}")
 
@@ -49,14 +58,15 @@ class SentinelDB:
         # Serialize huge JSONs
         try:
             raw_json = json.dumps(ai_input, ensure_ascii=False)
+            ai_result_json = json.dumps(ai_analysis, ensure_ascii=False)
             summary = ai_analysis.get('summary', '') or ai_analysis.get('market_summary', '')
             
             # TODO: Future enhancement - extract a numerical score 0-100 from AI analysis
             sentiment_score = 0.0 
             
             sql = """
-            INSERT INTO daily_records (date, timestamp, mode, market_breadth, sentiment_score, ai_summary, raw_data)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO daily_records (date, timestamp, mode, market_breadth, sentiment_score, ai_summary, raw_data, ai_result)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """
             
             with self._get_conn() as conn:
@@ -67,7 +77,8 @@ class SentinelDB:
                     ai_input.get('market_breadth', 'N/A'),
                     sentiment_score,
                     summary,
-                    raw_json
+                    raw_json,
+                    ai_result_json
                 ))
             logger.info(f"✅ Saved {mode} record to DB for {date_str}.")
             
@@ -85,4 +96,17 @@ class SentinelDB:
                     return json.loads(row[0])
         except Exception as e:
             logger.error(f"Failed to fetch latest record: {e}")
+        return None
+
+    def get_last_close_analysis(self) -> Optional[Dict]:
+        """Fetch the analysis result from the last 'close' session."""
+        sql = "SELECT ai_result FROM daily_records WHERE mode = 'close' ORDER BY id DESC LIMIT 1"
+        try:
+            with self._get_conn() as conn:
+                cursor = conn.execute(sql)
+                row = cursor.fetchone()
+                if row and row[0]: # Check if ai_result is not null
+                    return json.loads(row[0])
+        except Exception as e:
+            logger.error(f"Failed to fetch last close analysis: {e}")
         return None
