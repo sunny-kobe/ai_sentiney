@@ -12,6 +12,7 @@ from src.utils.config_loader import ConfigLoader
 from src.utils.logger import logger
 from src.collector.sources.efinance_source import EfinanceSource
 from src.collector.sources.akshare_source import AkshareSource
+from src.collector.sources.tencent_source import TencentSource
 
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -21,15 +22,18 @@ class DataCollector:
         self.executor = ThreadPoolExecutor(max_workers=16)
         self.config = ConfigLoader().config
         
-        # Priority: Efinance -> AkShare
-        self.sources = [EfinanceSource(), AkshareSource()]
+        # Priority: Tencent -> Efinance -> AkShare
+        self.sources = [TencentSource(), EfinanceSource(), AkshareSource()]
+        
+        # Circuit Breaker: Track sources that have failed completely
+        self._disabled_sources = set()
 
     async def _run_blocking(self, func, *args, **kwargs):
         """
         Helper to run blocking calls in a thread executor with smart retry logic and timeout.
         """
         loop = asyncio.get_running_loop()
-        timeout = kwargs.pop('timeout', 30) # Default 30s timeout
+        timeout = kwargs.pop('timeout', 5) # Default 5s timeout (Fail Fast)
         
         @retry(
             stop=stop_after_attempt(3), 
@@ -61,6 +65,13 @@ class DataCollector:
         """
         last_exception = None
         for source in self.sources:
+            source_name = source.get_source_name()
+            
+            # Circuit Breaker Check
+            if source_name in self._disabled_sources:
+                # logger.debug(f"Skipping disabled source: {source_name}")
+                continue
+
             try:
                 func = getattr(source, method_name)
                 # Run sync source method in thread pool
@@ -72,7 +83,13 @@ class DataCollector:
                         continue # Try next source if Empty DataFrame
                     return result
             except Exception as e:
-                logger.warning(f"Source {source.get_source_name()} failed for {method_name}: {e}")
+                logger.warning(f"Source {source_name} failed for {method_name}: {e}")
+                
+                # Circuit Breaker Logic: Mark source as disabled if it fails
+                # We assume network/timeout errors are persistent for the session
+                self._disabled_sources.add(source_name)
+                logger.error(f"Circuit Breaker: Disabling source {source_name} due to failure.")
+                
                 last_exception = e
                 continue
         

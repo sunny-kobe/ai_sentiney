@@ -22,31 +22,52 @@ class AkshareSource(DataSource):
             return "N/A"
 
     def fetch_prices(self, code: str, period: str = 'daily', count: int = 20) -> Optional[pd.DataFrame]:
+        """
+        Fetch history from AkShare (Switching to Tencent backend for resilience).
+        
+        Tencent API (stock_zh_a_hist_tx) returns: [date, open, close, high, low, amount]
+        """
         try:
-            # AkShare uses 'sh600519' format sometimes, but often just code for specific APIs
-            # stock_zh_a_hist usually takes just the 6 digits
-            df = ak.stock_zh_a_hist(symbol=code, period=period, adjust="qfq")
+            # Config check for symbol format? 
+            # stock_zh_a_hist_tx needs 'sz000001' or 'sh600519'.
+            # Our code is usually '000001'. Need helper to add prefix.
+            symbol = self._get_tencent_symbol(code)
+            
+            # end_date = today
+            end_date = datetime.now().strftime("%Y%m%d")
+            start_date = (datetime.now() - timedelta(days=count*2)).strftime("%Y%m%d")
+
+            df = ak.stock_zh_a_hist_tx(symbol=symbol, start_date=start_date, end_date=end_date, adjust="qfq")
             
             if df is None or df.empty:
                 return None
-                
-            # Columns: 日期, 开盘, 收盘, 最高, 最低, 成交量, 成交额, 振幅, 涨跌幅, 涨跌额, 换手率
+
+            # Standardize columns
+            # Tencent result cols: date, open, close, high, low, amount
             df = df.rename(columns={
-                '日期': 'date',
-                '开盘': 'open',
-                '最高': 'high',
-                '最低': 'low',
-                '收盘': 'close',
-                '成交量': 'volume',
-                '涨跌幅': 'pct_chg'
+                'date': 'Date',
+                'open': 'Open', 
+                'close': 'Close',
+                'high': 'High',
+                'low': 'Low',
+                'amount': 'Volume'
             })
             
-            df['date'] = pd.to_datetime(df['date'])
-            return df.tail(count)
+            # Ensure Date is datetime
+            df['Date'] = pd.to_datetime(df['Date'])
+            
+            return df
             
         except Exception as e:
-            logger.error(f"AkShare price fetch failed for {code}: {e}")
-            return None
+            # logger.warning(f"AkShare history fetch failed for {code}: {e}")
+            raise e
+
+    def _get_tencent_symbol(self, code: str) -> str:
+        """Helper to convert 600xxx -> sh600xxx"""
+        if code.startswith('6'): return f"sh{code}"
+        if code.startswith('0') or code.startswith('3'): return f"sz{code}"
+        if code.startswith('4') or code.startswith('8'): return f"bj{code}"
+        raise ValueError(f"Unsupported stock code format for Tencent API: {code}")
 
     def fetch_news(self, code: str, count: int = 5) -> str:
         try:

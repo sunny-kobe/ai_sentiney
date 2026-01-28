@@ -6,7 +6,18 @@ from typing import Dict, Any, List
 from src.utils.logger import logger
 from src.service.analysis_service import AnalysisService
 from src.web.server import WebServer
-from src.web.api import get_router # We'll implement this next
+from src.utils.config_loader import ConfigLoader
+from src.web.api import get_router
+import os
+
+def setup_proxy():
+    """Inject proxy settings into environment if configured."""
+    system_config = ConfigLoader().get_system_config()
+    proxy = system_config.get('proxy')
+    if proxy:
+        os.environ["HTTP_PROXY"] = proxy
+        os.environ["HTTPS_PROXY"] = proxy
+        logger.info(f"Global Proxy Enabled: {proxy}")
 
 def entry_point():
     parser = argparse.ArgumentParser(description="Project Sentinel V2")
@@ -17,6 +28,10 @@ def entry_point():
     
     args = parser.parse_args()
     
+    # 1. Setup Proxy (Before any networking)
+    setup_proxy()
+    
+    # 2. Init Service
     service = AnalysisService()
 
     if args.webui:

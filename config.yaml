@@ -3,6 +3,8 @@ system:
   retry_count: 3
   timeout_seconds: 10
   timezone: "Asia/Shanghai"
+  # Optional: Proxy URL (e.g., http://127.0.0.1:7890)
+  # proxy: "http://127.0.0.1:7890"
 
 ai:
   model_name: "gemini-3-pro-preview" # Corrected to available preview model

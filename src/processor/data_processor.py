@@ -38,7 +38,16 @@ class DataProcessor:
             # We need the last N-1 days close prices.
             
             # Ensure we are using the right column
-            close_col = '收盘' if '收盘' in history_df.columns else 'Close'
+            if '收盘' in history_df.columns:
+                close_col = '收盘'
+            elif 'Close' in history_df.columns:
+                close_col = 'Close'
+            elif 'close' in history_df.columns:
+                close_col = 'close'
+            else:
+                layout_msg = str(history_df.columns.tolist())
+                logger.error(f"Missing close column in history: {layout_msg}")
+                raise KeyError("Missing close column")
             
             # Get last (Window - 1) closing prices
             # Note: history_df could include TODAY if run after close. 
