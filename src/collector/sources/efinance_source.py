@@ -75,21 +75,25 @@ class EfinanceSource(DataSource):
             if df is None or df.empty:
                 return None
             
-            # Efinance columns: 股票代码, 股票名称, 涨跌幅, 最新价, ...
-            # Needs strict mapping
+            # Efinance columns: 股票代码, 股票名称, 涨跌幅, 最新价, 成交量, 换手率 ...
             df = df.rename(columns={
                 '股票代码': 'code',
                 '股票名称': 'name',
                 '最新价': 'current_price',
-                '涨跌幅': 'pct_change'
+                '涨跌幅': 'pct_change',
+                '成交量': 'volume',
+                '换手率': 'turnover_rate'
             })
             
             # Ensure columns exist
             required = ['code', 'name', 'current_price', 'pct_change']
+            optional = ['volume', 'turnover_rate']
             if not all(col in df.columns for col in required):
                 return None
-                
-            return df[required]
+            
+            # Include optional columns if present
+            cols_to_return = required + [c for c in optional if c in df.columns]
+            return df[cols_to_return]
         except Exception as e:
             logger.error(f"Efinance spot fetch failed: {e}")
             return None

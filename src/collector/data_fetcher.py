@@ -270,6 +270,8 @@ class DataCollector:
             # 1. Spot Data logic
             current_price = 0.0
             pct_change = 0.0
+            volume = 0.0
+            turnover_rate = 0.0
             name = stock_name
 
             if not df_all_spot.empty:
@@ -278,7 +280,8 @@ class DataCollector:
                     try:
                         current_price = float(spot_row.iloc[0]['current_price'])
                         pct_change = float(spot_row.iloc[0]['pct_change'])
-                        # name = spot_row.iloc[0]['name'] # Trust config name? Source name might be different
+                        volume = float(spot_row.iloc[0].get('volume', 0))
+                        turnover_rate = float(spot_row.iloc[0].get('turnover_rate', 0))
                     except (ValueError, KeyError, IndexError):
                         pass
 
@@ -290,7 +293,8 @@ class DataCollector:
                     try:
                         current_price = float(quote['current_price'])
                         pct_change = float(quote['pct_change'])
-                        # name = quote['name'] 
+                        volume = float(quote.get('volume', 0))
+                        turnover_rate = float(quote.get('turnover_rate', 0))
                     except Exception as e:
                         logger.warning(f"Failed to parse quote for {code}: {e}")
 
@@ -300,6 +304,8 @@ class DataCollector:
                 df_hist = pd.DataFrame()
                 logger.warning(f"History fetch failed for {code}")
 
+            # Calculate 5-day average volume from history for volume ratio
+            avg_volume_5d = 0.0
             if not df_hist.empty:
                 # Fallback for current_price if spot failed
                 if current_price == 0.0:
@@ -309,6 +315,13 @@ class DataCollector:
                             prev_close = float(df_hist.iloc[-2]['close'])
                             if prev_close > 0:
                                 pct_change = ((current_price - prev_close) / prev_close) * 100
+                    except Exception:
+                        pass
+                
+                # Calculate avg volume (last 5 days excluding today)
+                if 'volume' in df_hist.columns and len(df_hist) >= 5:
+                    try:
+                        avg_volume_5d = float(df_hist.tail(5)['volume'].mean())
                     except Exception:
                         pass
                 
@@ -324,6 +337,9 @@ class DataCollector:
                 "name": name,
                 "current_price": current_price,
                 "pct_change": pct_change,
+                "volume": volume,
+                "turnover_rate": turnover_rate,
+                "avg_volume_5d": avg_volume_5d,
                 "history": df_hist,
                 "news": news_list
             }

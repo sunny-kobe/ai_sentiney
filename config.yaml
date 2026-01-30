@@ -83,7 +83,13 @@ portfolio:
 risk_management:
   stop_loss_pct: -0.05
   ma_window: 20
-  north_money_threshold_billion: 30 # 30亿
+  # Bias thresholds for tiered signal generation (v2.0)
+  bias_thresholds:
+    watch: -0.01 # -1%
+    warning: -0.03 # -3%
+    danger: -0.05 # -5%
+    overbought: 0.05 # +5%
+  # NOTE: north_money_threshold removed - no longer real-time available
 
 prompts:
   midday_focus: |

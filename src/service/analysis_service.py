@@ -41,8 +41,8 @@ class AnalysisService:
             stock_indicators = processor.calculate_indicators(stock_raw)
             processed_stocks.append(stock_indicators)
             
-        # Pre-calculate signals
-        processed_stocks = processor.generate_signals(processed_stocks, north_funds)
+        # Pre-calculate signals (north_funds removed in v2.0)
+        processed_stocks = processor.generate_signals(processed_stocks)
 
         return {
             "market_breadth": market_breadth,

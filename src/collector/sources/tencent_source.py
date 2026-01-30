@@ -140,17 +140,22 @@ class TencentSource(DataSource):
             try:
                 current_price = float(vals[3])
                 pct_change = float(vals[32])
+                # vals[6] = 成交量(手), vals[38] = 换手率(%)
+                volume = float(vals[6]) if vals[6] else 0.0
+                turnover_rate = float(vals[38]) if len(vals) > 38 and vals[38] else 0.0
             except ValueError as ve:
                 logger.error(f"Tencent parse float error: {ve} vals={vals}")
                 return None
             
-            logger.info(f"✅ Tencent Quote Success: {code} -> {current_price} ({pct_change}%)")
+            logger.info(f"✅ Tencent Quote Success: {code} -> {current_price} ({pct_change}%) Vol:{volume}")
             
             return {
                 "code": code,
                 "name": name,
                 "current_price": current_price,
-                "pct_change": pct_change
+                "pct_change": pct_change,
+                "volume": volume,  # 成交量(手)
+                "turnover_rate": turnover_rate  # 换手率(%)
             }
             
         except Exception as e:

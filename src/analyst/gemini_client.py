@@ -31,6 +31,10 @@ class GeminiClient:
                 "Price": stock['current_price'],
                 "Change": f"{stock.get('pct_change', 0)}%",
                 "MA20": stock['ma20'],
+                "Bias": f"{round(stock.get('bias_pct', 0) * 100, 2)}%",  # 乖离率 (%)
+                "Volume": f"{stock.get('volume', 0)}万手",  # 成交量
+                "Volume_Ratio": stock.get('volume_ratio', 0),  # 量比
+                "Turnover": f"{stock.get('turnover_rate', 0)}%",  # 换手率
                 "Signal": stock.get('signal', 'N/A'),
                 "News": stock.get('news', [])
             })

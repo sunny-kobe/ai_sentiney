@@ -1,7 +1,52 @@
 import pandas as pd
 from typing import Dict, Any, List
+from datetime import datetime
+import pytz
 from src.utils.logger import logger
 from src.utils.config_loader import ConfigLoader
+
+
+def get_intraday_progress() -> float:
+    """
+    计算当前时间在交易日中的进度比例 (0.0 - 1.0)。
+    A股交易时间: 09:30-11:30 (120分钟) + 13:00-15:00 (120分钟) = 240分钟
+    
+    Returns:
+        float: 交易进度。0.0 = 尚未开盘, 1.0 = 已收盘。
+               如果在午休或非交易时间，返回当时的累计进度。
+    """
+    tz = pytz.timezone('Asia/Shanghai')
+    now = datetime.now(tz)
+    
+    # 将时间转换为当天的分钟数 (从00:00开始)
+    current_minutes = now.hour * 60 + now.minute
+    
+    # A股时间节点 (分钟)
+    OPEN_AM = 9 * 60 + 30    # 09:30 = 570
+    CLOSE_AM = 11 * 60 + 30  # 11:30 = 690
+    OPEN_PM = 13 * 60        # 13:00 = 780
+    CLOSE_PM = 15 * 60       # 15:00 = 900
+    TOTAL_TRADING_MINUTES = 240.0
+    
+    if current_minutes < OPEN_AM:
+        # 尚未开盘
+        return 0.0
+    elif current_minutes <= CLOSE_AM:
+        # 上午交易时段
+        elapsed = current_minutes - OPEN_AM
+        return elapsed / TOTAL_TRADING_MINUTES
+    elif current_minutes < OPEN_PM:
+        # 午休时间 (11:30-13:00)，算上午的120分钟
+        return 120.0 / TOTAL_TRADING_MINUTES  # = 0.5
+    elif current_minutes <= CLOSE_PM:
+        # 下午交易时段
+        elapsed_am = 120.0  # 上午满额
+        elapsed_pm = current_minutes - OPEN_PM
+        return (elapsed_am + elapsed_pm) / TOTAL_TRADING_MINUTES
+    else:
+        # 已收盘
+        return 1.0
+
 
 class DataProcessor:
     def __init__(self):
@@ -70,6 +115,21 @@ class DataProcessor:
             # Bias = (Price - MA20) / MA20
             bias_pct = (current_price - realtime_ma20) / realtime_ma20
 
+            # 4. Pass through volume data and calculate volume ratio (日内归一化)
+            volume = stock_d.get('volume', 0.0)
+            turnover_rate = stock_d.get('turnover_rate', 0.0)
+            avg_volume_5d = stock_d.get('avg_volume_5d', 0.0)
+            
+            # 🔧 修复: 日内量比归一化
+            # 问题: 午盘时 volume 只有半天数据，直接除以5日均量会低估50%
+            # 解决: 将当前成交量换算为"预估全天成交量"
+            intraday_progress = get_intraday_progress()
+            if intraday_progress > 0 and avg_volume_5d > 0:
+                projected_daily_volume = volume / intraday_progress
+                volume_ratio = projected_daily_volume / avg_volume_5d
+            else:
+                volume_ratio = 0.0
+
             return {
                 "code": code,
                 "name": name,
@@ -77,6 +137,9 @@ class DataProcessor:
                 "pct_change": stock_d.get('pct_change', 0.0),
                 "ma20": round(realtime_ma20, 2),
                 "bias_pct": round(bias_pct, 4), # e.g. 0.0512 = 5.12%
+                "volume": round(volume / 10000, 2),  # 转换为万手
+                "turnover_rate": round(turnover_rate, 2),
+                "volume_ratio": round(volume_ratio, 2),  # 量比
                 "news": stock_d.get('news', [])
             }
 
@@ -84,38 +147,51 @@ class DataProcessor:
             logger.error(f"Error calculating indicators for {code}: {e}")
             return stock_d
 
-    def generate_signals(self, processed_stocks: List[Dict], north_funds: float) -> List[Dict]:
+    def generate_signals(self, processed_stocks: List[Dict]) -> List[Dict]:
         """
-        Applies rules to generate simple status tags (SAFE/DANGER/WATCH).
-        This is a pre-filter before AI analysis.
+        Applies rules to generate status tags (SAFE/DANGER/WATCH).
+        Uses Bias-based tiered logic and volume confirmation.
+        NOTE: North funds logic has been REMOVED as it's no longer real-time.
         """
         results = []
-        stop_loss_threshold = 0.995 # 0.5% buffer
-        north_threshold = self.risk_params.get('north_money_threshold_billion', 30)
+        
+        # Bias thresholds for tiered signals
+        BIAS_WATCH_THRESHOLD = -0.01   # -1%
+        BIAS_WARNING_THRESHOLD = -0.03  # -3%
+        BIAS_DANGER_THRESHOLD = -0.05   # -5%
 
         for stock in processed_stocks:
             price = stock['current_price']
             ma20 = stock['ma20']
+            bias = stock.get('bias_pct', 0)
+            volume_ratio = stock.get('volume_ratio', 1.0)
             
             if ma20 == 0:
                 stock['signal'] = "N/A"
                 results.append(stock)
                 continue
 
-            # Signal Logic
+            # Signal Logic v2.0 with Bias Tiers
             if price > ma20:
-                signal = "SAFE"
-            else:
-                # Below MA20
-                if price < (ma20 * stop_loss_threshold):
-                    # Effective Breakdown
-                    if north_funds > north_threshold:
-                        signal = "WATCH" # Broken but Big Money is buying
-                    else:
-                        signal = "DANGER"
+                # Above MA20
+                if bias > 0.05:  # +5% 超买
+                    signal = "OVERBOUGHT"
                 else:
-                    # Hovering around MA20
-                    signal = "Observed"
+                    signal = "SAFE"
+            else:
+                # Below MA20 - use tiered approach
+                if bias < BIAS_DANGER_THRESHOLD:  # < -5%
+                    signal = "DANGER"
+                elif bias < BIAS_WARNING_THRESHOLD:  # -5% ~ -3%
+                    # Volume confirmation: 放量破位更危险
+                    if volume_ratio > 1.5:  # 量比 > 1.5 = 放量
+                        signal = "DANGER"
+                    else:
+                        signal = "WARNING"
+                elif bias < BIAS_WATCH_THRESHOLD:  # -3% ~ -1%
+                    signal = "WATCH"
+                else:  # -1% ~ 0%
+                    signal = "OBSERVED"
 
             stock['signal'] = signal
             results.append(stock)
