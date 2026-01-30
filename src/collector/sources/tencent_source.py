@@ -1,6 +1,6 @@
 import requests
 import pandas as pd
-from typing import Optional
+from typing import Optional, Dict
 from src.collector.source_interface import DataSource
 from src.utils.logger import logger
 
@@ -19,7 +19,7 @@ class TencentSource(DataSource):
         00xxxx -> sz
         30xxxx -> sz
         """
-        if code.startswith('6'):
+        if code.startswith('6') or code.startswith('5'):
             return f"sh{code}"
         elif code.startswith('9'): # B share?
             return f"sh{code}"
@@ -102,3 +102,57 @@ class TencentSource(DataSource):
 
     def fetch_news(self, code: str, count: int = 5) -> str:
         return ""
+
+    def fetch_single_quote(self, code: str) -> Optional[Dict]:
+        """
+        Fetch real-time quote for a single stock using Tencent qt interface.
+        URL: http://qt.gtimg.cn/q=sh600519
+        """
+        t_code = self._get_tencent_code(code)
+        url = f"http://qt.gtimg.cn/q={t_code}"
+        
+        try:
+            logger.info(f"Tencent Fetching Single Quote: {url}")
+            resp = requests.get(url, timeout=5)
+            if resp.status_code != 200:
+                logger.warning(f"Tencent Quote HTTP {resp.status_code}")
+                return None
+            
+            text = resp.text.strip()
+            
+            if 'v_' not in text:
+                logger.warning(f"Tencent response missing 'v_' prefix: {text[:50]}")
+                return None
+                
+            parts = text.split('=')
+            if len(parts) < 2:
+                logger.warning(f"Tencent response split fail: {text[:50]}")
+                return None
+                
+            data_str = parts[1].strip('"').strip(';')
+            vals = data_str.split('~')
+            
+            if len(vals) < 32:
+                logger.warning(f"Tencent response parts too short ({len(vals)}): {data_str[:50]}")
+                return None
+                
+            name = vals[1]
+            try:
+                current_price = float(vals[3])
+                pct_change = float(vals[32])
+            except ValueError as ve:
+                logger.error(f"Tencent parse float error: {ve} vals={vals}")
+                return None
+            
+            logger.info(f"✅ Tencent Quote Success: {code} -> {current_price} ({pct_change}%)")
+            
+            return {
+                "code": code,
+                "name": name,
+                "current_price": current_price,
+                "pct_change": pct_change
+            }
+            
+        except Exception as e:
+            logger.error(f"Tencent quote fetch failed for {code}: {e}")
+            return None

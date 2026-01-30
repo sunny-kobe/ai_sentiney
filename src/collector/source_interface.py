@@ -35,3 +35,11 @@ class DataSource(ABC):
         Returns DataFrame with columns: ['code', 'name', 'current_price', 'pct_change']
         """
         pass
+
+    def fetch_single_quote(self, code: str) -> Optional[Dict]:
+        """
+        Fetch real-time quote for a single stock.
+        Returns Dict with keys: ['code', 'name', 'current_price', 'pct_change']
+        Optional to implement (default returns None).
+        """
+        return None

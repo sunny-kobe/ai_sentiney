@@ -236,15 +236,23 @@ class DataCollector:
             code = stock['code']
             stock_tasks.append(self._fetch_individual_stock_extras(code, stock.get('name', 'Unknown'), df_all_spot))
             
-        global_results = await asyncio.gather(*global_tasks, return_exceptions=True)
-        stock_results = await asyncio.gather(*stock_tasks, return_exceptions=True)
+        try:
+            global_results = await asyncio.gather(*global_tasks, return_exceptions=True)
+            stock_results = await asyncio.gather(*stock_tasks, return_exceptions=True)
+        except Exception as e:
+            logger.error(f"Critical error during gather: {e}")
+            # Try to salvage whatever we have
+            global_results = [None] * 4
+            stock_results = []
+
+        market_breadth = global_results[0] if global_results and not isinstance(global_results[0], Exception) else "Error"
+        north_funds = global_results[1] if global_results and not isinstance(global_results[1], Exception) else 0.0
+        indices = global_results[2] if global_results and not isinstance(global_results[2], Exception) else {}
+        macro_news = global_results[3] if global_results and not isinstance(global_results[3], Exception) else {"telegraph": [], "ai_tech": []}
         
-        market_breadth = global_results[0] if not isinstance(global_results[0], Exception) else "Error"
-        north_funds = global_results[1] if not isinstance(global_results[1], Exception) else 0.0
-        indices = global_results[2] if not isinstance(global_results[2], Exception) else {}
-        macro_news = global_results[3] if not isinstance(global_results[3], Exception) else {"telegraph": [], "ai_tech": []}
-        
-        valid_stocks = [res for res in stock_results if not isinstance(res, Exception) and isinstance(res, dict) and "error" not in res]
+        valid_stocks = []
+        if stock_results:
+            valid_stocks = [res for res in stock_results if not isinstance(res, Exception) and isinstance(res, dict) and "error" not in res]
 
         return {
             "market_breadth": market_breadth,
@@ -274,7 +282,19 @@ class DataCollector:
                     except (ValueError, KeyError, IndexError):
                         pass
 
-            # 2. Fetch Prices (History) via Fallback
+            # 2. Try Individual Real-Time Quote (Fallback for Spot)
+            # This is critical if bulk spot fetch failed (e.g. Efinance timeout)
+            if current_price == 0.0:
+                quote = await self._fetch_with_fallback('fetch_single_quote', code=code)
+                if quote:
+                    try:
+                        current_price = float(quote['current_price'])
+                        pct_change = float(quote['pct_change'])
+                        # name = quote['name'] 
+                    except Exception as e:
+                        logger.warning(f"Failed to parse quote for {code}: {e}")
+
+            # 3. Fetch Prices (History) via Fallback
             df_hist = await self._fetch_with_fallback('fetch_prices', code=code, count=30)
             if df_hist is None:
                 df_hist = pd.DataFrame()
