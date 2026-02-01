@@ -159,13 +159,24 @@ prompts:
         {
           "code": "string",
           "name": "string",
-          "action": "DANGER|WATCH|HOLD",
-          "operation": "string (具体: 减仓/做T/锁仓/观望)",
+          "signal": "DANGER|WARNING|WATCH|OBSERVED|SAFE|OVERBOUGHT|LIMIT_UP|LIMIT_DOWN",
+          "action": "DANGER|WATCH|HOLD (向后兼容)",
+          "operation": "string (具体: 减仓/做T/锁仓/观望/无法操作-涨停/无法操作-跌停)",
           "reason": "string (核心逻辑：必须包含'量/价/线'三要素的分析)",
           "news_impact": "string"
         }
       ]
     }
+
+    **信号说明**:
+    - DANGER: 跌破MA20且放量，建议止损
+    - WARNING: 跌破MA20但缩量，警惕但可观察
+    - WATCH: 轻微破位(-1%~-3%)，等待确认
+    - OBSERVED: 刚触及MA20(-1%以内)，密切关注
+    - SAFE: MA20上方运行，安全持有
+    - OVERBOUGHT: 乖离率超+5%，警惕回调
+    - LIMIT_UP: 涨停锁定，无法买入
+    - LIMIT_DOWN: 跌停锁定，无法卖出
     </output_format>
 
     <user_instruction>

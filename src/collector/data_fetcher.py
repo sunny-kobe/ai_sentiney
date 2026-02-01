@@ -1,7 +1,9 @@
 import asyncio
 import functools
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -16,17 +18,85 @@ from src.collector.sources.tencent_source import TencentSource
 
 from tenacity import retry, stop_after_attempt, wait_exponential
 
+
+@dataclass
+class CircuitBreakerState:
+    """
+    🔧 优化后的熔断器状态
+    - 要求连续3次失败才熔断
+    - 30秒后进入半开状态，允许一次尝试
+    """
+    failure_count: int = 0
+    is_open: bool = False  # True = 熔断中
+    last_failure_time: float = 0.0
+
+    # 配置
+    FAILURE_THRESHOLD: int = 3  # 连续失败N次才熔断
+    RECOVERY_TIMEOUT: float = 30.0  # 熔断后30秒进入半开状态
+
+
 class DataCollector:
     def __init__(self):
         # GitHub Actions runners / Standard Cloud Instances (2-4 vCPUs)
         self.executor = ThreadPoolExecutor(max_workers=16)
         self.config = ConfigLoader().config
-        
+
         # Priority: Tencent -> Efinance -> AkShare
         self.sources = [TencentSource(), EfinanceSource(), AkshareSource()]
-        
-        # Circuit Breaker: Track sources that have failed completely
-        self._disabled_sources = set()
+
+        # 🔧 优化: 使用结构化的熔断器状态，替代简单的disabled set
+        self._circuit_breakers: Dict[str, CircuitBreakerState] = {
+            source.get_source_name(): CircuitBreakerState()
+            for source in self.sources
+        }
+
+    def _should_skip_source(self, source_name: str) -> bool:
+        """
+        检查数据源是否应该跳过（熔断中且未到恢复时间）
+        """
+        cb = self._circuit_breakers.get(source_name)
+        if not cb:
+            return False
+
+        if not cb.is_open:
+            return False
+
+        # 检查是否到了半开恢复时间
+        elapsed = time.time() - cb.last_failure_time
+        if elapsed >= cb.RECOVERY_TIMEOUT:
+            logger.info(f"Circuit Breaker: {source_name} entering half-open state (trying recovery)")
+            return False  # 允许尝试
+
+        return True  # 仍在熔断中
+
+    def _record_success(self, source_name: str):
+        """记录成功，重置熔断器"""
+        cb = self._circuit_breakers.get(source_name)
+        if cb:
+            if cb.is_open:
+                logger.info(f"Circuit Breaker: {source_name} recovered successfully")
+            cb.failure_count = 0
+            cb.is_open = False
+
+    def _record_failure(self, source_name: str):
+        """记录失败，可能触发熔断"""
+        cb = self._circuit_breakers.get(source_name)
+        if not cb:
+            return
+
+        cb.failure_count += 1
+        cb.last_failure_time = time.time()
+
+        if cb.failure_count >= cb.FAILURE_THRESHOLD:
+            cb.is_open = True
+            logger.warning(
+                f"Circuit Breaker: {source_name} OPEN after {cb.failure_count} consecutive failures. "
+                f"Will retry in {cb.RECOVERY_TIMEOUT}s."
+            )
+        else:
+            logger.info(
+                f"Circuit Breaker: {source_name} failure {cb.failure_count}/{cb.FAILURE_THRESHOLD}"
+            )
 
     async def _run_blocking(self, func, *args, **kwargs):
         """
@@ -62,37 +132,35 @@ class DataCollector:
     async def _fetch_with_fallback(self, method_name: str, *args, **kwargs) -> Any:
         """
         Try to fetch data from sources in priority order.
+        🔧 优化: 使用改进的熔断器逻辑
         """
         last_exception = None
         for source in self.sources:
             source_name = source.get_source_name()
-            
-            # Circuit Breaker Check
-            if source_name in self._disabled_sources:
-                # logger.debug(f"Skipping disabled source: {source_name}")
+
+            # 熔断器检查
+            if self._should_skip_source(source_name):
                 continue
 
             try:
                 func = getattr(source, method_name)
                 # Run sync source method in thread pool
                 result = await self._run_blocking(func, *args, **kwargs)
-                
+
                 # Check for validity
                 if result is not None:
                     if isinstance(result, pd.DataFrame) and result.empty:
-                        continue # Try next source if Empty DataFrame
+                        continue  # Try next source if Empty DataFrame
+                    # 成功！重置熔断器
+                    self._record_success(source_name)
                     return result
             except Exception as e:
                 logger.warning(f"Source {source_name} failed for {method_name}: {e}")
-                
-                # Circuit Breaker Logic: Mark source as disabled if it fails
-                # We assume network/timeout errors are persistent for the session
-                self._disabled_sources.add(source_name)
-                logger.error(f"Circuit Breaker: Disabling source {source_name} due to failure.")
-                
+                # 记录失败（可能触发熔断）
+                self._record_failure(source_name)
                 last_exception = e
                 continue
-        
+
         logger.error(f"All sources failed for {method_name}.")
         return None
 
@@ -305,6 +373,7 @@ class DataCollector:
                 logger.warning(f"History fetch failed for {code}")
 
             # Calculate 5-day average volume from history for volume ratio
+            # 🔧 修复: 排除今日数据，确保5日均量计算准确
             avg_volume_5d = 0.0
             if not df_hist.empty:
                 # Fallback for current_price if spot failed
@@ -317,14 +386,38 @@ class DataCollector:
                                 pct_change = ((current_price - prev_close) / prev_close) * 100
                     except Exception:
                         pass
-                
-                # Calculate avg volume (last 5 days excluding today)
-                if 'volume' in df_hist.columns and len(df_hist) >= 5:
+
+                # 🔧 修复: 过滤今日数据后计算5日均量
+                # 问题: df_hist可能包含今日半天数据，导致均量被拉低
+                # 解决: 按日期过滤，或保守地排除最后一条
+                if 'volume' in df_hist.columns and len(df_hist) >= 6:
                     try:
+                        # 尝试按日期过滤
+                        today = datetime.now().date()
+                        if 'date' in df_hist.columns:
+                            df_hist_copy = df_hist.copy()
+                            df_hist_copy['date'] = pd.to_datetime(df_hist_copy['date'])
+                            df_hist_excluding_today = df_hist_copy[
+                                df_hist_copy['date'].dt.date < today
+                            ]
+                            if len(df_hist_excluding_today) >= 5:
+                                avg_volume_5d = float(
+                                    df_hist_excluding_today.tail(5)['volume'].mean()
+                                )
+                            else:
+                                # 数据不足，用原逻辑
+                                avg_volume_5d = float(df_hist.tail(6).head(5)['volume'].mean())
+                        else:
+                            # 无日期列，保守地排除最后一条（可能是今日）
+                            avg_volume_5d = float(df_hist.tail(6).head(5)['volume'].mean())
+                    except Exception as e:
+                        logger.warning(f"Failed to calculate avg_volume_5d for {code}: {e}")
+                        # 降级到原逻辑
                         avg_volume_5d = float(df_hist.tail(5)['volume'].mean())
-                    except Exception:
-                        pass
-                
+                elif 'volume' in df_hist.columns and len(df_hist) >= 5:
+                    # 数据刚好5条，无法排除今日
+                    avg_volume_5d = float(df_hist.tail(5)['volume'].mean())
+
                 df_hist = df_hist.tail(30)
             
             # 3. Fetch News via Fallback

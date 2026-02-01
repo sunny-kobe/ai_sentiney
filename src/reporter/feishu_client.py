@@ -84,15 +84,49 @@ class FeishuClient:
             },
             {"tag": "hr"}
         ] # 2. Portfolio Grouping (Danger first)
-        grouped_actions: Dict[str, List[Dict[str, Any]]] = {"SELL": [], "WATCH": [], "HOLD": []}
+        # 🔧 统一信号标签体系
+        # Processor信号: SAFE, OVERBOUGHT, OBSERVED, WATCH, WARNING, DANGER, LIMIT_UP, LIMIT_DOWN, N/A
+        # 映射到Feishu组:
+        #   SELL组 (红): DANGER, WARNING, LIMIT_DOWN (跌停无法卖出，但需警示)
+        #   WATCH组 (黄): WATCH, OBSERVED, OVERBOUGHT (超买需观察是否回调)
+        #   HOLD组 (绿): SAFE, HOLD, LIMIT_UP (涨停继续持有)
+        #   特殊组 (灰): N/A (数据不足)
+
+        grouped_actions: Dict[str, List[Dict[str, Any]]] = {
+            "SELL": [],
+            "WATCH": [],
+            "HOLD": [],
+            "LIMIT": [],  # 涨跌停特殊组
+            "UNKNOWN": []  # 数据不足
+        }
+
+        # 信号到组的映射
+        SIGNAL_GROUP_MAP = {
+            # SELL组 (需要减仓/离场)
+            "DANGER": "SELL",
+            "WARNING": "SELL",
+            "SELL": "SELL",
+            # WATCH组 (需要观察)
+            "WATCH": "WATCH",
+            "OBSERVED": "WATCH",
+            "OVERBOUGHT": "WATCH",
+            # HOLD组 (安全持有)
+            "SAFE": "HOLD",
+            "HOLD": "HOLD",
+            # 涨跌停特殊处理
+            "LIMIT_UP": "LIMIT",
+            "LIMIT_DOWN": "LIMIT",
+            # 数据不足
+            "N/A": "UNKNOWN"
+        }
+
         for stock in actions:
             act = stock.get('action', 'HOLD').upper()
-            # Map Prompt 'DANGER' to Feishu 'SELL'
-            if act == 'DANGER':
-                act = 'SELL'
-            
-            if act not in grouped_actions: grouped_actions[act] = []
-            grouped_actions[act].append(stock)
+            signal = stock.get('signal', act).upper()  # 优先用signal字段
+
+            # 使用映射确定分组
+            group = SIGNAL_GROUP_MAP.get(signal, SIGNAL_GROUP_MAP.get(act, "UNKNOWN"))
+            grouped_actions[group].append(stock)
 
         # Helper to render a group
         def render_group(title, emoji, stock_list):
@@ -152,10 +186,13 @@ class FeishuClient:
                 })
             elements.append({"tag": "hr"})
 
-        # Render Order: SELL -> WATCH -> HOLD
+        # Render Order: SELL -> LIMIT -> WATCH -> HOLD -> UNKNOWN
         render_group("建议离场/减仓", "🔴", grouped_actions["SELL"])
+        render_group("涨跌停锁定", "🔒", grouped_actions["LIMIT"])
         render_group("重点观察/洗盘", "🟡", grouped_actions["WATCH"])
         render_group("持仓安好/躺赢", "🟢", grouped_actions["HOLD"])
+        if grouped_actions["UNKNOWN"]:
+            render_group("数据不足", "⚪", grouped_actions["UNKNOWN"])
 
         # 3. Footer with Date and Session
         from datetime import datetime

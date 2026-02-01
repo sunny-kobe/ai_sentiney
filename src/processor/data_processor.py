@@ -1,6 +1,6 @@
 import pandas as pd
 from typing import Dict, Any, List
-from datetime import datetime
+from datetime import datetime, date
 import pytz
 from src.utils.logger import logger
 from src.utils.config_loader import ConfigLoader
@@ -95,11 +95,37 @@ class DataProcessor:
                 raise KeyError("Missing close column")
             
             # Get last (Window - 1) closing prices
-            # Note: history_df could include TODAY if run after close. 
-            # But usually detailed history API updates at night.
-            # We assume history_df DOES NOT contain today's realtime close yet.
-            
-            past_closes = history_df[close_col].tail(self.ma_window - 1).tolist()
+            # 🔧 修复: 确保历史数据不包含今日，避免MA20重复计算
+            # 问题: 腾讯K线API可能返回当日未完成的K线，导致今日价格被计算两次
+            # 解决: 按日期过滤，只保留今日之前的数据
+            tz = pytz.timezone('Asia/Shanghai')
+            today = datetime.now(tz).date()
+
+            # 确保有日期列用于过滤
+            if 'date' in history_df.columns:
+                date_col = 'date'
+            elif '日期' in history_df.columns:
+                date_col = '日期'
+            else:
+                date_col = None
+
+            if date_col:
+                # 转换日期列并过滤
+                try:
+                    history_df_filtered = history_df.copy()
+                    history_df_filtered[date_col] = pd.to_datetime(history_df_filtered[date_col])
+                    history_df_filtered = history_df_filtered[
+                        history_df_filtered[date_col].dt.date < today
+                    ]
+                except Exception as e:
+                    logger.warning(f"Date filtering failed for {code}: {e}, using original data")
+                    history_df_filtered = history_df
+            else:
+                # 无日期列时，假设最后一条可能是今日，保守地去掉
+                logger.warning(f"No date column found for {code}, assuming last row may be today")
+                history_df_filtered = history_df.iloc[:-1] if len(history_df) > self.ma_window else history_df
+
+            past_closes = history_df_filtered[close_col].tail(self.ma_window - 1).tolist()
             
             # Stitch
             combined_closes = past_closes + [current_price]
@@ -154,27 +180,54 @@ class DataProcessor:
         NOTE: North funds logic has been REMOVED as it's no longer real-time.
         """
         results = []
-        
-        # Bias thresholds for tiered signals
-        BIAS_WATCH_THRESHOLD = -0.01   # -1%
-        BIAS_WARNING_THRESHOLD = -0.03  # -3%
-        BIAS_DANGER_THRESHOLD = -0.05   # -5%
+
+        # 🔧 修复: 从配置读取阈值，而非硬编码
+        bias_thresholds = self.risk_params.get('bias_thresholds', {})
+        BIAS_WATCH_THRESHOLD = bias_thresholds.get('watch', -0.01)      # -1%
+        BIAS_WARNING_THRESHOLD = bias_thresholds.get('warning', -0.03)  # -3%
+        BIAS_DANGER_THRESHOLD = bias_thresholds.get('danger', -0.05)    # -5%
+        BIAS_OVERBOUGHT_THRESHOLD = bias_thresholds.get('overbought', 0.05)  # +5%
+
+        # 量比阈值（放量判定）
+        VOLUME_RATIO_HIGH = 1.5  # 量比 > 1.5 = 放量
 
         for stock in processed_stocks:
             price = stock['current_price']
             ma20 = stock['ma20']
             bias = stock.get('bias_pct', 0)
             volume_ratio = stock.get('volume_ratio', 1.0)
-            
+            pct_change = stock.get('pct_change', 0.0)
+
             if ma20 == 0:
                 stock['signal'] = "N/A"
+                results.append(stock)
+                continue
+
+            # 🔧 新增: 涨跌停检测
+            # A股涨跌停规则: 主板±10%, 创业板/科创板±20%
+            # 通过代码前缀判断板块: 300xxx/301xxx=创业板, 688xxx=科创板
+            code = stock.get('code', '')
+            if code.startswith('300') or code.startswith('301') or code.startswith('688'):
+                limit_threshold = 19.5  # 创业板/科创板 ±20%，留0.5%容差
+            else:
+                limit_threshold = 9.5   # 主板 ±10%，留0.5%容差
+
+            # 涨跌停状态标记
+            if pct_change >= limit_threshold:
+                stock['signal'] = "LIMIT_UP"
+                stock['limit_status'] = "涨停"
+                results.append(stock)
+                continue
+            elif pct_change <= -limit_threshold:
+                stock['signal'] = "LIMIT_DOWN"
+                stock['limit_status'] = "跌停"
                 results.append(stock)
                 continue
 
             # Signal Logic v2.0 with Bias Tiers
             if price > ma20:
                 # Above MA20
-                if bias > 0.05:  # +5% 超买
+                if bias > BIAS_OVERBOUGHT_THRESHOLD:
                     signal = "OVERBOUGHT"
                 else:
                     signal = "SAFE"
@@ -184,7 +237,7 @@ class DataProcessor:
                     signal = "DANGER"
                 elif bias < BIAS_WARNING_THRESHOLD:  # -5% ~ -3%
                     # Volume confirmation: 放量破位更危险
-                    if volume_ratio > 1.5:  # 量比 > 1.5 = 放量
+                    if volume_ratio > VOLUME_RATIO_HIGH:
                         signal = "DANGER"
                     else:
                         signal = "WARNING"
@@ -195,5 +248,5 @@ class DataProcessor:
 
             stock['signal'] = signal
             results.append(stock)
-            
+
         return results
