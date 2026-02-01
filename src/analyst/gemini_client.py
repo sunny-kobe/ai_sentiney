@@ -63,6 +63,40 @@ class CloseAnalysis(BaseModel):
     market_temperature: str = Field(default="未知")
     actions: List[CloseAction] = Field(default_factory=list)
 
+
+class MorningAction(BaseModel):
+    """早报个股操作建议"""
+    code: str
+    name: str
+    overnight_driver: str = Field(default="")
+    opening_expectation: str = Field(default="FLAT")
+    strategy: str = Field(default="观望")
+    ma20_status: str = Field(default="NEAR")
+    key_level: float = Field(default=0.0)
+
+    @field_validator('opening_expectation')
+    @classmethod
+    def normalize_expectation(cls, v: str) -> str:
+        v_upper = v.upper()
+        valid = {'HIGH_OPEN', 'LOW_OPEN', 'FLAT'}
+        if v_upper in valid:
+            return v_upper
+        if '高' in v or 'HIGH' in v_upper:
+            return 'HIGH_OPEN'
+        if '低' in v or 'LOW' in v_upper:
+            return 'LOW_OPEN'
+        return 'FLAT'
+
+
+class MorningAnalysis(BaseModel):
+    """早报分析结果"""
+    global_overnight_summary: str = Field(default="暂无隔夜综述")
+    commodity_summary: str = Field(default="")
+    us_treasury_impact: str = Field(default="")
+    a_share_outlook: str = Field(default="平开")
+    risk_events: List[str] = Field(default_factory=list)
+    actions: List[MorningAction] = Field(default_factory=list)
+
 class GeminiClient:
     def __init__(self):
         self.config = ConfigLoader().config
@@ -302,6 +336,69 @@ class GeminiClient:
             return result
         except Exception as e:
             logger.warning(f"Schema validation failed, using raw data: {e}")
+            if 'actions' not in data or not isinstance(data['actions'], list):
+                data['actions'] = []
+            return data
+
+    def _build_morning_context(self, morning_data: Dict[str, Any]) -> str:
+        """Constructs the prompt context for morning mode."""
+        portfolio_summary = []
+        for stock in morning_data.get('stocks', []):
+            portfolio_summary.append({
+                "Code": stock.get('code'),
+                "Name": stock.get('name'),
+                "Last_Close": stock.get('last_close', 0),
+                "MA20": stock.get('ma20', 0),
+                "Bias": f"{round(stock.get('bias_pct', 0) * 100, 2)}%",
+                "MA20_Status": stock.get('ma20_status', 'NEAR'),
+                "Overnight_Drivers": stock.get('overnight_driver_str', ''),
+                "Opening_Expectation": stock.get('opening_expectation', 'FLAT'),
+            })
+
+        context = {
+            "Global_Indices": morning_data.get('global_indices', []),
+            "Commodities": morning_data.get('commodities', []),
+            "US_Treasury": morning_data.get('us_treasury', {}),
+            "Macro_News": {
+                "财联社电报": morning_data.get('macro_news', {}).get("telegraph", []),
+                "AI科技热点": morning_data.get('macro_news', {}).get("ai_tech", [])
+            },
+            "Portfolio": portfolio_summary,
+        }
+        return json.dumps(context, ensure_ascii=False, indent=2)
+
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+    def analyze_morning(self, morning_data: Dict[str, Any], system_prompt: str) -> Dict[str, Any]:
+        """
+        早报模式：发送外盘+持仓数据到Gemini进行盘前分析。
+        """
+        context_json = self._build_morning_context(morning_data)
+
+        full_prompt = f"""
+{system_prompt}
+
+---
+[OVERNIGHT DATA CONTEXT]
+{context_json}
+"""
+        logger.info("Sending morning brief request to Gemini...")
+        try:
+            response = self.model.generate_content(full_prompt)
+            parsed = self._parse_response(response.text)
+            return self._validate_morning_response(parsed)
+        except Exception as e:
+            logger.error(f"Gemini API call failed (morning): {e}")
+            raise
+
+    def _validate_morning_response(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """使用Pydantic校验早报分析输出"""
+        try:
+            validated = MorningAnalysis.model_validate(data)
+            result = validated.model_dump()
+            logger.info(f"Morning schema validation passed: {len(result.get('actions', []))} actions")
+            return result
+        except Exception as e:
+            logger.warning(f"Morning schema validation failed, using raw data: {e}")
             if 'actions' not in data or not isinstance(data['actions'], list):
                 data['actions'] = []
             return data

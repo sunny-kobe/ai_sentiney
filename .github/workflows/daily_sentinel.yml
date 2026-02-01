@@ -4,8 +4,10 @@ on:
   schedule:
     # UTC Time!
     # China is UTC+8.
+    # Morning 08:30 CST = 00:30 UTC
     # Midday 11:40 CST = 03:40 UTC
     # Close 15:10 CST = 07:10 UTC
+    - cron: "30 0 * * 1-5" # Morning Brief
     - cron: "40 3 * * 1-5" # Midday Check
     - cron: "10 7 * * 1-5" # Close Review
   workflow_dispatch: # Allow manual button click test
@@ -45,7 +47,10 @@ jobs:
           current_hour=$(date -u +%H)
           echo "Current UTC Hour: $current_hour"
 
-          if [ "$current_hour" -lt 6 ]; then
+          if [ "$current_hour" -lt 2 ]; then
+            echo "Running Morning Brief..."
+            python -m src.main --mode morning
+          elif [ "$current_hour" -lt 6 ]; then
             echo "Running Midday Check..."
             python -m src.main --mode midday
           else

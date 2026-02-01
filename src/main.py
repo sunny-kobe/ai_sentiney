@@ -21,7 +21,7 @@ def setup_proxy():
 
 def entry_point():
     parser = argparse.ArgumentParser(description="Project Sentinel V2")
-    parser.add_argument('--mode', type=str, default='midday', choices=['midday', 'close'], help='Execution mode')
+    parser.add_argument('--mode', type=str, default='midday', choices=['midday', 'close', 'morning'], help='Execution mode')
     parser.add_argument('--dry-run', action='store_true', help='Run without calling expensive APIs or sending notifications')
     parser.add_argument('--replay', action='store_true', help='Replay analysis using last saved data')
     parser.add_argument('--webui', action='store_true', help='Start WebUI server')

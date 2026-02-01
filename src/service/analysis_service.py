@@ -25,13 +25,13 @@ class AnalysisService:
         # 1. Collect Data (Async)
         collector = DataCollector()
         raw_data = await collector.collect_all(portfolio)
-        
+
         market_breadth = raw_data['market_breadth']
         north_funds = raw_data['north_funds']
         stock_data_list = raw_data['stocks']
         indices = raw_data.get('indices', {})
         macro_news = raw_data.get('macro_news', {})
-        
+
         logger.info(f"Data Collected. Market Breadth: {market_breadth}, North Funds: {north_funds}")
 
         # 2. Process Data (Indicators)
@@ -40,7 +40,7 @@ class AnalysisService:
         for stock_raw in stock_data_list:
             stock_indicators = processor.calculate_indicators(stock_raw)
             processed_stocks.append(stock_indicators)
-            
+
         # Pre-calculate signals (north_funds removed in v2.0)
         processed_stocks = processor.generate_signals(processed_stocks)
 
@@ -52,8 +52,24 @@ class AnalysisService:
             "stocks": processed_stocks
         }
 
-    def post_process_result(self, analysis_result: Dict, ai_input: Dict) -> Dict:
+    async def collect_and_process_morning_data(self, portfolio: List[Dict]) -> Dict[str, Any]:
+        """Collects and processes morning pre-market data."""
+        collector = DataCollector()
+        raw_data = await collector.collect_morning_data(portfolio)
+
+        processor = DataProcessor()
+        processed_data = processor.process_morning_data(raw_data, portfolio)
+
+        logger.info(f"Morning data collected. Global indices: {len(processed_data.get('global_indices', []))}, "
+                     f"Commodities: {len(processed_data.get('commodities', []))}, "
+                     f"Stocks: {len(processed_data.get('stocks', []))}")
+        return processed_data
+
+    def post_process_result(self, analysis_result: Dict, ai_input: Dict, mode: str = 'midday') -> Dict:
         """Injects real-time data back into analysis result for display."""
+        if mode == 'morning':
+            return self._post_process_morning(analysis_result, ai_input)
+
         indices = ai_input.get('indices', {})
         processed_stocks = ai_input.get('stocks', [])
         
@@ -97,6 +113,49 @@ class AnalysisService:
                 
         return analysis_result
 
+    def _post_process_morning(self, analysis_result: Dict, ai_input: Dict) -> Dict:
+        """Injects raw overnight data into morning analysis result for Feishu display."""
+        # Format global indices info
+        global_indices = ai_input.get('global_indices', [])
+        indices_parts = []
+        for idx in global_indices:
+            pct = idx.get('change_pct', 0)
+            sign = "+" if pct > 0 else ""
+            emoji = "🔴" if pct > 0 else "🟢"
+            indices_parts.append(f"{emoji} {idx['name']} {sign}{pct}%")
+        analysis_result['global_indices_info'] = "\n".join(indices_parts)
+
+        # Format commodities info
+        commodities = ai_input.get('commodities', [])
+        commodity_parts = []
+        for c in commodities:
+            pct = c.get('change_pct', 0)
+            sign = "+" if pct > 0 else ""
+            commodity_parts.append(f"{c['name']} {sign}{pct}%")
+        analysis_result['commodities_info'] = " / ".join(commodity_parts)
+
+        # Format treasury info
+        treasury = ai_input.get('us_treasury', {})
+        if treasury:
+            y10 = treasury.get('yield_10y', 0)
+            y2 = treasury.get('yield_2y', 0)
+            spread = treasury.get('spread_10y_2y', 0)
+            analysis_result['treasury_info'] = f"10Y: {y10}% / 2Y: {y2}% / 利差: {spread}%"
+
+        # Match overnight drivers to actions
+        stocks = ai_input.get('stocks', [])
+        for action in analysis_result.get('actions', []):
+            code = action.get('code', '')
+            for s in stocks:
+                if s.get('code') == code:
+                    if not action.get('overnight_driver'):
+                        action['overnight_driver'] = s.get('overnight_driver_str', '')
+                    if not action.get('ma20_status'):
+                        action['ma20_status'] = s.get('ma20_status', 'NEAR')
+                    break
+
+        return analysis_result
+
     async def run_analysis(self, mode: str, dry_run: bool = False, replay: bool = False) -> Dict:
         """
         Runs the full analysis pipeline.
@@ -127,7 +186,10 @@ class AnalysisService:
                 return {"error": "Portfolio is empty"}
             
             try:
-                ai_input = await self.collect_and_process_data(portfolio)
+                if mode == 'morning':
+                    ai_input = await self.collect_and_process_morning_data(portfolio)
+                else:
+                    ai_input = await self.collect_and_process_data(portfolio)
                 # Save context
                 with open(self.data_path, 'w', encoding='utf-8') as f:
                     json.dump(ai_input, f, ensure_ascii=False, indent=2)
@@ -158,9 +220,16 @@ class AnalysisService:
                         analysis_result = analyst.analyze_with_prompt(ai_input, system_prompt)
                     else:
                         analysis_result = analyst.analyze(ai_input)
-            
+                elif mode == 'morning':
+                    system_prompt = self.config['prompts'].get('morning_brief')
+                    if system_prompt:
+                        analysis_result = analyst.analyze_morning(ai_input, system_prompt)
+                    else:
+                        logger.error("Morning brief prompt not found in config!")
+                        return {"error": "Missing morning_brief prompt"}
+
             # Unified Post-Processing
-            analysis_result = self.post_process_result(analysis_result, ai_input)
+            analysis_result = self.post_process_result(analysis_result, ai_input, mode=mode)
             
             logger.info(f"{mode.capitalize()} Analysis Completed.")
             
@@ -176,8 +245,10 @@ class AnalysisService:
         else:
             if mode == 'midday':
                 reporter.send_card(analysis_result)
-            else:
+            elif mode == 'close':
                 reporter.send_close_card(analysis_result)
+            elif mode == 'morning':
+                reporter.send_morning_card(analysis_result)
 
         # --- Step 4: Persistence ---
         if not dry_run or (dry_run and replay):

@@ -250,3 +250,91 @@ class DataProcessor:
             results.append(stock)
 
         return results
+
+    # ============================================================
+    # Morning Mode: 盘前外盘映射处理
+    # ============================================================
+
+    # 持仓-外盘关联映射
+    PORTFOLIO_GLOBAL_MAP = {
+        "159934": ["黄金"],           # 黄金ETF
+        "601899": ["黄金", "铜"],      # 紫金矿业
+        "000603": ["白银", "黄金"],    # 盛达资源
+        "512480": ["纳斯达克"],        # 半导体ETF
+        "560780": ["纳斯达克"],        # 半导体设备ETF
+        "588760": ["纳斯达克"],        # 科创人工智能ETF
+        "159819": ["纳斯达克"],        # 人工智能ETF
+        "510500": ["标普500", "纳斯达克"],  # 中证500ETF
+        "510300": ["标普500", "纳斯达克"],  # 沪深300ETF
+        "159338": ["标普500", "纳斯达克"],  # 中证A500ETF
+        "510980": ["标普500", "纳斯达克"],  # 上证指数ETF
+        "563300": ["标普500", "纳斯达克"],  # 中证2000ETF
+        "600089": ["WTI原油"],         # 特变电工
+    }
+
+    def process_morning_data(self, morning_data: Dict[str, Any], portfolio_config: List[Dict]) -> Dict[str, Any]:
+        """
+        处理早报数据：将外盘变动映射到持仓。
+        """
+        global_indices = morning_data.get('global_indices', [])
+        commodities = morning_data.get('commodities', [])
+        stocks = morning_data.get('stocks', [])
+
+        # Build lookup: name -> change_pct
+        global_lookup = {}
+        for idx in global_indices:
+            global_lookup[idx['name']] = idx.get('change_pct', 0)
+        for c in commodities:
+            global_lookup[c['name']] = c.get('change_pct', 0)
+
+        # Enrich each stock with overnight drivers
+        enriched_stocks = []
+        for stock in stocks:
+            code = stock.get('code', '')
+            drivers = self.PORTFOLIO_GLOBAL_MAP.get(code, [])
+            overnight_impacts = []
+            for driver in drivers:
+                # Fuzzy match against global_lookup keys
+                for key, pct in global_lookup.items():
+                    if driver in key:
+                        sign = "+" if pct > 0 else ""
+                        overnight_impacts.append(f"{key}{sign}{pct}%")
+                        break
+
+            stock['overnight_drivers'] = overnight_impacts
+            stock['overnight_driver_str'] = ", ".join(overnight_impacts) if overnight_impacts else "无直接关联外盘"
+
+            # Determine opening expectation based on drivers
+            stock['opening_expectation'] = self._morning_signal(stock, global_lookup)
+            enriched_stocks.append(stock)
+
+        morning_data['stocks'] = enriched_stocks
+        return morning_data
+
+    def _morning_signal(self, stock: Dict, global_lookup: Dict) -> str:
+        """
+        基于昨收MA20和外盘变动生成盘前信号。
+        Returns: HIGH_OPEN / LOW_OPEN / FLAT
+        """
+        code = stock.get('code', '')
+        drivers = self.PORTFOLIO_GLOBAL_MAP.get(code, [])
+
+        # Collect relevant driver changes
+        driver_changes = []
+        for driver in drivers:
+            for key, pct in global_lookup.items():
+                if driver in key:
+                    driver_changes.append(pct)
+                    break
+
+        if not driver_changes:
+            return "FLAT"
+
+        avg_change = sum(driver_changes) / len(driver_changes)
+
+        if avg_change > 0.5:
+            return "HIGH_OPEN"
+        elif avg_change < -0.5:
+            return "LOW_OPEN"
+        else:
+            return "FLAT"

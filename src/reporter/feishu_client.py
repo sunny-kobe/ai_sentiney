@@ -247,6 +247,159 @@ class FeishuClient:
         except Exception as e:
             logger.error(f"Failed to send Feishu close card: {e}")
 
+    def send_morning_card(self, data: Dict[str, Any]):
+        """Sends the morning pre-market brief card to Feishu."""
+        if not self.webhook_url:
+            logger.warning("Skipping Feishu push (No URL)")
+            return
+
+        try:
+            card_content = self._construct_morning_card(data)
+            payload = {
+                "msg_type": "interactive",
+                "card": card_content
+            }
+            response = requests.post(self.webhook_url, json=payload, timeout=10)
+            response.raise_for_status()
+            resp_json = response.json()
+            if resp_json.get("code") != 0:
+                logger.error(f"Feishu Error: {resp_json}")
+            else:
+                logger.info("Feishu morning brief sent successfully.")
+        except Exception as e:
+            logger.error(f"Failed to send Feishu morning card: {e}")
+
+    def _construct_morning_card(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Constructs the Feishu Interactive Card for morning pre-market brief.
+        Layout: 🌍隔夜全球 → 📦大宗/汇率 → ⚠️风险事件 → 🎯A股预判 → 📋持仓策略
+        """
+        global_summary = data.get("global_overnight_summary", "暂无隔夜综述")
+        commodity_summary = data.get("commodity_summary", "")
+        treasury_impact = data.get("us_treasury_impact", "")
+        a_share_outlook = data.get("a_share_outlook", "平开")
+        risk_events = data.get("risk_events", [])
+        actions = data.get("actions", [])
+
+        # Header color based on outlook
+        header_color = "blue"
+        if "低开" in a_share_outlook or "LOW" in a_share_outlook.upper():
+            header_color = "red"
+        elif "高开" in a_share_outlook or "HIGH" in a_share_outlook.upper():
+            header_color = "green"
+
+        from datetime import datetime
+        date_str = datetime.now().strftime('%Y年%m月%d日')
+
+        elements = []
+
+        # 1. 🌍 隔夜全球市场
+        # Inject raw global indices if available
+        global_indices_info = data.get("global_indices_info", "")
+        global_section = f"**🌍 隔夜全球市场**\n{global_indices_info}\n{global_summary}"
+        elements.append({
+            "tag": "div",
+            "text": {"tag": "lark_md", "content": global_section}
+        })
+        elements.append({"tag": "hr"})
+
+        # 2. 📦 大宗商品 & 美债
+        commodities_info = data.get("commodities_info", "")
+        treasury_info = data.get("treasury_info", "")
+        commodity_section = f"**📦 大宗商品 & 汇率**\n{commodities_info}\n{commodity_summary}"
+        if treasury_impact:
+            commodity_section += f"\n**💰 美债**: {treasury_info}\n{treasury_impact}"
+        elements.append({
+            "tag": "div",
+            "text": {"tag": "lark_md", "content": commodity_section}
+        })
+        elements.append({"tag": "hr"})
+
+        # 3. ⚠️ 风险事件
+        if risk_events:
+            risk_text = "**⚠️ 今日风险事件**\n" + "\n".join(f"• {e}" for e in risk_events)
+            elements.append({
+                "tag": "div",
+                "text": {"tag": "lark_md", "content": risk_text}
+            })
+            elements.append({"tag": "hr"})
+
+        # 4. 🎯 A股预判
+        # Opening expectation emoji
+        if "高开" in a_share_outlook or "HIGH" in a_share_outlook.upper():
+            outlook_emoji = "⬆️"
+        elif "低开" in a_share_outlook or "LOW" in a_share_outlook.upper():
+            outlook_emoji = "⬇️"
+        else:
+            outlook_emoji = "➡️"
+
+        elements.append({
+            "tag": "div",
+            "text": {"tag": "lark_md", "content": f"**🎯 A股开盘预判** {outlook_emoji}\n{a_share_outlook}"}
+        })
+        elements.append({"tag": "hr"})
+
+        # 5. 📋 持仓策略
+        if actions:
+            elements.append({
+                "tag": "div",
+                "text": {"tag": "lark_md", "content": f"**📋 持仓开盘策略 ({len(actions)}只)**"}
+            })
+
+            for s in actions:
+                name = s.get('name', '')
+                code = s.get('code', '')
+                driver = s.get('overnight_driver', '')
+                expectation = s.get('opening_expectation', 'FLAT')
+                strategy = s.get('strategy', '')
+                ma20_status = s.get('ma20_status', '')
+                key_level = s.get('key_level', 0)
+
+                # Expectation emoji
+                if expectation == 'HIGH_OPEN':
+                    exp_emoji = "⬆️高开"
+                elif expectation == 'LOW_OPEN':
+                    exp_emoji = "⬇️低开"
+                else:
+                    exp_emoji = "➡️平开"
+
+                content = f"**{name}** ({code}) {exp_emoji}"
+                if driver:
+                    content += f"\n> 🌐 驱动: {driver}"
+                content += f"\n> 📊 MA20: {ma20_status}"
+                if strategy:
+                    content += f"\n> 🔥 **策略**: {strategy}"
+                if key_level:
+                    content += f"\n> 🎯 关键位: {key_level}"
+
+                elements.append({
+                    "tag": "div",
+                    "text": {"tag": "lark_md", "content": content}
+                })
+
+            elements.append({"tag": "hr"})
+
+        # Footer
+        elements.append({
+            "tag": "note",
+            "elements": [{
+                "tag": "plain_text",
+                "content": f"Sentinel AI V2.0 • {date_str} 盘前战备简报 • {time.strftime('%H:%M')}"
+            }]
+        })
+
+        return {
+            "config": {"wide_screen_mode": True},
+            "header": {
+                "template": header_color,
+                "title": {
+                    "tag": "plain_text",
+                    "content": "☀️ 哨兵盘前战备简报"
+                }
+            },
+            "elements": elements
+        }
+
     def _construct_close_card(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Constructs the Feishu Interactive Card for close review.

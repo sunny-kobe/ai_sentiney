@@ -330,6 +330,197 @@ class DataCollector:
             "stocks": valid_stocks
         }
 
+    # ============================================================
+    # Morning Mode: 盘前外盘数据采集
+    # ============================================================
+
+    async def get_global_indices(self) -> List[Dict]:
+        """
+        获取隔夜全球指数（美股/恒生/美元指数等）。
+        Uses ak.index_global_spot_em()
+        """
+        logger.info("Fetching global indices...")
+        try:
+            df = await self._run_blocking(ak.index_global_spot_em, timeout=10)
+            if df is None or df.empty:
+                return []
+
+            targets = ['标普500', '纳斯达克', '道琼斯', '恒生指数', '美元指数',
+                        '纳斯达克100', '日经225']
+            results = []
+            for name in targets:
+                row = df[df['名称'].str.contains(name, na=False)]
+                if not row.empty:
+                    try:
+                        results.append({
+                            "name": name,
+                            "current": float(row.iloc[0].get('最新价', 0)),
+                            "change_pct": float(row.iloc[0].get('涨跌幅', 0)),
+                            "change_amount": float(row.iloc[0].get('涨跌额', 0)),
+                        })
+                    except (ValueError, KeyError):
+                        continue
+            return results
+        except Exception as e:
+            logger.error(f"Failed to fetch global indices: {e}")
+            return []
+
+    async def get_commodity_futures(self) -> List[Dict]:
+        """
+        获取隔夜大宗商品期货（黄金/白银/铜/原油）。
+        Uses ak.futures_global_spot_em()
+        """
+        logger.info("Fetching commodity futures...")
+        try:
+            df = await self._run_blocking(ak.futures_global_spot_em, timeout=10)
+            if df is None or df.empty:
+                return []
+
+            targets = ['黄金', '白银', '铜', 'WTI原油', '布伦特原油', 'COMEX铜']
+            results = []
+            for name in targets:
+                row = df[df['名称'].str.contains(name, na=False)]
+                if not row.empty:
+                    try:
+                        results.append({
+                            "name": row.iloc[0].get('名称', name),
+                            "current": float(row.iloc[0].get('最新价', 0)),
+                            "change_pct": float(row.iloc[0].get('涨跌幅', 0)),
+                        })
+                    except (ValueError, KeyError):
+                        continue
+            return results
+        except Exception as e:
+            logger.error(f"Failed to fetch commodity futures: {e}")
+            return []
+
+    async def get_us_treasury_yields(self) -> Dict:
+        """
+        获取美债收益率（2Y/10Y/利差）。
+        Uses ak.bond_zh_us_rate() with pandas date filtering.
+        """
+        logger.info("Fetching US treasury yields...")
+        try:
+            df = await self._run_blocking(ak.bond_zh_us_rate, start_date="2024-01-01", timeout=10)
+            if df is None or df.empty:
+                return {}
+
+            # Get most recent row
+            latest = df.iloc[-1]
+            yield_2y = float(latest.get('美国国债收益率2年', 0))
+            yield_10y = float(latest.get('美国国债收益率10年', 0))
+            spread = round(yield_10y - yield_2y, 4)
+
+            result = {
+                "yield_2y": yield_2y,
+                "yield_10y": yield_10y,
+                "spread_10y_2y": spread,
+            }
+
+            # Calculate change if we have at least 2 rows
+            if len(df) >= 2:
+                prev = df.iloc[-2]
+                prev_10y = float(prev.get('美国国债收益率10年', 0))
+                result["yield_10y_change"] = round(yield_10y - prev_10y, 4)
+
+            return result
+        except Exception as e:
+            logger.error(f"Failed to fetch US treasury yields: {e}")
+            return {}
+
+    async def _fetch_morning_stock_context(self, code: str, name: str) -> Dict:
+        """
+        获取持仓股票的盘前上下文（昨日收盘价 + MA20，无实时价）。
+        """
+        try:
+            df_hist = await self._fetch_with_fallback('fetch_prices', code=code, count=30)
+            if df_hist is None or df_hist.empty:
+                return {"code": code, "name": name, "error": "no_history"}
+
+            # Determine close column
+            if 'close' in df_hist.columns:
+                close_col = 'close'
+            elif '收盘' in df_hist.columns:
+                close_col = '收盘'
+            elif 'Close' in df_hist.columns:
+                close_col = 'Close'
+            else:
+                return {"code": code, "name": name, "error": "no_close_column"}
+
+            last_close = float(df_hist.iloc[-1][close_col])
+
+            # Calculate MA20 from pure historical closes (no real-time stitching)
+            ma_window = self.config.get('risk_management', {}).get('ma_window', 20)
+            closes = df_hist[close_col].tail(ma_window).tolist()
+            ma20 = sum(closes) / len(closes) if closes else 0.0
+            bias_pct = (last_close - ma20) / ma20 if ma20 > 0 else 0.0
+
+            # Determine MA20 status
+            if bias_pct > 0.01:
+                ma20_status = "ABOVE"
+            elif bias_pct < -0.01:
+                ma20_status = "BELOW"
+            else:
+                ma20_status = "NEAR"
+
+            return {
+                "code": code,
+                "name": name,
+                "last_close": round(last_close, 3),
+                "ma20": round(ma20, 3),
+                "bias_pct": round(bias_pct, 4),
+                "ma20_status": ma20_status,
+            }
+        except Exception as e:
+            logger.error(f"Failed to fetch morning context for {code}: {e}")
+            return {"code": code, "name": name, "error": str(e)}
+
+    async def collect_morning_data(self, portfolio: List[Dict]) -> Dict[str, Any]:
+        """
+        早报模式的主入口。并行采集外盘数据 + 昨日持仓上下文。
+        """
+        logger.info("Starting Morning Pre-Market Data Collection...")
+
+        # Global overnight data tasks
+        global_tasks = [
+            self.get_global_indices(),
+            self.get_commodity_futures(),
+            self.get_us_treasury_yields(),
+            self.get_macro_news(),
+        ]
+
+        # Per-stock historical context
+        stock_tasks = [
+            self._fetch_morning_stock_context(s['code'], s.get('name', 'Unknown'))
+            for s in portfolio
+        ]
+
+        try:
+            global_results = await asyncio.gather(*global_tasks, return_exceptions=True)
+            stock_results = await asyncio.gather(*stock_tasks, return_exceptions=True)
+        except Exception as e:
+            logger.error(f"Critical error during morning gather: {e}")
+            global_results = [None] * 4
+            stock_results = []
+
+        global_indices = global_results[0] if not isinstance(global_results[0], Exception) else []
+        commodities = global_results[1] if not isinstance(global_results[1], Exception) else []
+        us_treasury = global_results[2] if not isinstance(global_results[2], Exception) else {}
+        macro_news = global_results[3] if not isinstance(global_results[3], Exception) else {"telegraph": [], "ai_tech": []}
+
+        valid_stocks = [
+            res for res in stock_results
+            if not isinstance(res, Exception) and isinstance(res, dict) and "error" not in res
+        ]
+
+        return {
+            "global_indices": global_indices,
+            "commodities": commodities,
+            "us_treasury": us_treasury,
+            "macro_news": macro_news,
+            "stocks": valid_stocks,
+        }
+
     async def _fetch_individual_stock_extras(self, code: str, stock_name: str, df_all_spot: pd.DataFrame) -> Dict:
         """
         Fetches History and News for a specific stock using fallback.
