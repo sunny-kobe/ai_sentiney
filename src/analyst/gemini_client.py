@@ -22,12 +22,15 @@ class MiddayAction(BaseModel):
     operation: str = Field(default="观望")
     reason: str = Field(default="")
     news_impact: str = Field(default="")
+    # T+1 相关字段（由 post_process 注入，非 AI 输出）
+    tradeable: Optional[bool] = Field(default=None)
+    signal_note: Optional[str] = Field(default=None)
 
     @field_validator('action')
     @classmethod
     def normalize_action(cls, v: str) -> str:
         valid = {'DANGER', 'WARNING', 'WATCH', 'OBSERVED', 'SAFE', 'OVERBOUGHT',
-                 'HOLD', 'LIMIT_UP', 'LIMIT_DOWN', 'N/A'}
+                 'HOLD', 'LIMIT_UP', 'LIMIT_DOWN', 'LOCKED_DANGER', 'N/A'}
         v_upper = v.upper()
         if v_upper in valid:
             return v_upper

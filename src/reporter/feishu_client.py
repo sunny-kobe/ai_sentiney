@@ -106,6 +106,7 @@ class FeishuClient:
             "DANGER": "SELL",
             "WARNING": "SELL",
             "SELL": "SELL",
+            "LOCKED_DANGER": "SELL",  # T+1锁定但处于危险状态，仍需警示
             # WATCH组 (需要观察)
             "WATCH": "WATCH",
             "OBSERVED": "WATCH",
@@ -167,6 +168,11 @@ class FeishuClient:
                 
                 content = f"**{name}** ({code}){price_display} {pct_info}"
                 
+                # 🔧 FIX: 显示 T+1 锁定警告
+                signal_note = s.get('signal_note', '')
+                if signal_note:
+                    content += f"\n> ⚠️ **{signal_note}**"
+
                 # Highlight Operation Advice
                 operation = s.get('operation', '')
                 if operation:

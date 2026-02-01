@@ -28,13 +28,15 @@ def get_intraday_progress() -> float:
     CLOSE_PM = 15 * 60       # 15:00 = 900
     TOTAL_TRADING_MINUTES = 240.0
     
+    # 9:15-9:25 Call Auction usually has volume, but technically not continuous trading.
+    # To be safe, we treat anything < 9:30 as 0 progress.
     if current_minutes < OPEN_AM:
-        # 尚未开盘
+        # 尚未开盘 (包括集合竞价)
         return 0.0
     elif current_minutes <= CLOSE_AM:
         # 上午交易时段
         elapsed = current_minutes - OPEN_AM
-        return elapsed / TOTAL_TRADING_MINUTES
+        return max(0.001, elapsed / TOTAL_TRADING_MINUTES) # Avoid strict 0 if just opened
     elif current_minutes < OPEN_PM:
         # 午休时间 (11:30-13:00)，算上午的120分钟
         return 120.0 / TOTAL_TRADING_MINUTES  # = 0.5
@@ -121,9 +123,12 @@ class DataProcessor:
                     logger.warning(f"Date filtering failed for {code}: {e}, using original data")
                     history_df_filtered = history_df
             else:
-                # 无日期列时，假设最后一条可能是今日，保守地去掉
-                logger.warning(f"No date column found for {code}, assuming last row may be today")
-                history_df_filtered = history_df.iloc[:-1] if len(history_df) > self.ma_window else history_df
+                # 无日期列时，无论行数多少，都保守地去掉最后一行，防止是今日数据
+                logger.warning(f"No date column found for {code}, unconditionally removing last row to match previous behavior safely")
+                history_df_filtered = history_df.iloc[:-1] if not history_df.empty else history_df
+                
+                if len(history_df_filtered) < self.ma_window - 1:
+                     logger.warning(f"Insufficient history after filtering for {code}: {len(history_df_filtered)}")
 
             past_closes = history_df_filtered[close_col].tail(self.ma_window - 1).tolist()
             
@@ -149,10 +154,17 @@ class DataProcessor:
             # 🔧 修复: 日内量比归一化
             # 问题: 午盘时 volume 只有半天数据，直接除以5日均量会低估50%
             # 解决: 将当前成交量换算为"预估全天成交量"
+            
             intraday_progress = get_intraday_progress()
-            if intraday_progress > 0 and avg_volume_5d > 0:
+            MIN_PROGRESS_THRESHOLD = 0.1 # 至少交易24分钟才有意义，否则放大倍数过大
+            
+            if intraday_progress >= MIN_PROGRESS_THRESHOLD and avg_volume_5d > 0:
                 projected_daily_volume = volume / intraday_progress
-                volume_ratio = projected_daily_volume / avg_volume_5d
+                # 限制最大倍数，防止开盘极端数据干扰
+                volume_ratio = min(projected_daily_volume / avg_volume_5d, 10.0)
+            elif intraday_progress > 0 and intraday_progress < MIN_PROGRESS_THRESHOLD:
+                # 进度太小，不计算量比 (或者返回默认1.0)
+                volume_ratio = 0.0 # 标记为无效/数据不足
             else:
                 volume_ratio = 0.0
 
@@ -173,13 +185,16 @@ class DataProcessor:
             logger.error(f"Error calculating indicators for {code}: {e}")
             return stock_d
 
-    def generate_signals(self, processed_stocks: List[Dict]) -> List[Dict]:
+    def generate_signals(self, processed_stocks: List[Dict], holdings: Dict[str, date] = None) -> List[Dict]:
         """
         Applies rules to generate status tags (SAFE/DANGER/WATCH).
         Uses Bias-based tiered logic and volume confirmation.
+        Includes T+1 validation if 'holdings' context allows.
         NOTE: North funds logic has been REMOVED as it's no longer real-time.
         """
         results = []
+        tz = pytz.timezone('Asia/Shanghai')
+        today = datetime.now(tz).date()
 
         # 🔧 修复: 从配置读取阈值，而非硬编码
         bias_thresholds = self.risk_params.get('bias_thresholds', {})
@@ -203,14 +218,18 @@ class DataProcessor:
                 results.append(stock)
                 continue
 
-            # 🔧 新增: 涨跌停检测
-            # A股涨跌停规则: 主板±10%, 创业板/科创板±20%
+            # 🔧 新增: 涨跌停检测 & 优化 ST 判断
+            # A股涨跌停规则: 主板±10%, 创业板/科创板±20%, ST±5%
             # 通过代码前缀判断板块: 300xxx/301xxx=创业板, 688xxx=科创板
             code = stock.get('code', '')
-            if code.startswith('300') or code.startswith('301') or code.startswith('688'):
-                limit_threshold = 19.5  # 创业板/科创板 ±20%，留0.5%容差
+            name = stock.get('name', '')
+            
+            if 'ST' in name or 'st' in name:
+                limit_threshold = 4.5 # ST股 ±5% (留0.5%容差)
+            elif code.startswith('300') or code.startswith('301') or code.startswith('688'):
+                limit_threshold = 19.5  # 创业板/科创板 ±20%
             else:
-                limit_threshold = 9.5   # 主板 ±10%，留0.5%容差
+                limit_threshold = 9.5   # 主板 ±10%
 
             # 涨跌停状态标记
             if pct_change >= limit_threshold:
@@ -247,6 +266,19 @@ class DataProcessor:
                     signal = "OBSERVED"
 
             stock['signal'] = signal
+            
+            # T+1 Check
+            if holdings and code in holdings:
+                buy_date = holdings[code]
+                if buy_date == today:
+                     stock['tradeable'] = False
+                     stock['signal_note'] = f"T+1限制：今日({buy_date})买入无法卖出"
+                     if signal == "DANGER":
+                         # Force downgrade signal intensity or mark explicitly
+                         stock['signal'] = "LOCKED_DANGER" 
+                else:
+                     stock['tradeable'] = True
+
             results.append(stock)
 
         return results

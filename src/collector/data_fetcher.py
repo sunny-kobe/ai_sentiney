@@ -3,7 +3,8 @@ import functools
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
+import json
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -40,6 +41,7 @@ class DataCollector:
         # GitHub Actions runners / Standard Cloud Instances (2-4 vCPUs)
         self.executor = ThreadPoolExecutor(max_workers=16)
         self.config = ConfigLoader().config
+        self.state_file = "data/circuit_breaker_state.json"
 
         # Priority: Tencent -> Efinance -> AkShare
         self.sources = [TencentSource(), EfinanceSource(), AkshareSource()]
@@ -49,6 +51,34 @@ class DataCollector:
             source.get_source_name(): CircuitBreakerState()
             for source in self.sources
         }
+        self._load_circuit_breaker_state()
+
+    def _load_circuit_breaker_state(self):
+        """Load circuit breaker states from disk."""
+        try:
+            import os
+            if os.path.exists(self.state_file):
+                with open(self.state_file, 'r') as f:
+                    data = json.load(f)
+                    for name, state_dict in data.items():
+                        if name in self._circuit_breakers:
+                            # Restore state
+                            cb = self._circuit_breakers[name]
+                            cb.failure_count = state_dict.get('failure_count', 0)
+                            cb.is_open = state_dict.get('is_open', False)
+                            cb.last_failure_time = state_dict.get('last_failure_time', 0.0)
+                logger.info("Circuit breaker states loaded from disk.")
+        except Exception as e:
+            logger.warning(f"Failed to load circuit breaker states: {e}")
+
+    def _save_circuit_breaker_state(self):
+        """Persist circuit breaker states to disk."""
+        try:
+            states = {name: asdict(cb) for name, cb in self._circuit_breakers.items()}
+            with open(self.state_file, 'w') as f:
+                json.dump(states, f)
+        except Exception as e:
+            logger.warning(f"Failed to save circuit breaker states: {e}")
 
     def _should_skip_source(self, source_name: str) -> bool:
         """
@@ -77,6 +107,7 @@ class DataCollector:
                 logger.info(f"Circuit Breaker: {source_name} recovered successfully")
             cb.failure_count = 0
             cb.is_open = False
+            self._save_circuit_breaker_state()
 
     def _record_failure(self, source_name: str):
         """记录失败，可能触发熔断"""
@@ -97,6 +128,7 @@ class DataCollector:
             logger.info(
                 f"Circuit Breaker: {source_name} failure {cb.failure_count}/{cb.FAILURE_THRESHOLD}"
             )
+        self._save_circuit_breaker_state()
 
     async def _run_blocking(self, func, *args, **kwargs):
         """
@@ -580,34 +612,41 @@ class DataCollector:
 
                 # 🔧 修复: 过滤今日数据后计算5日均量
                 # 问题: df_hist可能包含今日半天数据，导致均量被拉低
-                # 解决: 按日期过滤，或保守地排除最后一条
-                if 'volume' in df_hist.columns and len(df_hist) >= 6:
+                # 解决: 统一使用日期判断
+                if 'volume' in df_hist.columns and len(df_hist) >= 5:
                     try:
                         # 尝试按日期过滤
                         today = datetime.now().date()
                         if 'date' in df_hist.columns:
                             df_hist_copy = df_hist.copy()
                             df_hist_copy['date'] = pd.to_datetime(df_hist_copy['date'])
-                            df_hist_excluding_today = df_hist_copy[
-                                df_hist_copy['date'].dt.date < today
-                            ]
-                            if len(df_hist_excluding_today) >= 5:
-                                avg_volume_5d = float(
-                                    df_hist_excluding_today.tail(5)['volume'].mean()
-                                )
-                            else:
-                                # 数据不足，用原逻辑
-                                avg_volume_5d = float(df_hist.tail(6).head(5)['volume'].mean())
+                            df_past = df_hist_copy[df_hist_copy['date'].dt.date < today]
+                        elif '日期' in df_hist.columns:
+                            df_hist_copy = df_hist.copy()
+                            df_hist_copy['日期'] = pd.to_datetime(df_hist_copy['日期'])
+                            df_past = df_hist_copy[df_hist_copy['日期'].dt.date < today]
                         else:
-                            # 无日期列，保守地排除最后一条（可能是今日）
-                            avg_volume_5d = float(df_hist.tail(6).head(5)['volume'].mean())
+                            # 无日期列，如果数据足够多，保守切掉最后一行
+                            if len(df_hist) >= 6:
+                                df_past = df_hist.iloc[:-1]
+                            else:
+                                df_past = df_hist # 只能硬着头皮用了
+                        
+                        if len(df_past) >= 5:
+                            avg_volume_5d = float(df_past.tail(5)['volume'].mean())
+                        elif len(df_past) > 0:
+                            # 至少有一些数据
+                            avg_volume_5d = float(df_past['volume'].mean())
+                        else:
+                             avg_volume_5d = 0.0
+
                     except Exception as e:
                         logger.warning(f"Failed to calculate avg_volume_5d for {code}: {e}")
                         # 降级到原逻辑
-                        avg_volume_5d = float(df_hist.tail(5)['volume'].mean())
-                elif 'volume' in df_hist.columns and len(df_hist) >= 5:
-                    # 数据刚好5条，无法排除今日
-                    avg_volume_5d = float(df_hist.tail(5)['volume'].mean())
+                        if len(df_hist) >= 6:
+                             avg_volume_5d = float(df_hist.tail(6).head(5)['volume'].mean())
+                        else:
+                             avg_volume_5d = float(df_hist['volume'].mean())
 
                 df_hist = df_hist.tail(30)
             
