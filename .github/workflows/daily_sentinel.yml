@@ -4,10 +4,10 @@ on:
   schedule:
     # UTC Time!
     # China is UTC+8.
-    # Morning 08:30 CST = 00:30 UTC
+    # Morning 08:00 CST = 00:00 UTC (提前30分钟)
     # Midday 11:40 CST = 03:40 UTC
     # Close 15:10 CST = 07:10 UTC
-    - cron: "30 0 * * 1-5" # Morning Brief
+    - cron: "0 0 * * 1-5" # Morning Brief
     - cron: "40 3 * * 1-5" # Midday Check
     - cron: "10 7 * * 1-5" # Close Review
   workflow_dispatch: # Allow manual button click test
