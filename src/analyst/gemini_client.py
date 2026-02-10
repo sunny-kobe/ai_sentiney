@@ -114,40 +114,48 @@ class GeminiClient:
         self.model = genai.GenerativeModel(model_name)
 
     def _build_context(self, market_breadth: str, north_funds: float, indices: Dict, macro_news: Dict, portfolio: List[Dict], yesterday_context: Dict = None) -> str:
-        """Constructs the prompt context."""
-        
-        # Simplify portfolio data for AI to save tokens and focus attention
+        """Constructs the prompt context (slim version for token efficiency)."""
         portfolio_summary = []
         for stock in portfolio:
-            portfolio_summary.append({
+            entry = {
                 "Code": stock['code'],
                 "Name": stock['name'],
                 "Price": stock['current_price'],
                 "Change": f"{stock.get('pct_change', 0)}%",
                 "MA20": stock['ma20'],
-                "Bias": f"{round(stock.get('bias_pct', 0) * 100, 2)}%",  # 乖离率 (%)
-                "Volume": f"{stock.get('volume', 0)}万手",  # 成交量
-                "Volume_Ratio": stock.get('volume_ratio', 0),  # 量比
-                "Turnover": f"{stock.get('turnover_rate', 0)}%",  # 换手率
+                "Bias": f"{round(stock.get('bias_pct', 0) * 100, 2)}%",
                 "Signal": stock.get('signal', 'N/A'),
-                "News": stock.get('news', [])
-            })
-            
+                "Confidence": stock.get('confidence', '中'),
+                "Tech": stock.get('tech_summary', ''),
+            }
+            news = stock.get('news', [])
+            if news:
+                entry["News"] = news[:3]
+            portfolio_summary.append(entry)
+
         context = {
             "Market_Breadth": market_breadth,
-            "North_Money": f"{north_funds}亿元",  # 单位修正：原"Billion"有10倍夸大
-            "Indices": indices,
-            "Macro_News": {
-                "财联社电报": macro_news.get("telegraph", []),
-                "AI科技热点": macro_news.get("ai_tech", [])
-            },
-            "Portfolio": portfolio_summary
+            "Indices": {name: f"{'+' if d.get('change_pct',0)>0 else ''}{d.get('change_pct',0)}%"
+                        for name, d in indices.items()},
+            "Portfolio": portfolio_summary,
         }
-        
+
+        telegraph = macro_news.get("telegraph", [])
+        ai_tech = macro_news.get("ai_tech", [])
+        if telegraph or ai_tech:
+            context["News"] = {}
+            if telegraph:
+                context["News"]["财联社"] = telegraph[:5]
+            if ai_tech:
+                context["News"]["AI科技"] = ai_tech[:3]
+
         if yesterday_context:
-            context["Yesterday_Plan"] = yesterday_context.get('actions', [])
-            
-        return json.dumps(context, ensure_ascii=False, indent=2)
+            context["Yesterday_Plan"] = [
+                {"code": a.get("code"), "plan": a.get("tomorrow_plan", a.get("operation", ""))}
+                for a in yesterday_context.get('actions', [])
+            ]
+
+        return json.dumps(context, ensure_ascii=False, indent=1)
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
     def analyze(self, market_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -412,8 +420,12 @@ class GeminiClient:
         Free-text Q&A: answer user questions based on cached market data and AI analysis.
         Returns plain text (not JSON).
         """
-        context_summary = json.dumps(context_data, ensure_ascii=False, indent=2) if context_data else "无市场数据"
-        ai_summary = json.dumps(ai_result, ensure_ascii=False, indent=2) if ai_result else "无AI分析结果"
+        if context_data:
+            slim_context = self._slim_qa_context(context_data)
+            context_summary = json.dumps(slim_context, ensure_ascii=False, indent=1)
+        else:
+            context_summary = "无市场数据"
+        ai_summary = json.dumps(ai_result, ensure_ascii=False, indent=1) if ai_result else "无AI分析结果"
 
         full_prompt = f"""{system_prompt}
 
@@ -436,3 +448,17 @@ class GeminiClient:
         except Exception as e:
             logger.error(f"Gemini Q&A call failed: {e}")
             raise
+
+    def _slim_qa_context(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Slim down Q&A context: only keep key fields."""
+        slim = {"market_breadth": data.get("market_breadth")}
+        if "indices" in data:
+            slim["indices"] = data["indices"]
+        stocks = data.get("stocks", [])
+        if stocks:
+            slim["stocks"] = [{
+                "code": s.get("code"), "name": s.get("name"),
+                "price": s.get("current_price"), "change": s.get("pct_change"),
+                "signal": s.get("signal"), "tech": s.get("tech_summary", ""),
+            } for s in stocks]
+        return slim

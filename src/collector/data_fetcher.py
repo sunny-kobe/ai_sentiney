@@ -46,6 +46,11 @@ class DataCollector:
         # Priority: Tencent -> Efinance -> AkShare
         self.sources = [TencentSource(), EfinanceSource(), AkshareSource()]
 
+        # Read history_days from config (needed for MACD calculation)
+        risk_cfg = self.config.get('risk_management', {})
+        ti_cfg = risk_cfg.get('technical_indicators', {})
+        self.history_days = ti_cfg.get('history_days', 60)
+
         # 🔧 优化: 使用结构化的熔断器状态，替代简单的disabled set
         self._circuit_breakers: Dict[str, CircuitBreakerState] = {
             source.get_source_name(): CircuitBreakerState()
@@ -465,7 +470,7 @@ class DataCollector:
         获取持仓股票的盘前上下文（昨日收盘价 + MA20，无实时价）。
         """
         try:
-            df_hist = await self._fetch_with_fallback('fetch_prices', code=code, count=30)
+            df_hist = await self._fetch_with_fallback('fetch_prices', code=code, count=self.history_days)
             if df_hist is None or df_hist.empty:
                 return {"code": code, "name": name, "error": "no_history"}
 
@@ -590,7 +595,7 @@ class DataCollector:
                         logger.warning(f"Failed to parse quote for {code}: {e}")
 
             # 3. Fetch Prices (History) via Fallback
-            df_hist = await self._fetch_with_fallback('fetch_prices', code=code, count=30)
+            df_hist = await self._fetch_with_fallback('fetch_prices', code=code, count=self.history_days)
             if df_hist is None:
                 df_hist = pd.DataFrame()
                 logger.warning(f"History fetch failed for {code}")
@@ -648,7 +653,7 @@ class DataCollector:
                         else:
                              avg_volume_5d = float(df_hist['volume'].mean())
 
-                df_hist = df_hist.tail(30)
+                df_hist = df_hist.tail(self.history_days)
             
             # 3. Fetch News via Fallback
             news_str = await self._fetch_with_fallback('fetch_news', code=code, count=5)

@@ -6,6 +6,125 @@ from src.utils.logger import logger
 from src.utils.config_loader import ConfigLoader
 
 
+# ============================================================
+# Pure Functions: Technical Indicator Calculations
+# ============================================================
+
+def calculate_ema(closes: List[float], period: int) -> List[float]:
+    """Exponential Moving Average."""
+    if not closes:
+        return []
+    ema = [closes[0]]
+    multiplier = 2 / (period + 1)
+    for price in closes[1:]:
+        ema.append(price * multiplier + ema[-1] * (1 - multiplier))
+    return ema
+
+
+def calculate_macd(closes: List[float], fast: int = 12, slow: int = 26, signal: int = 9) -> Dict[str, Any]:
+    """MACD indicator: returns {macd, signal_line, histogram, trend}."""
+    if len(closes) < slow + signal:
+        return {"macd": 0, "signal_line": 0, "histogram": 0, "trend": "UNKNOWN"}
+    ema_fast = calculate_ema(closes, fast)
+    ema_slow = calculate_ema(closes, slow)
+    macd_line = [f - s for f, s in zip(ema_fast, ema_slow)]
+    signal_line = calculate_ema(macd_line[slow - 1:], signal)
+    current_macd = macd_line[-1]
+    current_signal = signal_line[-1] if signal_line else 0
+    histogram = current_macd - current_signal
+    prev_histogram = (macd_line[-2] - (signal_line[-2] if len(signal_line) > 1 else 0)) if len(macd_line) > 1 else 0
+
+    if histogram > 0 and prev_histogram <= 0:
+        trend = "GOLDEN_CROSS"
+    elif histogram < 0 and prev_histogram >= 0:
+        trend = "DEATH_CROSS"
+    elif histogram > 0:
+        trend = "BULLISH"
+    else:
+        trend = "BEARISH"
+    return {
+        "macd": round(current_macd, 4),
+        "signal_line": round(current_signal, 4),
+        "histogram": round(histogram, 4),
+        "trend": trend,
+    }
+
+
+def calculate_rsi(closes: List[float], period: int = 14) -> float:
+    """RSI (0-100). Returns 50.0 if insufficient data."""
+    if len(closes) < period + 1:
+        return 50.0
+    deltas = [closes[i] - closes[i - 1] for i in range(1, len(closes))]
+    gains = [d if d > 0 else 0 for d in deltas]
+    losses = [-d if d < 0 else 0 for d in deltas]
+    avg_gain = sum(gains[:period]) / period
+    avg_loss = sum(losses[:period]) / period
+    for i in range(period, len(gains)):
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+    if avg_loss == 0:
+        return 100.0
+    rs = avg_gain / avg_loss
+    return round(100 - (100 / (1 + rs)), 2)
+
+
+def calculate_bollinger(closes: List[float], window: int = 20, num_std: int = 2) -> Dict[str, Any]:
+    """Bollinger Bands: returns {upper, middle, lower, bandwidth, position}."""
+    if len(closes) < window:
+        return {"upper": 0, "middle": 0, "lower": 0, "bandwidth": 0, "position": "UNKNOWN"}
+    recent = closes[-window:]
+    middle = sum(recent) / window
+    variance = sum((x - middle) ** 2 for x in recent) / window
+    std = variance ** 0.5
+    upper = middle + num_std * std
+    lower = middle - num_std * std
+    bandwidth = (upper - lower) / middle if middle > 0 else 0
+    current = closes[-1]
+    if current >= upper:
+        position = "ABOVE_UPPER"
+    elif current <= lower:
+        position = "BELOW_LOWER"
+    elif current > middle:
+        position = "UPPER_HALF"
+    else:
+        position = "LOWER_HALF"
+    return {
+        "upper": round(upper, 2),
+        "middle": round(middle, 2),
+        "lower": round(lower, 2),
+        "bandwidth": round(bandwidth, 4),
+        "position": position,
+    }
+
+
+def _build_tech_summary(macd: Dict, rsi: float, bb: Dict, bias: float, vol_ratio: float) -> str:
+    """Build a concise technical indicator summary string."""
+    parts = []
+    trend_map = {
+        "GOLDEN_CROSS": "MACD金叉", "DEATH_CROSS": "MACD死叉",
+        "BULLISH": "MACD多头", "BEARISH": "MACD空头",
+    }
+    parts.append(trend_map.get(macd.get('trend', ''), 'MACD未知'))
+    if rsi > 70:
+        parts.append(f"RSI超买({rsi})")
+    elif rsi < 30:
+        parts.append(f"RSI超卖({rsi})")
+    else:
+        parts.append(f"RSI={rsi}")
+    pos_map = {
+        "ABOVE_UPPER": "突破布林上轨", "BELOW_LOWER": "跌破布林下轨",
+        "UPPER_HALF": "布林上半区", "LOWER_HALF": "布林下半区",
+    }
+    bb_text = pos_map.get(bb.get('position', ''), '')
+    if bb_text:
+        parts.append(bb_text)
+    if vol_ratio > 1.5:
+        parts.append(f"放量({vol_ratio}x)")
+    elif vol_ratio > 0:
+        parts.append(f"量比{vol_ratio}x")
+    return " | ".join(p for p in parts if p)
+
+
 def get_intraday_progress() -> float:
     """
     计算当前时间在交易日中的进度比例 (0.0 - 1.0)。
@@ -131,9 +250,13 @@ class DataProcessor:
                      logger.warning(f"Insufficient history after filtering for {code}: {len(history_df_filtered)}")
 
             past_closes = history_df_filtered[close_col].tail(self.ma_window - 1).tolist()
-            
+
             # Stitch
             combined_closes = past_closes + [current_price]
+
+            # Full history closes for multi-dimensional indicators (MACD needs 35+ data points)
+            all_past_closes = history_df_filtered[close_col].tolist()
+            full_closes = all_past_closes + [current_price]
             
             # 2. Calculate Realtime MA20
             if len(combined_closes) < self.ma_window:
@@ -168,16 +291,40 @@ class DataProcessor:
             else:
                 volume_ratio = 0.0
 
+            # 5. Multi-dimensional indicators (MACD / RSI / Bollinger)
+            ti_cfg = self.risk_params.get('technical_indicators', {})
+
+            macd_cfg = ti_cfg.get('macd', {})
+            macd_result = calculate_macd(
+                full_closes,
+                fast=macd_cfg.get('fast_period', 12),
+                slow=macd_cfg.get('slow_period', 26),
+                signal=macd_cfg.get('signal_period', 9),
+            )
+
+            rsi_cfg = ti_cfg.get('rsi', {})
+            rsi_value = calculate_rsi(full_closes, period=rsi_cfg.get('period', 14))
+
+            bb_cfg = ti_cfg.get('bollinger', {})
+            bb_result = calculate_bollinger(
+                full_closes,
+                window=bb_cfg.get('window', 20),
+                num_std=bb_cfg.get('num_std', 2),
+            )
+
             return {
                 "code": code,
                 "name": name,
                 "current_price": round(current_price, 2),
                 "pct_change": stock_d.get('pct_change', 0.0),
                 "ma20": round(realtime_ma20, 2),
-                "bias_pct": round(bias_pct, 4), # e.g. 0.0512 = 5.12%
-                "volume": round(volume / 10000, 2),  # 转换为万手
+                "bias_pct": round(bias_pct, 4),
+                "volume": round(volume / 10000, 2),
                 "turnover_rate": round(turnover_rate, 2),
-                "volume_ratio": round(volume_ratio, 2),  # 量比
+                "volume_ratio": round(volume_ratio, 2),
+                "macd": macd_result,
+                "rsi": rsi_value,
+                "bollinger": bb_result,
                 "news": stock_d.get('news', [])
             }
 
@@ -203,8 +350,14 @@ class DataProcessor:
         BIAS_DANGER_THRESHOLD = bias_thresholds.get('danger', -0.05)    # -5%
         BIAS_OVERBOUGHT_THRESHOLD = bias_thresholds.get('overbought', 0.05)  # +5%
 
-        # 量比阈值（放量判定）
-        VOLUME_RATIO_HIGH = 1.5  # 量比 > 1.5 = 放量
+        # 量比阈值（放量判定）- 从配置读取
+        VOLUME_RATIO_HIGH = self.risk_params.get('volume_ratio_high', 1.5)
+
+        # RSI 阈值
+        ti_cfg = self.risk_params.get('technical_indicators', {})
+        rsi_cfg = ti_cfg.get('rsi', {})
+        RSI_OVERSOLD = rsi_cfg.get('oversold', 30)
+        RSI_OVERBOUGHT = rsi_cfg.get('overbought', 70)
 
         for stock in processed_stocks:
             price = stock['current_price']
@@ -266,7 +419,59 @@ class DataProcessor:
                     signal = "OBSERVED"
 
             stock['signal'] = signal
-            
+
+            # === Multi-dimensional cross-validation ===
+            macd_data = stock.get('macd', {})
+            rsi = stock.get('rsi', 50)
+            bb_data = stock.get('bollinger', {})
+            macd_trend = macd_data.get('trend', 'UNKNOWN')
+            bb_position = bb_data.get('position', 'UNKNOWN')
+
+            confidence = "中"
+
+            if signal == "DANGER":
+                bearish_count = sum([
+                    macd_trend in ("BEARISH", "DEATH_CROSS"),
+                    rsi < RSI_OVERSOLD,
+                    bb_position == "BELOW_LOWER",
+                ])
+                confidence = "高" if bearish_count >= 2 else "中"
+
+            elif signal == "WARNING":
+                if macd_trend in ("BULLISH", "GOLDEN_CROSS"):
+                    signal = "WATCH"
+                    confidence = "中"
+                elif macd_trend in ("BEARISH", "DEATH_CROSS") and rsi < RSI_OVERSOLD:
+                    signal = "DANGER"
+                    confidence = "高"
+
+            elif signal == "SAFE":
+                if rsi > RSI_OVERBOUGHT and bb_position == "ABOVE_UPPER":
+                    signal = "OVERBOUGHT"
+                    confidence = "高"
+                elif macd_trend in ("BULLISH", "GOLDEN_CROSS"):
+                    confidence = "高"
+                elif macd_trend in ("BEARISH", "DEATH_CROSS"):
+                    confidence = "低"
+
+            elif signal == "OVERBOUGHT":
+                overbought_count = sum([
+                    rsi > RSI_OVERBOUGHT,
+                    bb_position == "ABOVE_UPPER",
+                    macd_trend in ("BEARISH", "DEATH_CROSS"),
+                ])
+                confidence = "高" if overbought_count >= 2 else "中"
+
+            elif signal in ("WATCH", "OBSERVED"):
+                if macd_trend == "GOLDEN_CROSS" and rsi < 50:
+                    confidence = "低"
+                elif macd_trend in ("BEARISH", "DEATH_CROSS"):
+                    confidence = "高"
+
+            stock['signal'] = signal
+            stock['confidence'] = confidence
+            stock['tech_summary'] = _build_tech_summary(macd_data, rsi, bb_data, bias, volume_ratio)
+
             # T+1 Check
             if holdings and code in holdings:
                 buy_date = holdings[code]

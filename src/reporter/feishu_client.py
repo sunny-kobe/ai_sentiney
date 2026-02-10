@@ -182,6 +182,10 @@ class FeishuClient:
                 if confidence: content += f" `置信度:{confidence}`"
                 content += f"\n> 💡 {reason}"
                 if key_level: content += f"\n> 🎯 关键位: {key_level}"
+
+                tech_summary = s.get('tech_summary', '')
+                if tech_summary:
+                    content += f"\n> 📊 {tech_summary}"
                 
                 elements.append({
                     "tag": "div",
@@ -463,6 +467,13 @@ class FeishuClient:
             content += f"\n> 🎯 **明日**: {tomorrow_plan}"
             if support and resistance:
                 content += f"\n> 📐 支撑: {support} / 压力: {resistance}"
+
+            tech_summary = s.get('tech_summary', '')
+            confidence = s.get('confidence', '')
+            if tech_summary:
+                content += f"\n> 📊 {tech_summary}"
+            if confidence:
+                content += f" `置信度:{confidence}`"
             
             elements.append({
                 "tag": "div",

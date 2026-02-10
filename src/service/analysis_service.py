@@ -114,6 +114,11 @@ class AnalysisService:
                     action['tradeable'] = stock_obj['tradeable']
                 if 'signal_note' in stock_obj:
                     action['signal_note'] = stock_obj['signal_note']
+                # 传递多维指标字段
+                if 'confidence' in stock_obj:
+                    action['confidence'] = stock_obj['confidence']
+                if 'tech_summary' in stock_obj:
+                    action['tech_summary'] = stock_obj['tech_summary']
                 # 如果 processor 生成了 LOCKED_DANGER，覆盖 AI 的 signal
                 if stock_obj.get('signal') == 'LOCKED_DANGER':
                     action['signal'] = 'LOCKED_DANGER'

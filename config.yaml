@@ -89,6 +89,20 @@ risk_management:
     warning: -0.03 # -3%
     danger: -0.05 # -5%
     overbought: 0.05 # +5%
+  volume_ratio_high: 1.5          # 放量判定阈值
+  technical_indicators:
+    macd:
+      fast_period: 12
+      slow_period: 26
+      signal_period: 9
+    rsi:
+      period: 14
+      oversold: 30               # RSI < 30 超卖
+      overbought: 70             # RSI > 70 超买
+    bollinger:
+      window: 20
+      num_std: 2
+    history_days: 60             # K线获取天数（MACD需要更多数据）
   # NOTE: north_money_threshold removed - no longer real-time available
 
 prompts:
@@ -109,7 +123,7 @@ prompts:
     你将接收一个 JSON 对象（注：由于市场规则变更，部分字段需特殊处理）：
     1.  `Market_Breadth`: 涨跌家数比（核心情绪指标）。
     2.  `North_Money`: **已失效或仅作为参考**（不再具备盘中实时指引意义，请降低其权重，转而关注下方个股的成交量变动）。
-    3.  `Portfolio`: 持仓列表（含现价、MA20、乖离率、新闻）。
+    3.  `Portfolio`: 持仓列表（含现价、MA20、乖离率、MACD趋势、RSI、布林带位置、技术摘要 `Tech`、置信度 `Confidence`、新闻）。
     4.  `Indices`: (隐含) 如果有大盘指数数据，结合判断市场水位。
     5.  `Yesterday_Plan`: 昨日计划。
     </input_spec>
@@ -135,6 +149,13 @@ prompts:
         *   **板块共振**:
             *   若个股跌，但所属板块（如有色、电力）整体强势 -> 错杀机会 -> `WATCH/BUY`。
             *   若个股跌，且板块不仅跌还领跌市场 -> 还要跌 -> `DANGER`。
+        *   **多维交叉验证 (Cross Validation)**:
+            *   系统已预计算 MACD/RSI/布林带，结果在每只股票的 `Tech` 字段中。
+            *   `Confidence` 字段反映多维指标一致性（高=多维共振，中=部分矛盾，低=信号冲突）。
+            *   **你应优先参考系统预计算的 Signal 和 Confidence，然后结合新闻面做最终修正。**
+            *   MACD金叉 + RSI < 50 = 潜在底部反转信号
+            *   MACD死叉 + RSI > 70 = 顶部风险信号
+            *   布林下轨支撑 + 缩量 = 洗盘概率高
 
     3.  **消息面修正**:
         *   对于 紫金/盛达/黄金ETF，必须隐含考虑 **美元指数/黄金期货** 的走势影响（根据常识判断，无需外部输入）。
@@ -162,7 +183,7 @@ prompts:
           "signal": "DANGER|WARNING|WATCH|OBSERVED|SAFE|OVERBOUGHT|LIMIT_UP|LIMIT_DOWN",
           "action": "DANGER|WATCH|HOLD (向后兼容)",
           "operation": "string (具体: 减仓/做T/锁仓/观望/无法操作-涨停/无法操作-跌停)",
-          "reason": "string (核心逻辑：必须包含'量/价/线'三要素的分析)",
+          "reason": "string (核心逻辑：必须包含'量/价/线/指标'四要素，引用Tech字段数据)",
           "news_impact": "string"
         }
       ]
@@ -315,6 +336,10 @@ prompts:
     2.  **持仓诊断**:
         *   **有效性确认**: 收盘价 < MA20 -> 趋势破坏。
         *   **周期股特判**: 紫金/盛达 如果跟随大宗商品回调，但并未跌破长期趋势线（如MA30/60，此处参考MA20作为短期警戒），可适当宽容。
+        *   **技术指标确认**: 参考 MACD 趋势、RSI 位置和布林带宽度判断趋势强度。
+            *   MACD 柱状体连续缩小 = 动能衰竭
+            *   RSI 连续走低 + 价格创新高 = 顶背离风险
+            *   布林带收窄 = 变盘窗口临近
     3.  **明日剧本**:
         *   若今日缩量回调 -> 明日关键看“反包”。
         *   若今日放量下杀 -> 明日关键看“惯性低开后的承接”。
