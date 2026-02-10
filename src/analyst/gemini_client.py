@@ -405,3 +405,34 @@ class GeminiClient:
             if 'actions' not in data or not isinstance(data['actions'], list):
                 data['actions'] = []
             return data
+
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+    def ask_question(self, context_data: Dict[str, Any], ai_result: Dict[str, Any], question: str, system_prompt: str) -> str:
+        """
+        Free-text Q&A: answer user questions based on cached market data and AI analysis.
+        Returns plain text (not JSON).
+        """
+        context_summary = json.dumps(context_data, ensure_ascii=False, indent=2) if context_data else "无市场数据"
+        ai_summary = json.dumps(ai_result, ensure_ascii=False, indent=2) if ai_result else "无AI分析结果"
+
+        full_prompt = f"""{system_prompt}
+
+---
+[市场数据]
+{context_summary}
+
+---
+[AI分析结果]
+{ai_summary}
+
+---
+[用户问题]
+{question}
+"""
+        logger.info(f"Sending Q&A request to Gemini: {question[:50]}...")
+        try:
+            response = self.model.generate_content(full_prompt)
+            return response.text.strip()
+        except Exception as e:
+            logger.error(f"Gemini Q&A call failed: {e}")
+            raise

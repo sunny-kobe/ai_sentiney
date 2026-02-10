@@ -110,3 +110,66 @@ class SentinelDB:
         except Exception as e:
             logger.error(f"Failed to fetch last close analysis: {e}")
         return None
+
+    def get_record_by_date(self, date: str, mode: str = 'midday') -> Optional[Dict]:
+        """Fetch raw_data for a specific date and mode."""
+        sql = "SELECT raw_data FROM daily_records WHERE date = ? AND mode = ? ORDER BY id DESC LIMIT 1"
+        try:
+            with self._get_conn() as conn:
+                cursor = conn.execute(sql, (date, mode))
+                row = cursor.fetchone()
+                if row and row[0]:
+                    return json.loads(row[0])
+        except Exception as e:
+            logger.error(f"Failed to fetch record for {date}/{mode}: {e}")
+        return None
+
+    def get_analysis_by_date(self, date: str, mode: str = 'midday') -> Optional[Dict]:
+        """Fetch ai_result for a specific date and mode."""
+        sql = "SELECT ai_result FROM daily_records WHERE date = ? AND mode = ? ORDER BY id DESC LIMIT 1"
+        try:
+            with self._get_conn() as conn:
+                cursor = conn.execute(sql, (date, mode))
+                row = cursor.fetchone()
+                if row and row[0]:
+                    return json.loads(row[0])
+        except Exception as e:
+            logger.error(f"Failed to fetch analysis for {date}/{mode}: {e}")
+        return None
+
+    def get_last_analysis(self, mode: str = 'midday') -> Optional[Dict]:
+        """Fetch the most recent ai_result for a given mode."""
+        sql = "SELECT ai_result, raw_data FROM daily_records WHERE mode = ? AND ai_result IS NOT NULL ORDER BY id DESC LIMIT 1"
+        try:
+            with self._get_conn() as conn:
+                cursor = conn.execute(sql, (mode,))
+                row = cursor.fetchone()
+                if row:
+                    return {
+                        "ai_result": json.loads(row[0]) if row[0] else None,
+                        "raw_data": json.loads(row[1]) if row[1] else None
+                    }
+        except Exception as e:
+            logger.error(f"Failed to fetch last analysis for {mode}: {e}")
+        return None
+
+    def get_records_range(self, mode: str = 'close', days: int = 7) -> List[Dict]:
+        """Fetch the most recent N days of records for trend analysis."""
+        sql = """
+        SELECT date, raw_data, ai_result FROM daily_records
+        WHERE mode = ? AND ai_result IS NOT NULL
+        ORDER BY date DESC LIMIT ?
+        """
+        results = []
+        try:
+            with self._get_conn() as conn:
+                cursor = conn.execute(sql, (mode, days))
+                for row in cursor.fetchall():
+                    results.append({
+                        "date": row[0],
+                        "raw_data": json.loads(row[1]) if row[1] else None,
+                        "ai_result": json.loads(row[2]) if row[2] else None
+                    })
+        except Exception as e:
+            logger.error(f"Failed to fetch records range: {e}")
+        return results

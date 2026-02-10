@@ -165,7 +165,7 @@ class AnalysisService:
 
         return analysis_result
 
-    async def run_analysis(self, mode: str, dry_run: bool = False, replay: bool = False) -> Dict:
+    async def run_analysis(self, mode: str, dry_run: bool = False, replay: bool = False, publish: bool = False) -> Dict:
         """
         Runs the full analysis pipeline.
         Returns the analysis result dict.
@@ -250,14 +250,15 @@ class AnalysisService:
         reporter = FeishuClient()
         if dry_run:
             logger.info("Dry Run Mode: Skipping Feishu Push.")
-            # For WebUI return, we still want the result
-        else:
+        elif publish:
             if mode == 'midday':
                 reporter.send_card(analysis_result)
             elif mode == 'close':
                 reporter.send_close_card(analysis_result)
             elif mode == 'morning':
                 reporter.send_morning_card(analysis_result)
+        else:
+            logger.info("Publish not requested: Skipping Feishu Push.")
 
         # --- Step 4: Persistence ---
         if not dry_run or (dry_run and replay):
@@ -266,3 +267,81 @@ class AnalysisService:
 
         logger.info(f"=== Analysis ({mode.upper()}) Finished ===")
         return analysis_result
+
+    async def ask_question(self, question: str, date: str = None, mode: str = 'midday') -> str:
+        """
+        Q&A mode: answer user questions based on cached data.
+        Detects trend keywords and routes to trend analysis if needed.
+        """
+        logger.info(f"=== Q&A Mode: '{question}' ===")
+
+        # Detect trend question
+        if self._detect_trend(question):
+            return await self._run_trend_analysis(question)
+
+        # Single-day question: load cached data
+        if date:
+            raw_data = self.db.get_record_by_date(date, mode)
+            ai_result = self.db.get_analysis_by_date(date, mode)
+        else:
+            record = self.db.get_last_analysis(mode)
+            if record:
+                raw_data = record.get('raw_data')
+                ai_result = record.get('ai_result')
+            else:
+                raw_data = None
+                ai_result = None
+
+        if not raw_data and not ai_result:
+            return "没有找到缓存的分析数据。请先运行一次分析（python -m src.main --mode midday）再进行追问。"
+
+        analyst = GeminiClient()
+        qa_prompt = self.config['prompts'].get('qa_prompt', '')
+        answer = analyst.ask_question(raw_data, ai_result, question, qa_prompt)
+        return answer
+
+    def _detect_trend(self, question: str) -> bool:
+        """Detect if the question is about trends (multi-day analysis)."""
+        trend_keywords = ['趋势', '走势', '一周', '一个月', '近期', '最近', '这周', '本周', '上周', '本月', '上月', '几天', '多天']
+        return any(kw in question for kw in trend_keywords)
+
+    async def _run_trend_analysis(self, question: str) -> str:
+        """Run trend analysis over multiple days of historical data."""
+        # Determine how many days to look back
+        if '一个月' in question or '本月' in question or '上月' in question:
+            days = 30
+        elif '两周' in question:
+            days = 14
+        else:
+            days = 7  # default to one week
+
+        # Try close records first (more complete), fallback to midday
+        records = self.db.get_records_range(mode='close', days=days)
+        if not records:
+            records = self.db.get_records_range(mode='midday', days=days)
+
+        if not records:
+            return f"没有找到最近{days}天的历史数据，无法进行趋势分析。"
+
+        # Build trend context
+        trend_context = []
+        for r in reversed(records):  # chronological order
+            day_summary = {
+                "date": r['date'],
+                "ai_result": r.get('ai_result'),
+            }
+            raw = r.get('raw_data')
+            if raw:
+                day_summary["market_breadth"] = raw.get('market_breadth')
+                day_summary["indices"] = raw.get('indices')
+            trend_context.append(day_summary)
+
+        analyst = GeminiClient()
+        trend_prompt = self.config['prompts'].get('trend_prompt', '')
+        answer = analyst.ask_question(
+            context_data={"trend_data": trend_context, "days": days},
+            ai_result=None,
+            question=question,
+            system_prompt=trend_prompt
+        )
+        return answer

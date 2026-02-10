@@ -49,13 +49,13 @@ jobs:
 
           if [ "$current_hour" -lt 2 ]; then
             echo "Running Morning Brief..."
-            python -m src.main --mode morning
+            python -m src.main --mode morning --publish
           elif [ "$current_hour" -lt 6 ]; then
             echo "Running Midday Check..."
-            python -m src.main --mode midday
+            python -m src.main --mode midday --publish
           else
             echo "Running Close Review..."
-            python -m src.main --mode close
+            python -m src.main --mode close --publish
           fi
 
       - name: Commit Database Changes (Persistence)
