@@ -12,6 +12,7 @@ from src.processor.data_processor import DataProcessor
 from src.analyst.gemini_client import GeminiClient
 from src.reporter.feishu_client import FeishuClient
 from src.storage.database import SentinelDB
+from src.processor.signal_tracker import evaluate_yesterday, calculate_rolling_stats, build_scorecard
 
 class AnalysisService:
     def __init__(self):
@@ -124,7 +125,12 @@ class AnalysisService:
                     action['signal'] = 'LOCKED_DANGER'
             else:
                 action['pct_change_str'] = ""
-                
+
+        # Pass through signal scorecard
+        scorecard = ai_input.get('signal_scorecard')
+        if scorecard:
+            analysis_result['signal_scorecard'] = scorecard
+
         return analysis_result
 
     def _post_process_morning(self, analysis_result: Dict, ai_input: Dict) -> Dict:
@@ -211,6 +217,12 @@ class AnalysisService:
                 logger.error(f"Data collection failed: {e}")
                 return {"error": str(e)}
 
+        # --- Step 1.5: Signal Tracking ---
+        if mode in ('midday', 'close') and not dry_run:
+            scorecard = self._compute_signal_scorecard(ai_input.get('stocks', []))
+            if scorecard:
+                ai_input['signal_scorecard'] = scorecard
+
         # --- Step 2: AI Analysis ---
         analyst = GeminiClient()
         analysis_result = {}
@@ -280,6 +292,10 @@ class AnalysisService:
         """
         logger.info(f"=== Q&A Mode: '{question}' ===")
 
+        # Detect accuracy query
+        if self._detect_accuracy_query(question):
+            return self._run_accuracy_report()
+
         # Detect trend question
         if self._detect_trend(question):
             return await self._run_trend_analysis(question)
@@ -309,6 +325,64 @@ class AnalysisService:
         """Detect if the question is about trends (multi-day analysis)."""
         trend_keywords = ['趋势', '走势', '一周', '一个月', '近期', '最近', '这周', '本周', '上周', '本月', '上月', '几天', '多天']
         return any(kw in question for kw in trend_keywords)
+
+    def _compute_signal_scorecard(self, today_stocks: List[Dict]) -> Optional[Dict]:
+        """Compute signal scorecard by evaluating yesterday's signals against today's prices."""
+        try:
+            yesterday = self.db.get_last_analysis(mode='midday')
+            if not yesterday or not yesterday.get('ai_result'):
+                logger.info("Signal Tracker: No yesterday data, skipping scorecard.")
+                return None
+
+            yesterday_actions = yesterday['ai_result'].get('actions', [])
+            if not yesterday_actions or not today_stocks:
+                return None
+
+            eval_results = evaluate_yesterday(yesterday_actions, today_stocks)
+
+            # Rolling stats: fetch 8 records to get 7 day-pairs
+            records = self.db.get_records_range(mode='midday', days=8)
+            rolling = calculate_rolling_stats(records, days=7)
+
+            scorecard = build_scorecard(eval_results, rolling)
+            logger.info(f"Signal Tracker: {scorecard.get('summary_text', '')}")
+            return scorecard
+        except Exception as e:
+            logger.warning(f"Signal Tracker failed: {e}")
+            return None
+
+    def _detect_accuracy_query(self, question: str) -> bool:
+        """Detect if the question is about signal accuracy."""
+        keywords = ['准确率', '命中率', '准不准', '靠谱', '可靠', '信得过', '历史表现', '胜率', '准吗', '准么', '靠谱吗', '可信']
+        return any(kw in question for kw in keywords)
+
+    def _run_accuracy_report(self) -> str:
+        """Generate a formatted accuracy report."""
+        records = self.db.get_records_range(mode='midday', days=31)
+
+        stats_7d = calculate_rolling_stats(records[:8], days=7)
+        stats_30d = calculate_rolling_stats(records, days=30)
+
+        lines = ["📊 信号追踪准确率报告", ""]
+
+        def _format_stats(label, stats):
+            total = stats.get('total', 0)
+            if total == 0:
+                return [f"**{label}**: 数据不足，暂无统计"]
+            parts = [f"**{label}**: 命中率 {int(stats['hit_rate']*100)}% ({stats['hits']}/{total})"]
+            for conf, cs in stats.get('by_confidence', {}).items():
+                if cs['total'] > 0:
+                    parts.append(f"  - {conf}置信度: {int(cs['rate']*100)}% ({cs['hits']}/{cs['total']})")
+            for sig, ss in stats.get('by_signal', {}).items():
+                if ss['total'] > 0:
+                    parts.append(f"  - {sig}: {int(ss['rate']*100)}% ({ss['hits']}/{ss['total']})")
+            return parts
+
+        lines.extend(_format_stats("近7日", stats_7d))
+        lines.append("")
+        lines.extend(_format_stats("近30日", stats_30d))
+
+        return "\n".join(lines)
 
     async def _run_trend_analysis(self, question: str) -> str:
         """Run trend analysis over multiple days of historical data."""

@@ -56,13 +56,19 @@ cd /Users/lan/Desktop/code/ai_sentiney && source .venv/bin/activate && python -m
 
 ## 使用场景
 
-### 生成报告
+**⚠️ 核心路由规则（必须严格遵守）**:
+- 只有用户**明确要求"跑分析/生成报告/推送飞书"**时，才执行 `--mode` 命令
+- **所有其他问题**（包括追问、评价、询问准确率、闲聊等）一律使用 `--ask "用户的原始问题"` 转发给 Sentinel CLI
+- **禁止**自行编造回答来代替 CLI 输出。必须执行命令并将 stdout 原样返回给用户
+- 当不确定该用哪个命令时，默认使用 `--ask`
+
+### 生成报告（仅当用户明确要求生成/跑/推送时）
 
 当用户说：
 - "跑一下午盘分析"
-- "看看今天的市场情况"
 - "生成收盘复盘"
 - "早报分析一下"
+- "推送到飞书"
 
 执行：`cd /Users/lan/Desktop/code/ai_sentiney && source .venv/bin/activate && python -m src.main --mode midday`
 
@@ -74,23 +80,17 @@ cd /Users/lan/Desktop/code/ai_sentiney && source .venv/bin/activate && python -m
 
 执行：`cd /Users/lan/Desktop/code/ai_sentiney && source .venv/bin/activate && python -m src.main --mode midday --publish`
 
-### 追问
+### 所有其他问题（追问、准确率、评价、闲聊等）
 
-当用户在看完报告后说：
-- "黄金ETF今天怎么样"
-- "半导体板块什么情况"
-- "紫金矿业能买吗"
+当用户说任何非"生成报告"的话，包括但不限于：
+- 追问标的："黄金ETF今天怎么样"、"紫金矿业能买吗"
+- 准确率相关："准不准"、"准确率"、"命中率"、"靠谱吗"、"可信吗"、"胜率"
+- 趋势相关："最近一周市场走势"、"这个月持仓趋势"
+- 其他任何问题
 
-执行：`cd /Users/lan/Desktop/code/ai_sentiney && source .venv/bin/activate && python -m src.main --ask "用户的问题"`
+**一律**执行：`cd /Users/lan/Desktop/code/ai_sentiney && source .venv/bin/activate && python -m src.main --ask "用户的原始问题"`
 
-### 趋势分析
-
-当用户说：
-- "最近一周市场走势"
-- "这个月持仓趋势"
-- "近期大盘怎么样"
-
-执行：`cd /Users/lan/Desktop/code/ai_sentiney && source .venv/bin/activate && python -m src.main --ask "用户的问题"`
+将 stdout 输出原样返回给用户，**不要自行加工或编造内容**。
 
 ## 数据缓存
 

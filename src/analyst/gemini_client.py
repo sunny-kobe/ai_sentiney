@@ -113,7 +113,7 @@ class GeminiClient:
         logger.info(f"Initializing Gemini Client with model: {model_name}")
         self.model = genai.GenerativeModel(model_name)
 
-    def _build_context(self, market_breadth: str, north_funds: float, indices: Dict, macro_news: Dict, portfolio: List[Dict], yesterday_context: Dict = None) -> str:
+    def _build_context(self, market_breadth: str, north_funds: float, indices: Dict, macro_news: Dict, portfolio: List[Dict], yesterday_context: Dict = None, scorecard: Dict = None) -> str:
         """Constructs the prompt context (slim version for token efficiency)."""
         portfolio_summary = []
         for stock in portfolio:
@@ -133,7 +133,9 @@ class GeminiClient:
                 entry["News"] = news[:3]
             portfolio_summary.append(entry)
 
+        from datetime import datetime
         context = {
+            "Date": datetime.now().strftime('%Y-%m-%d'),
             "Market_Breadth": market_breadth,
             "Indices": {name: f"{'+' if d.get('change_pct',0)>0 else ''}{d.get('change_pct',0)}%"
                         for name, d in indices.items()},
@@ -155,6 +157,17 @@ class GeminiClient:
                 for a in yesterday_context.get('actions', [])
             ]
 
+        if scorecard:
+            context["Signal_Track_Record"] = {
+                "summary": scorecard.get("summary_text", ""),
+                "yesterday": [
+                    {"code": e["code"], "signal": e["yesterday_signal"],
+                     "change": f"{e['today_change']}%", "result": e["result"]}
+                    for e in scorecard.get("yesterday_evaluation", [])
+                    if e["result"] != "NEUTRAL"
+                ]
+            }
+
         return json.dumps(context, ensure_ascii=False, indent=1)
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
@@ -169,8 +182,9 @@ class GeminiClient:
         indices = market_data.get('indices', {})
         macro_news = market_data.get('macro_news', {})
         yesterday_context = market_data.get('yesterday_context')
+        scorecard = market_data.get('signal_scorecard')
 
-        context_json = self._build_context(market_breadth, north_funds, indices, macro_news, portfolio, yesterday_context)
+        context_json = self._build_context(market_breadth, north_funds, indices, macro_news, portfolio, yesterday_context, scorecard)
 
         # Load Prompt Template
         # Using the midday focus from config
@@ -203,8 +217,9 @@ class GeminiClient:
         portfolio = market_data.get('stocks', [])
         indices = market_data.get('indices', {})
         macro_news = market_data.get('macro_news', {})
-        
-        context_json = self._build_context(market_breadth, north_funds, indices, macro_news, portfolio)
+        scorecard = market_data.get('signal_scorecard')
+
+        context_json = self._build_context(market_breadth, north_funds, indices, macro_news, portfolio, scorecard=scorecard)
         
         full_prompt = f"""
 {system_prompt}
@@ -427,7 +442,14 @@ class GeminiClient:
             context_summary = "无市场数据"
         ai_summary = json.dumps(ai_result, ensure_ascii=False, indent=1) if ai_result else "无AI分析结果"
 
+        from datetime import datetime
+        today_str = datetime.now().strftime('%Y年%m月%d日')
+
         full_prompt = f"""{system_prompt}
+
+---
+[当前日期]
+{today_str}
 
 ---
 [市场数据]

@@ -83,7 +83,21 @@ class FeishuClient:
                 }
             },
             {"tag": "hr"}
-        ] # 2. Portfolio Grouping (Danger first)
+        ]
+
+        # Signal Scorecard Section
+        scorecard = data.get('signal_scorecard')
+        if scorecard:
+            sc_text = f"**📊 信号追踪** | {scorecard.get('summary_text', '')}\n"
+            for e in scorecard.get('yesterday_evaluation', []):
+                if e['result'] == 'NEUTRAL':
+                    continue
+                icon = "✅" if e['result'] == 'HIT' else "❌"
+                sc_text += f"{icon} {e['name']} {e['yesterday_signal']}→{e['today_change']}%\n"
+            elements.append({"tag": "div", "text": {"tag": "lark_md", "content": sc_text}})
+            elements.append({"tag": "hr"})
+
+        # 2. Portfolio Grouping (Danger first)
         # 🔧 统一信号标签体系
         # Processor信号: SAFE, OVERBOUGHT, OBSERVED, WATCH, WARNING, DANGER, LIMIT_UP, LIMIT_DOWN, N/A
         # 映射到Feishu组:
@@ -438,6 +452,18 @@ class FeishuClient:
             },
             {"tag": "hr"}
         ]
+
+        # Signal Scorecard Section
+        scorecard = data.get('signal_scorecard')
+        if scorecard:
+            sc_text = f"**📊 信号追踪** | {scorecard.get('summary_text', '')}\n"
+            for e in scorecard.get('yesterday_evaluation', []):
+                if e['result'] == 'NEUTRAL':
+                    continue
+                icon = "✅" if e['result'] == 'HIT' else "❌"
+                sc_text += f"{icon} {e['name']} {e['yesterday_signal']}→{e['today_change']}%\n"
+            elements.append({"tag": "div", "text": {"tag": "lark_md", "content": sc_text}})
+            elements.append({"tag": "hr"})
 
         # Per-stock review
         elements.append({

@@ -42,20 +42,50 @@ def _print_text_summary(result: Dict[str, Any], mode: str):
         lines.append(f"=== 收盘复盘 ===")
         lines.append(f"总结: {result.get('market_summary', 'N/A')}")
         lines.append(f"温度: {result.get('market_temperature', 'N/A')}")
+        # Signal Scorecard
+        scorecard = result.get('signal_scorecard')
+        if scorecard:
+            lines.append(f"")
+            lines.append(f"📊 信号追踪: {scorecard.get('summary_text', '')}")
+            for e in scorecard.get('yesterday_evaluation', []):
+                if e['result'] == 'NEUTRAL':
+                    continue
+                icon = "✅" if e['result'] == 'HIT' else "❌"
+                lines.append(f"  {icon} {e['name']} {e['yesterday_signal']}[{e.get('confidence', '')}] → {e['today_change']}%")
+            lines.append(f"")
         for a in result.get('actions', []):
             lines.append(f"  [{a.get('code')}] {a.get('name')}")
             lines.append(f"    今日: {a.get('today_review', '')}")
             lines.append(f"    明日: {a.get('tomorrow_plan', '')}")
             lines.append(f"    支撑:{a.get('support_level', 0)} / 压力:{a.get('resistance_level', 0)}")
+            tech = a.get('tech_summary', '')
+            if tech:
+                lines.append(f"    指标: {tech}")
     else:  # midday
         lines.append(f"=== 午盘分析 ===")
         lines.append(f"情绪: {result.get('market_sentiment', 'N/A')}")
         lines.append(f"量能: {result.get('volume_analysis', 'N/A')}")
         lines.append(f"指数: {result.get('indices_info', 'N/A')}")
         lines.append(f"点评: {result.get('macro_summary', 'N/A')}")
+        # Signal Scorecard
+        scorecard = result.get('signal_scorecard')
+        if scorecard:
+            lines.append(f"")
+            lines.append(f"📊 信号追踪: {scorecard.get('summary_text', '')}")
+            for e in scorecard.get('yesterday_evaluation', []):
+                if e['result'] == 'NEUTRAL':
+                    continue
+                icon = "✅" if e['result'] == 'HIT' else "❌"
+                lines.append(f"  {icon} {e['name']} {e['yesterday_signal']}[{e.get('confidence', '')}] → {e['today_change']}%")
+            lines.append(f"")
         for a in result.get('actions', []):
             pct = a.get('pct_change_str', '')
-            lines.append(f"  [{a.get('code')}] {a.get('name')} {pct} | 信号:{a.get('signal','N/A')} | 操作:{a.get('operation','N/A')}")
+            confidence = a.get('confidence', '')
+            conf_tag = f" [{confidence}]" if confidence else ""
+            lines.append(f"  [{a.get('code')}] {a.get('name')} {pct} | 信号:{a.get('signal','N/A')}{conf_tag} | 操作:{a.get('operation','N/A')}")
+            tech = a.get('tech_summary', '')
+            if tech:
+                lines.append(f"    指标: {tech}")
             if a.get('reason'):
                 lines.append(f"    理由: {a.get('reason')}")
 
