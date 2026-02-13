@@ -2,14 +2,14 @@ name: Sentinel Daily Briefing
 
 on:
   schedule:
-    # UTC Time!
-    # China is UTC+8.
-    # Morning 08:00 CST = 00:00 UTC (提前30分钟)
-    # Midday 11:40 CST = 03:40 UTC
-    # Close 15:10 CST = 07:10 UTC
-    - cron: "0 0 * * 1-5" # Morning Brief
-    - cron: "40 3 * * 1-5" # Midday Check
-    - cron: "10 7 * * 1-5" # Close Review
+    # UTC Time! China is UTC+8.
+    # OpenClaw 本地为主力，GitHub Actions 延后10分钟作为兜底
+    # Morning 08:10 CST = 00:10 UTC
+    # Midday 11:50 CST = 03:50 UTC
+    # Close 15:20 CST = 07:20 UTC
+    - cron: "10 0 * * 1-5" # Morning Brief (兜底)
+    - cron: "50 3 * * 1-5" # Midday Check (兜底)
+    - cron: "20 7 * * 1-5" # Close Review (兜底)
   workflow_dispatch: # Allow manual button click test
 
 jobs:

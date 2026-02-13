@@ -378,7 +378,7 @@ class DataCollector:
         """
         logger.info("Fetching global indices...")
         try:
-            df = await self._run_blocking(ak.index_global_spot_em, timeout=10)
+            df = await self._run_blocking(ak.index_global_spot_em, timeout=20)
             if df is None or df.empty:
                 return []
 
@@ -409,7 +409,7 @@ class DataCollector:
         """
         logger.info("Fetching commodity futures...")
         try:
-            df = await self._run_blocking(ak.futures_global_spot_em, timeout=10)
+            df = await self._run_blocking(ak.futures_global_spot_em, timeout=20)
             if df is None or df.empty:
                 return []
 
@@ -438,7 +438,7 @@ class DataCollector:
         """
         logger.info("Fetching US treasury yields...")
         try:
-            df = await self._run_blocking(ak.bond_zh_us_rate, start_date="2024-01-01", timeout=10)
+            df = await self._run_blocking(ak.bond_zh_us_rate, start_date="2024-01-01", timeout=20)
             if df is None or df.empty:
                 return {}
 
@@ -533,8 +533,9 @@ class DataCollector:
         ]
 
         try:
-            global_results = await asyncio.gather(*global_tasks, return_exceptions=True)
-            stock_results = await asyncio.gather(*stock_tasks, return_exceptions=True)
+            all_results = await asyncio.gather(*global_tasks, *stock_tasks, return_exceptions=True)
+            global_results = all_results[:4]
+            stock_results = all_results[4:]
         except Exception as e:
             logger.error(f"Critical error during morning gather: {e}")
             global_results = [None] * 4
@@ -544,6 +545,12 @@ class DataCollector:
         commodities = global_results[1] if not isinstance(global_results[1], Exception) else []
         us_treasury = global_results[2] if not isinstance(global_results[2], Exception) else {}
         macro_news = global_results[3] if not isinstance(global_results[3], Exception) else {"telegraph": [], "ai_tech": []}
+
+        # Log failures for debugging
+        labels = ['global_indices', 'commodities', 'us_treasury', 'macro_news']
+        for i, label in enumerate(labels):
+            if isinstance(global_results[i], Exception):
+                logger.warning(f"Morning data {label} failed: {global_results[i]}")
 
         valid_stocks = [
             res for res in stock_results
