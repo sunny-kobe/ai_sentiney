@@ -80,6 +80,11 @@ portfolio:
     cost: 0
     strategy: "trend"
 
+  - code: "000062"
+    name: "深圳华强"
+    cost: 0
+    strategy: "trend"
+
 risk_management:
   stop_loss_pct: -0.05
   ma_window: 20
@@ -89,7 +94,7 @@ risk_management:
     warning: -0.03 # -3%
     danger: -0.05 # -5%
     overbought: 0.05 # +5%
-  volume_ratio_high: 1.5          # 放量判定阈值
+  volume_ratio_high: 1.5 # 放量判定阈值
   technical_indicators:
     macd:
       fast_period: 12
@@ -97,12 +102,12 @@ risk_management:
       signal_period: 9
     rsi:
       period: 14
-      oversold: 30               # RSI < 30 超卖
-      overbought: 70             # RSI > 70 超买
+      oversold: 30 # RSI < 30 超卖
+      overbought: 70 # RSI > 70 超买
     bollinger:
       window: 20
       num_std: 2
-    history_days: 60             # K线获取天数（MACD需要更多数据）
+    history_days: 60 # K线获取天数（MACD需要更多数据）
   # NOTE: north_money_threshold removed - no longer real-time available
 
 prompts:
