@@ -86,7 +86,11 @@ portfolio:
     strategy: "trend"
 
 risk_management:
-  stop_loss_pct: -0.05
+  strategies:
+    trend:
+      stop_loss_pct: -0.05
+    value:
+      stop_loss_pct: -0.08
   ma_window: 20
   # Bias thresholds for tiered signal generation (v2.0)
   bias_thresholds:
@@ -108,6 +112,89 @@ risk_management:
       window: 20
       num_std: 2
     history_days: 60 # K线获取天数（MACD需要更多数据）
+
+  # Signal rules: first-match-wins. Order matters — put higher-priority overrides first.
+  # Available flags: MACD_BULLISH, MACD_BEARISH, MACD_GOLDEN_CROSS, MACD_WEAK,
+  #   MACD_BOTTOM_DIV, MACD_TOP_DIV, OBV_INFLOW, OBV_OUTFLOW,
+  #   VOLUME_SHRINK (<1.0), VOLUME_HIGH (>1.5), VOLUME_CONTINUOUS_SHRINK,
+  #   RSI_OVERBOUGHT, RSI_OVERSOLD, RSI_WEAK, RSI_BB_OVERBOUGHT,
+  #   BB_BELOW_LOWER, BB_ABOVE_UPPER,
+  #   KDJ_OVERSOLD, KDJ_OVERBOUGHT, KDJ_OVERSOLD_GOLDEN, KDJ_OVERBOUGHT_DEATH,
+  #   ATR_HIGH_VOLATILE, ATR_LOW_VOLATILE
+  signal_rules:
+    - name: "底背驰洗盘降级"
+      triggers: ["DANGER"]
+      conditions_all: ["MACD_BOTTOM_DIV", "VOLUME_SHRINK"]
+      conditions_any: []
+      result: "WATCH"
+      confidence: "高"
+    - name: "多头回调抵抗"
+      triggers: ["WARNING"]
+      conditions_all: []
+      conditions_any: ["MACD_BULLISH", "MACD_BOTTOM_DIV"]
+      result: "WATCH"
+      confidence: "中"
+    - name: "弱势共振下杀"
+      triggers: ["WARNING"]
+      conditions_all: ["MACD_WEAK", "OBV_OUTFLOW"]
+      conditions_any: []
+      result: "DANGER"
+      confidence: "高"
+    - name: "顶背离超买"
+      triggers: ["SAFE"]
+      conditions_all: []
+      conditions_any: ["RSI_BB_OVERBOUGHT", "MACD_TOP_DIV"]
+      result: "OVERBOUGHT"
+      confidence: "高"
+    - name: "多头共振"
+      triggers: ["SAFE"]
+      conditions_all: ["MACD_BULLISH", "OBV_INFLOW"]
+      conditions_any: []
+      result: "SAFE"
+      confidence: "高"
+    - name: "空头初现"
+      triggers: ["SAFE"]
+      conditions_all: ["MACD_BEARISH"]
+      conditions_any: []
+      result: "SAFE"
+      confidence: "低"
+    - name: "弱势金叉"
+      triggers: ["WATCH", "OBSERVED"]
+      conditions_all: ["MACD_GOLDEN_CROSS", "RSI_WEAK"]
+      conditions_any: []
+      result: "" # 空字符串代表不修改 signal
+      confidence: "低"
+    - name: "空头共振"
+      triggers: ["WATCH", "OBSERVED"]
+      conditions_all: ["MACD_BEARISH", "OBV_OUTFLOW"]
+      conditions_any: []
+      result: ""
+      confidence: "高"
+    - name: "水下底背驰"
+      triggers: ["WATCH", "OBSERVED"]
+      conditions_all: ["MACD_BOTTOM_DIV"]
+      conditions_any: []
+      result: ""
+      confidence: "高"
+    - name: "超卖金叉企稳"
+      triggers: ["DANGER", "WARNING"]
+      conditions_all: ["KDJ_OVERSOLD_GOLDEN", "VOLUME_SHRINK"]
+      conditions_any: []
+      result: "WATCH"
+      confidence: "高"
+    - name: "超买死叉见顶"
+      triggers: ["SAFE", "OVERBOUGHT"]
+      conditions_all: ["KDJ_OVERBOUGHT_DEATH"]
+      conditions_any: ["MACD_TOP_DIV", "OBV_OUTFLOW"]
+      result: "OVERBOUGHT"
+      confidence: "高"
+    - name: "高波动缩量洗盘"
+      triggers: ["DANGER", "WARNING"]
+      conditions_all: ["ATR_HIGH_VOLATILE", "VOLUME_CONTINUOUS_SHRINK"]
+      conditions_any: []
+      result: "WATCH"
+      confidence: "中"
+
   # NOTE: north_money_threshold removed - no longer real-time available
 
 prompts:
@@ -148,20 +235,20 @@ prompts:
         *   **趋势判定 (MA20)**: 
             *   **ETF/蓝筹**: 严格遵守 `Price < MA20` 离场原则。
             *   **高波个股 (如紫金/盛达)**: 允许 `Price` 瞬间刺破 `MA20` (假摔)，需结合 **-3%** 阈值或 **缩量** 确认。
-        *   **真假摔过滤器 (Volume Filter)**:
-            *   **CASE A (缩量回踩)**: 股价跌破 MA20，但成交量显著萎缩（无主力出逃迹象） -> 判定为**洗盘** -> 建议 `WATCH` (观察下午能否收回)。
-            *   **CASE B (放量击穿)**: 股价跌破 MA20，且成交量放大（主力坚决出货） -> 判定为**破位** -> 建议 `DANGER` (立即减仓/止损)。
-            *   **CASE C (上涨中继)**: 股价在 MA20 上方震荡 -> 建议 `HOLD`。
+        *   **真假摔过滤器 (Volume & OBV Filter)**:
+            *   **CASE A (洗盘回踩)**: 股价跌破 MA20，但成交量显著萎缩，且 **OBV资金平衡或流入**，或出现 **MACD底背驰** -> 判定为**洗盘假摔** -> 建议 `WATCH` (观察能否收回)。
+            *   **CASE B (放量击穿)**: 股价跌破 MA20，且成交量放大，且 **OBV资金流出**，MACD呈现**杀多棒/超弱** -> 判定为**真实破位** -> 建议 `DANGER` (立即减仓/止损)。
+            *   **CASE C (上涨中继)**: 股价在 MA20 上方震荡，MACD多头且OBV流入 -> 建议 `HOLD`。
         *   **板块共振**:
             *   若个股跌，但所属板块（如有色、电力）整体强势 -> 错杀机会 -> `WATCH/BUY`。
             *   若个股跌，且板块不仅跌还领跌市场 -> 还要跌 -> `DANGER`。
         *   **多维交叉验证 (Cross Validation)**:
-            *   系统已预计算 MACD/RSI/布林带，结果在每只股票的 `Tech` 字段中。
+            *   系统已将多维技术指标（MACD/OBV/KDJ/RSI/ATR/布林带/量能）结构化为标准标签序列（如 `[日线_MACD_多头_无背驰_0]`, `[日线_KDJ_超卖_0]`等），附在 `Tech` 字段中。
             *   `Confidence` 字段反映多维指标一致性（高=多维共振，中=部分矛盾，低=信号冲突）。
-            *   **你应优先参考系统预计算的 Signal 和 Confidence，然后结合新闻面做最终修正。**
-            *   MACD金叉 + RSI < 50 = 潜在底部反转信号
-            *   MACD死叉 + RSI > 70 = 顶部风险信号
-            *   布林下轨支撑 + 缩量 = 洗盘概率高
+            *   **必须优先寻找 Tech 字段里的 `[底背驰]` 或 `[顶背驰]` 标记。底背驰往往是极佳的买点或确认洗盘的信号。**
+            *   **KDJ 灵敏度**：`[日线_KDJ_超卖_0]` 出现且伴随缩量，说明短期企稳概率极高；`[日线_KDJ_超卖金叉_0]` 是极强的短期反弹买点信号；`[日线_KDJ_超买死叉_0]` 则警示短期见顶。
+            *   **ATR 波幅**：`[日线_ATR_高波动_0]` 提示当前处于剧烈震荡宽幅洗盘期，切莫追涨杀跌。
+            *   布林带下半区 + 极度缩量 = 洗盘概率极高。
 
     3.  **消息面修正**:
         *   对于 紫金/盛达/黄金ETF，必须隐含考虑 **美元指数/黄金期货** 的走势影响（根据常识判断，无需外部输入）。
@@ -177,9 +264,9 @@ prompts:
     <thinking_process_protocol>
     在生成 JSON 前，必须在 Markdown 引用块中打印 **策略运算日志**：
     1.  **宏观扫描**: 今天的市场是“杀估值”（大票跌）还是“杀情绪”（小票跌）？
-    2.  **量价显微镜**: 扫描持仓中破位的票，是“缩量假摔”还是“放量真跌”？
+    2.  **量价与能量微雕**: 扫描破位个股的 Tech 摘要，有无 `[底背驰]` 结构？OBV能量是流入还是流出？缩量假摔还是放量真跌？
     3.  **博弈推演**: “如果下午不收回MA20，这只票的技术形态是否彻底破坏？”
-    4.  **最终裁决**: 给出 DANGER/WATCH/HOLD。
+    4.  **最终裁决**: 根据上述多维交叉得出 DANGER/WATCH/HOLD/SAFE。
     </thinking_process_protocol>
 
     <output_format>
@@ -347,18 +434,21 @@ prompts:
 
     <logic_core>
     1.  **全景复盘**:
-        *   **量能定性**: 今日是从缩量变放量（变盘向上），还是放量变缩量（人气涣散）？
+        *   **量价定性**: 今日是从缩量变放量（变盘向上），还是放量变缩量（人气涣散）？
         *   **主线强度**: 这种行情下，持仓的板块（有色、科技、红利）是领涨还是抗跌？
     2.  **持仓诊断**:
         *   **有效性确认**: 收盘价 < MA20 -> 趋势破坏。
-        *   **周期股特判**: 紫金/盛达 如果跟随大宗商品回调，但并未跌破长期趋势线（如MA30/60，此处参考MA20作为短期警戒），可适当宽容。
-        *   **技术指标确认**: 参考 MACD 趋势、RSI 位置和布林带宽度判断趋势强度。
-            *   MACD 柱状体连续缩小 = 动能衰竭
-            *   RSI 连续走低 + 价格创新高 = 顶背离风险
-            *   布林带收窄 = 变盘窗口临近
+        *   **结构与能量穿越 (Structure & Energy)**: 
+            *   密切关注 `Tech` 字段给出的标准结构标签序列（如 `[日线_KDJ_超买_0]`, `[日线_ATR_高波动_0]`）。
+            *   如果收盘价跌破 MA20，但 MACD 提示 `底背驰` 且 OBV `资金流出` 不明显、KDJ 处于 `超卖`，这是典型的空头陷阱（诱空洗盘）。
+        *   **周期股特判**: 紫金/盛达 如果跟随大宗商品回调，但并未跌破长期趋势线，结合能量可适当宽容。
+        *   **经典技术指标验证**:
+            *   `[日线_KDJ_超买_0]` 或 `[日线_KDJ_超买死叉_0]` + 价格创新高 = 顶背离风险，极度危险。
+            *   `[日线_MACD_死叉_无背驰_0]` + `[日线_OBV_资金流出_0]` = 动能衰竭，坚决看空。
+            *   `[日线_ATR_高波动_0]` = 变盘窗口期，方向取决于接下来的放量方向。
     3.  **明日剧本**:
-        *   若今日缩量回调 -> 明日关键看“反包”。
-        *   若今日放量下杀 -> 明日关键看“惯性低开后的承接”。
+        *   若今日缩量回调且伴随底背驰 -> 明日强看“反包”。
+        *   若今日放量下杀且OBV大幅流出 -> 明日关键看“惯性低开后的绝望承接”。
     </logic_core>
 
     <output_format>

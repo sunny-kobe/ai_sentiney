@@ -35,6 +35,13 @@ class AnalysisService:
 
         logger.info(f"Data Collected. Market Breadth: {market_breadth}, North Funds: {north_funds}")
 
+        # 1.5. Enrich stock data with portfolio config (strategy, cost)
+        portfolio_map = {p['code']: p for p in portfolio}
+        for stock_raw in stock_data_list:
+            cfg = portfolio_map.get(stock_raw.get('code', ''), {})
+            stock_raw['strategy'] = cfg.get('strategy', 'trend')
+            stock_raw['cost'] = cfg.get('cost', 0)
+
         # 2. Process Data (Indicators)
         processor = DataProcessor()
         processed_stocks = []
@@ -230,6 +237,8 @@ class AnalysisService:
         try:
             if dry_run and not replay:
                 logger.info("Dry Run Mode: Mocking AI response.")
+                for s in ai_input.get('stocks', []):
+                    logger.info(f"[DRY-RUN TAGS] {s['name']} Tech: {s.get('tech_summary')}")
                 analysis_result = {
                     "market_sentiment": "DryRun", 
                     "summary": "This is a dry run.", 

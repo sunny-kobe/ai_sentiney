@@ -97,32 +97,273 @@ def calculate_bollinger(closes: List[float], window: int = 20, num_std: int = 2)
     }
 
 
-def _build_tech_summary(macd: Dict, rsi: float, bb: Dict, bias: float, vol_ratio: float) -> str:
-    """Build a concise technical indicator summary string."""
-    parts = []
-    trend_map = {
-        "GOLDEN_CROSS": "MACD金叉", "DEATH_CROSS": "MACD死叉",
-        "BULLISH": "MACD多头", "BEARISH": "MACD空头",
+# ============================================================
+# Advanced czsc-derived Technical Indicator calculations
+# ============================================================
+
+def calculate_kdj(highs: List[float], lows: List[float], closes: List[float], n: int = 9, m1: int = 3, m2: int = 3) -> Dict[str, Any]:
+    """KDJ indicator: returns {k, d, j, signal}"""
+    if len(closes) < n:
+        return {"k": 50.0, "d": 50.0, "j": 50.0, "signal": "UNKNOWN"}
+        
+    k = 50.0
+    d = 50.0
+    
+    k_seq, d_seq, j_seq = [], [], []
+    
+    for i in range(len(closes)):
+        if i < n - 1:
+            k_seq.append(50.0)
+            d_seq.append(50.0)
+            j_seq.append(50.0)
+            continue
+            
+        hh = max(highs[i-n+1:i+1])
+        ll = min(lows[i-n+1:i+1])
+        
+        rsv = 100.0 if hh == ll else (closes[i] - ll) / (hh - ll) * 100.0
+        
+        k = (m1 - 1) / m1 * k + 1 / m1 * rsv
+        d = (m2 - 1) / m2 * d + 1 / m2 * k
+        j = 3 * k - 2 * d
+        
+        k_seq.append(k)
+        d_seq.append(d)
+        j_seq.append(j)
+        
+    current_k, current_d, current_j = k_seq[-1], d_seq[-1], j_seq[-1]
+
+    # Cross detection: K crossing D
+    cross = "NONE"
+    if len(k_seq) >= 2 and len(d_seq) >= 2:
+        prev_k, prev_d = k_seq[-2], d_seq[-2]
+        if prev_k <= prev_d and current_k > current_d:
+            cross = "GOLDEN_CROSS"
+        elif prev_k >= prev_d and current_k < current_d:
+            cross = "DEATH_CROSS"
+
+    signal = "NEUTRAL"
+    if current_k < 20 and current_d < 20:
+        signal = "OVERSOLD"
+        if cross == "GOLDEN_CROSS":
+            signal = "OVERSOLD_GOLDEN"  # Extreme value golden cross — strong buy
+    elif current_k > 80 and current_d > 80:
+        signal = "OVERBOUGHT"
+        if cross == "DEATH_CROSS":
+            signal = "OVERBOUGHT_DEATH"  # Extreme value death cross — strong sell
+
+    return {
+        "k": round(current_k, 2),
+        "d": round(current_d, 2),
+        "j": round(current_j, 2),
+        "cross": cross,
+        "signal": signal
     }
-    parts.append(trend_map.get(macd.get('trend', ''), 'MACD未知'))
-    if rsi > 70:
-        parts.append(f"RSI超买({rsi})")
-    elif rsi < 30:
-        parts.append(f"RSI超卖({rsi})")
+
+def calculate_atr(highs: List[float], lows: List[float], closes: List[float], period: int = 14) -> Dict[str, Any]:
+    """Average True Range (Wilder Smoothing)"""
+    if len(closes) < period + 1:
+        return {"atr": 0.0, "atr_pct": 0.0, "volatility": "UNKNOWN"}
+        
+    tr_seq = []
+    for i in range(1, len(closes)):
+        h = highs[i]
+        l = lows[i]
+        pc = closes[i-1]
+        tr = max(h - l, abs(h - pc), abs(l - pc))
+        tr_seq.append(tr)
+        
+    atr = sum(tr_seq[:period]) / period
+    for i in range(period, len(tr_seq)):
+        atr = (atr * (period - 1) + tr_seq[i]) / period
+        
+    current_close = closes[-1]
+    atr_pct = atr / current_close if current_close > 0 else 0
+    
+    if atr_pct > 0.08:
+        volatility = "HIGH_VOLATILE"
+    elif atr_pct < 0.03:
+        volatility = "LOW_VOLATILE"
     else:
-        parts.append(f"RSI={rsi}")
-    pos_map = {
-        "ABOVE_UPPER": "突破布林上轨", "BELOW_LOWER": "跌破布林下轨",
-        "UPPER_HALF": "布林上半区", "LOWER_HALF": "布林下半区",
+        volatility = "NORMAL"
+        
+    return {
+        "atr": round(atr, 2),
+        "atr_pct": round(atr_pct, 4),
+        "volatility": volatility
     }
-    bb_text = pos_map.get(bb.get('position', ''), '')
-    if bb_text:
-        parts.append(bb_text)
-    if vol_ratio > 1.5:
-        parts.append(f"放量({vol_ratio}x)")
-    elif vol_ratio > 0:
-        parts.append(f"量比{vol_ratio}x")
-    return " | ".join(p for p in parts if p)
+
+def calculate_obv(closes: List[float], opens: List[float], vols: List[float], ma_period: int = 10) -> Dict[str, Any]:
+    """
+    On-Balance Volume (能量潮) - czsc style.
+    Calculates OBV and OBV_MA to determine energy momentum.
+    """
+    if len(closes) < ma_period + 1 or len(closes) != len(opens) or len(closes) != len(vols):
+        return {"obv": 0, "obv_ma": 0, "trend": "UNKNOWN"}
+    
+    obv_seq = []
+    current_obv = 0
+    # Process history
+    for i in range(len(closes)):
+        # Rule: if close > open, vol is positive energy. Otherwise negative.
+        if closes[i] > opens[i]:
+            current_obv += vols[i]
+        elif closes[i] < opens[i]:
+            current_obv -= vols[i]
+        obv_seq.append(current_obv)
+    
+    # Calculate EMA of OBV
+    obv_ma = calculate_ema(obv_seq, ma_period)
+    
+    current = obv_seq[-1]
+    ma = obv_ma[-1] if obv_ma else 0
+    
+    if current > ma:
+        trend = "INFLOW"
+    elif current < ma:
+        trend = "OUTFLOW"
+    else:
+        trend = "NEUTRAL"
+        
+    return {
+        "obv": round(current, 2),
+        "obv_ma": round(ma, 2),
+        "trend": trend
+    }
+
+def analyze_macd_advanced(closes: List[float], fast: int = 12, slow: int = 26, signal: int = 9, lookback: int = 5) -> Dict[str, Any]:
+    """
+    Advanced MACD analysis derived from czsc: detects Divergence (背驰) and Pillar Power.
+    Computes MACD once and derives base + advanced signals from the same arrays.
+    """
+    if len(closes) < slow + signal:
+        return {"macd": 0, "signal_line": 0, "histogram": 0, "trend": "UNKNOWN", "power": "UNKNOWN", "divergence": "NONE"}
+
+    ema_fast = calculate_ema(closes, fast)
+    ema_slow = calculate_ema(closes, slow)
+    macd_line = [f - s for f, s in zip(ema_fast, ema_slow)]
+    signal_line = calculate_ema(macd_line[slow - 1:], signal)
+
+    # Align arrays
+    valid_len = len(signal_line)
+    macd_valid = macd_line[-valid_len:]
+    hist_seq = [m - s for m, s in zip(macd_valid, signal_line)]
+
+    current_macd = macd_valid[-1]
+    current_signal = signal_line[-1]
+    histogram = hist_seq[-1]
+    prev_histogram = hist_seq[-2] if len(hist_seq) > 1 else 0
+
+    # Base trend
+    if histogram > 0 and prev_histogram <= 0:
+        trend = "GOLDEN_CROSS"
+    elif histogram < 0 and prev_histogram >= 0:
+        trend = "DEATH_CROSS"
+    elif histogram > 0:
+        trend = "BULLISH"
+    else:
+        trend = "BEARISH"
+
+    # Power analysis (tas_macd_power)
+    dif, dea = current_macd, current_signal
+    if dif >= dea and dea >= 0:
+        power = "SUPER_STRONG"
+    elif histogram > 0:
+        power = "STRONG"
+    elif dif <= dea and dea <= 0:
+        power = "SUPER_WEAK"
+    elif histogram <= 0:
+        power = "WEAK"
+    else:
+        power = "UNKNOWN"
+
+    # Divergence analysis (tas_macd_bc)
+    divergence = "NONE"
+    if len(closes) >= slow + signal + lookback * 2 and valid_len > lookback * 4:
+        recent_closes = closes[-lookback:]
+        past_closes = closes[-lookback*3:-lookback]
+        recent_macd = macd_valid[-lookback:]
+        past_macd = macd_valid[-lookback*3:-lookback]
+
+        if min(recent_closes) < min(past_closes) and min(recent_macd) > min(past_macd):
+            divergence = "BOTTOM_DIV"
+        elif max(recent_closes) > max(past_closes) and max(recent_macd) < max(past_macd):
+            divergence = "TOP_DIV"
+
+    return {
+        "macd": round(current_macd, 4),
+        "signal_line": round(current_signal, 4),
+        "histogram": round(histogram, 4),
+        "trend": trend,
+        "power": power,
+        "divergence": divergence,
+    }
+
+
+def _build_tech_summary(stock: Dict[str, Any]) -> str:
+    """Build a czsc-style structural tag summary."""
+    tags = []
+    
+    # 1. MACD
+    macd = stock.get('macd', {})
+    trend_map = {"GOLDEN_CROSS": "金叉", "DEATH_CROSS": "死叉", "BULLISH": "多头", "BEARISH": "空头"}
+    power_map = {"SUPER_STRONG": "超强", "STRONG": "强势", "SUPER_WEAK": "超弱", "WEAK": "弱势"}
+    div_map = {"BOTTOM_DIV": "底背驰", "TOP_DIV": "顶背驰"}
+    
+    macd_status = trend_map.get(macd.get('trend', ''), '未知')
+    if macd.get('power') and macd.get('power') != "UNKNOWN":
+        macd_status += f"-{power_map.get(macd.get('power'), '')}"
+        
+    macd_supp = div_map.get(macd.get('divergence', ''), '无背驰')
+    tags.append(f"[日线_MACD_{macd_status}_{macd_supp}_0]")
+
+    # 2. OBV
+    obv = stock.get('obv', {})
+    obv_map = {"INFLOW": "资金流入", "OUTFLOW": "资金流出", "NEUTRAL": "资金平衡"}
+    obv_status = obv_map.get(obv.get('trend', ''), '未知')
+    tags.append(f"[日线_OBV_{obv_status}_0]")
+
+    # 3. KDJ
+    kdj = stock.get('kdj', {})
+    kdj_map = {
+        "OVERBOUGHT": "超买", "OVERBOUGHT_DEATH": "超买死叉",
+        "OVERSOLD": "超卖", "OVERSOLD_GOLDEN": "超卖金叉",
+        "NEUTRAL": "中性"
+    }
+    kdj_status = kdj_map.get(kdj.get('signal', ''), '未知')
+    tags.append(f"[日线_KDJ_{kdj_status}_0]")
+
+    # 4. RSI
+    rsi = stock.get('rsi', 50)
+    rsi_status = "超买" if rsi > 70 else "超卖" if rsi < 30 else "中性"
+    tags.append(f"[日线_RSI_{rsi_status}_{rsi}_0]")
+
+    # 5. Volatility (ATR)
+    atr = stock.get('atr', {})
+    atr_map = {"HIGH_VOLATILE": "高波动", "LOW_VOLATILE": "低波动", "NORMAL": "正常波动"}
+    atr_status = atr_map.get(atr.get('volatility', ''), '未知')
+    tags.append(f"[日线_ATR_{atr_status}_0]")
+
+    # 6. Bollinger
+    bb = stock.get('bollinger', {})
+    pos_map = {
+        "ABOVE_UPPER": "突破上轨", "BELOW_LOWER": "跌破下轨",
+        "UPPER_HALF": "上半区", "LOWER_HALF": "下半区",
+    }
+    bb_status = pos_map.get(bb.get('position', ''), '未知')
+    tags.append(f"[日线_布林带_{bb_status}_0]")
+
+    # 7. Volume
+    vol_level = stock.get('volume_level', '未知')
+    vol_ratio = stock.get('volume_ratio', 0)
+    cont_shrink = "连缩" if stock.get('continuous_shrink', False) else "单缩"
+    if vol_ratio < 1.0:
+        vol_supp = f"量比{vol_ratio}x_{cont_shrink}"
+    else:
+        vol_supp = f"量比{vol_ratio}x"
+    tags.append(f"[日线_量能_{vol_level}_{vol_supp}_0]")
+
+    return " ".join(tags)
 
 
 def get_intraday_progress() -> float:
@@ -291,15 +532,76 @@ class DataProcessor:
             else:
                 volume_ratio = 0.0
 
-            # 5. Multi-dimensional indicators (MACD / RSI / Bollinger)
+            # Extract additional properties for OBV calculation
+            if '开盘' in history_df_filtered.columns:
+                open_col = '开盘'
+            elif 'Open' in history_df_filtered.columns:
+                open_col = 'Open'
+            elif 'open' in history_df_filtered.columns:
+                open_col = 'open'
+            else:
+                open_col = close_col # fallback
+                
+            # Add High and Low extraction
+            high_col = next((c for c in ['最高', 'High', 'high'] if c in history_df_filtered.columns), close_col)
+            low_col = next((c for c in ['最低', 'Low', 'low'] if c in history_df_filtered.columns), close_col)
+                
+            if '成交量' in history_df_filtered.columns:
+                vol_col = '成交量'
+            elif 'Volume' in history_df_filtered.columns:
+                vol_col = 'Volume'
+            elif 'volume' in history_df_filtered.columns:
+                vol_col = 'volume'
+            else:
+                vol_col = None
+
+            all_past_opens = history_df_filtered[open_col].tolist()
+            full_opens = all_past_opens + [stock_d.get('open_price', current_price)]
+            
+            all_past_highs = history_df_filtered[high_col].tolist()
+            full_highs = all_past_highs + [stock_d.get('high', current_price)]
+            
+            all_past_lows = history_df_filtered[low_col].tolist()
+            full_lows = all_past_lows + [stock_d.get('low', current_price)]
+
+            # Detect shrinking volume trend
+            continuous_shrink = False
+            if vol_col and len(history_df_filtered) >= 3:
+                all_past_vols = history_df_filtered[vol_col].tolist()
+                full_vols = all_past_vols + [volume]
+                
+                # Check if last 3 days were shrinking
+                v3, v2, v1 = all_past_vols[-3], all_past_vols[-2], all_past_vols[-1]
+                if v1 < v2 < v3:
+                    continuous_shrink = True
+            else:
+                full_vols = [0] * len(full_closes)
+
+            # Categorize volume ratio
+            volume_level = "无"
+            if volume_ratio > 1.5:
+                volume_level = "放量"
+            elif volume_ratio > 1.0:
+                volume_level = "平量"
+            elif volume_ratio > 0.8:
+                volume_level = "温和缩量"
+            elif volume_ratio > 0:
+                volume_level = "极度缩量"
+
+            # 5. Multi-dimensional indicators (Advanced MACD / RSI / Bollinger / OBV)
             ti_cfg = self.risk_params.get('technical_indicators', {})
 
             macd_cfg = ti_cfg.get('macd', {})
-            macd_result = calculate_macd(
+            macd_result = analyze_macd_advanced(
                 full_closes,
                 fast=macd_cfg.get('fast_period', 12),
                 slow=macd_cfg.get('slow_period', 26),
                 signal=macd_cfg.get('signal_period', 9),
+            )
+            
+            obv_result = calculate_obv(
+                full_closes, full_opens, full_vols,
+                ma_period=10
             )
 
             rsi_cfg = ti_cfg.get('rsi', {})
@@ -311,6 +613,9 @@ class DataProcessor:
                 window=bb_cfg.get('window', 20),
                 num_std=bb_cfg.get('num_std', 2),
             )
+            
+            kdj_result = calculate_kdj(full_highs, full_lows, full_closes)
+            atr_result = calculate_atr(full_highs, full_lows, full_closes)
 
             return {
                 "code": code,
@@ -322,9 +627,16 @@ class DataProcessor:
                 "volume": round(volume / 10000, 2),
                 "turnover_rate": round(turnover_rate, 2),
                 "volume_ratio": round(volume_ratio, 2),
+                "volume_level": volume_level,
+                "continuous_shrink": continuous_shrink,
                 "macd": macd_result,
+                "obv": obv_result,
                 "rsi": rsi_value,
                 "bollinger": bb_result,
+                "kdj": kdj_result,
+                "atr": atr_result,
+                "strategy": stock_d.get('strategy', 'trend'),
+                "cost": stock_d.get('cost', 0),
                 "news": stock_d.get('news', [])
             }
 
@@ -420,57 +732,107 @@ class DataProcessor:
 
             stock['signal'] = signal
 
-            # === Multi-dimensional cross-validation ===
+            # === Multi-dimensional cross-validation (Rule Engine) ===
             macd_data = stock.get('macd', {})
+            obv_data = stock.get('obv', {})
             rsi = stock.get('rsi', 50)
             bb_data = stock.get('bollinger', {})
+            
             macd_trend = macd_data.get('trend', 'UNKNOWN')
+            macd_power = macd_data.get('power', 'UNKNOWN')
+            macd_div = macd_data.get('divergence', 'NONE')
+            obv_trend = obv_data.get('trend', 'UNKNOWN')
             bb_position = bb_data.get('position', 'UNKNOWN')
 
-            confidence = "中"
+            # Build feature flags for the rule engine
+            flags = set()
+            if macd_trend in ("BULLISH", "GOLDEN_CROSS"): flags.add("MACD_BULLISH")
+            if macd_trend in ("BEARISH", "DEATH_CROSS"): flags.add("MACD_BEARISH")
+            if macd_trend == "GOLDEN_CROSS": flags.add("MACD_GOLDEN_CROSS")
+            if macd_power in ("WEAK", "SUPER_WEAK"): flags.add("MACD_WEAK")
+            if macd_div == "BOTTOM_DIV": flags.add("MACD_BOTTOM_DIV")
+            if macd_div == "TOP_DIV": flags.add("MACD_TOP_DIV")
+            if obv_trend == "INFLOW": flags.add("OBV_INFLOW")
+            if obv_trend == "OUTFLOW": flags.add("OBV_OUTFLOW")
+            if volume_ratio < 1.0: flags.add("VOLUME_SHRINK")   # Below average
+            if volume_ratio > VOLUME_RATIO_HIGH: flags.add("VOLUME_HIGH")
+            if rsi > RSI_OVERBOUGHT and bb_position == "ABOVE_UPPER": flags.add("RSI_BB_OVERBOUGHT")
+            if rsi > RSI_OVERBOUGHT: flags.add("RSI_OVERBOUGHT")
+            if rsi < RSI_OVERSOLD: flags.add("RSI_OVERSOLD")
+            if rsi < 50: flags.add("RSI_WEAK")
+            if bb_position == "BELOW_LOWER": flags.add("BB_BELOW_LOWER")
+            if bb_position == "ABOVE_UPPER": flags.add("BB_ABOVE_UPPER")
 
+            # KDJ flags
+            kdj_data = stock.get('kdj', {})
+            kdj_signal = kdj_data.get('signal', 'NEUTRAL')
+            if kdj_signal in ("OVERSOLD", "OVERSOLD_GOLDEN"): flags.add("KDJ_OVERSOLD")
+            if kdj_signal in ("OVERBOUGHT", "OVERBOUGHT_DEATH"): flags.add("KDJ_OVERBOUGHT")
+            if kdj_signal == "OVERSOLD_GOLDEN": flags.add("KDJ_OVERSOLD_GOLDEN")
+            if kdj_signal == "OVERBOUGHT_DEATH": flags.add("KDJ_OVERBOUGHT_DEATH")
+
+            # ATR flags
+            atr_data = stock.get('atr', {})
+            atr_vol = atr_data.get('volatility', 'NORMAL')
+            if atr_vol == "HIGH_VOLATILE": flags.add("ATR_HIGH_VOLATILE")
+            if atr_vol == "LOW_VOLATILE": flags.add("ATR_LOW_VOLATILE")
+
+            # Continuous shrink flag
+            if stock.get('continuous_shrink', False): flags.add("VOLUME_CONTINUOUS_SHRINK")
+
+            # Default confidence logic based on initial signal
+            confidence = "中"
             if signal == "DANGER":
                 bearish_count = sum([
-                    macd_trend in ("BEARISH", "DEATH_CROSS"),
-                    rsi < RSI_OVERSOLD,
-                    bb_position == "BELOW_LOWER",
+                    "MACD_BEARISH" in flags,
+                    "MACD_WEAK" in flags,
+                    "OBV_OUTFLOW" in flags,
+                    "RSI_OVERSOLD" in flags,
+                    "BB_BELOW_LOWER" in flags,
                 ])
-                confidence = "高" if bearish_count >= 2 else "中"
-
-            elif signal == "WARNING":
-                if macd_trend in ("BULLISH", "GOLDEN_CROSS"):
-                    signal = "WATCH"
-                    confidence = "中"
-                elif macd_trend in ("BEARISH", "DEATH_CROSS") and rsi < RSI_OVERSOLD:
-                    signal = "DANGER"
-                    confidence = "高"
-
-            elif signal == "SAFE":
-                if rsi > RSI_OVERBOUGHT and bb_position == "ABOVE_UPPER":
-                    signal = "OVERBOUGHT"
-                    confidence = "高"
-                elif macd_trend in ("BULLISH", "GOLDEN_CROSS"):
-                    confidence = "高"
-                elif macd_trend in ("BEARISH", "DEATH_CROSS"):
-                    confidence = "低"
-
+                confidence = "高" if bearish_count >= 3 else "中"
             elif signal == "OVERBOUGHT":
                 overbought_count = sum([
-                    rsi > RSI_OVERBOUGHT,
-                    bb_position == "ABOVE_UPPER",
-                    macd_trend in ("BEARISH", "DEATH_CROSS"),
+                    "RSI_OVERBOUGHT" in flags,
+                    "BB_ABOVE_UPPER" in flags,
+                    "MACD_BEARISH" in flags,
+                    "MACD_TOP_DIV" in flags
                 ])
                 confidence = "高" if overbought_count >= 2 else "中"
+            
+            # Apply YAML Rules dynamically
+            rules = self.risk_params.get('signal_rules', [])
+            for rule in rules:
+                triggers = rule.get('triggers', [])
+                if signal not in triggers:
+                    continue
+                
+                cond_all = rule.get('conditions_all', [])
+                cond_any = rule.get('conditions_any', [])
+                
+                match_all = True
+                if cond_all:
+                    match_all = all(c in flags for c in cond_all)
+                    
+                match_any = True
+                if cond_any:
+                    match_any = any(c in flags for c in cond_any)
+                
+                if match_all and match_any:
+                    new_signal = rule.get('result', '')
+                    if new_signal:
+                        signal = new_signal
 
-            elif signal in ("WATCH", "OBSERVED"):
-                if macd_trend == "GOLDEN_CROSS" and rsi < 50:
-                    confidence = "低"
-                elif macd_trend in ("BEARISH", "DEATH_CROSS"):
-                    confidence = "高"
+                    new_confidence = rule.get('confidence', '')
+                    if new_confidence:
+                        confidence = new_confidence
+
+                    logger.debug(f"Rule [{rule.get('name')}] fired for [{name}]: signal={signal}, confidence={confidence}")
+                    break # First-match-wins: stop after first matching rule
 
             stock['signal'] = signal
             stock['confidence'] = confidence
-            stock['tech_summary'] = _build_tech_summary(macd_data, rsi, bb_data, bias, volume_ratio)
+            stock['tech_summary'] = _build_tech_summary(stock)
 
             # T+1 Check
             if holdings and code in holdings:
