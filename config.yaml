@@ -280,8 +280,8 @@ prompts:
           "code": "string",
           "name": "string",
           "signal": "DANGER|WARNING|WATCH|OBSERVED|SAFE|OVERBOUGHT|LIMIT_UP|LIMIT_DOWN",
-          "action": "DANGER|WATCH|HOLD (向后兼容)",
-          "operation": "string (具体: 减仓/做T/锁仓/观望/无法操作-涨停/无法操作-跌停)",
+          "action": "DANGER|WATCH|HOLD|BUY",
+          "operation": "string (具体: 减仓/清仓/做T/锁仓/观望/加仓/建仓)",
           "reason": "string (核心逻辑：必须包含'量/价/线/指标'四要素，引用Tech字段数据)",
           "news_impact": "string"
         }

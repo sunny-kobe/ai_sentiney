@@ -30,13 +30,15 @@ class MiddayAction(BaseModel):
     @classmethod
     def normalize_action(cls, v: str) -> str:
         valid = {'DANGER', 'WARNING', 'WATCH', 'OBSERVED', 'SAFE', 'OVERBOUGHT',
-                 'HOLD', 'LIMIT_UP', 'LIMIT_DOWN', 'LOCKED_DANGER', 'N/A'}
+                 'HOLD', 'BUY', 'LIMIT_UP', 'LIMIT_DOWN', 'LOCKED_DANGER', 'N/A'}
         v_upper = v.upper()
         if v_upper in valid:
             return v_upper
         # 尝试模糊匹配
-        if '危' in v or '卖' in v or 'SELL' in v_upper:
+        if '危' in v or '卖' in v or 'SELL' in v_upper or '减仓' in v:
             return 'DANGER'
+        if '买' in v or '加仓' in v or '建仓' in v:
+            return 'BUY'
         if '观' in v or '看' in v:
             return 'WATCH'
         return 'HOLD'
