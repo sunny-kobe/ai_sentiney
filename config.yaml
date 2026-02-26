@@ -7,7 +7,7 @@ system:
   # proxy: "http://127.0.0.1:7890"
 
 ai:
-  model_name: "gemini-3-pro-preview" # Corrected to available preview model
+  model_name: "gemini-3.1-pro-preview" # Updated to newest 3.1 model
 
 api_keys:
   # Using env vars is recommended, but supporting config file for ease of use in local env
