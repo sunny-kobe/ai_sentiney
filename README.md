@@ -1,264 +1,222 @@
-# Project Sentinel: A 股智能投顾系统
+# Project Sentinel / A股 AI 投研哨兵
 
-![Python](https://img.shields.io/badge/Python-3.9%2B-blue)
-![License](https://img.shields.io/badge/License-MIT-green)
-![Gemini](https://img.shields.io/badge/AI-Google%20Gemini%20Pro-orange)
-![Resilience](https://img.shields.io/badge/Resilience-Dual%20Source-green)
+<p align="center">
+  <a href="https://github.com/sunny-kobe/ai_sentiney/stargazers"><img src="https://img.shields.io/github/stars/sunny-kobe/ai_sentiney?style=for-the-badge" alt="stars" /></a>
+  <a href="https://github.com/sunny-kobe/ai_sentiney/network/members"><img src="https://img.shields.io/github/forks/sunny-kobe/ai_sentiney?style=for-the-badge" alt="forks" /></a>
+  <a href="https://github.com/sunny-kobe/ai_sentiney/issues"><img src="https://img.shields.io/github/issues/sunny-kobe/ai_sentiney?style=for-the-badge" alt="issues" /></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-1f883d?style=for-the-badge" alt="license" /></a>
+</p>
 
-**Project Sentinel** 是一个运行在本地的"全栈式 AI 投顾助理"。它不是自动交易软件，而是你的**情报官 (Intelligence Officer)** 和 **风控官 (Risk Officer)**。
+> 一个面向 A 股投资者和开发者的开源 AI 分析系统：
+> 自动采集行情与新闻，生成午盘/收盘/盘前策略，支持飞书推送、问答追问、趋势分析和 WebUI。
 
-它利用 Python 采集 A 股实时行情与新闻，结合 Google Gemini 的长文本分析能力，为您提供理性、客观的午间风控预警和收盘复盘报告，并通过飞书 (Feishu/Lark) 第一时间推送到您的手机。
+## Navigation / 导航
 
-同时，它也是一个 **OpenClaw Skill**，支持通过飞书群聊进行自然语言交互式追问和趋势分析。
+- 中文：`Why This Project` / `30 秒看效果` / `Quick Start` / `Q&A` / `Roadmap`
+- English: `Why This Project` / `30s Demo` / `Quick Start` / `Q&A` / `Roadmap`
 
----
+## Showcase
 
-## 核心痛点解决
+CLI Preview:
 
-1.  **拒绝数据碎片化**: 自动聚合行情软件、财联社电报、个股公告，无需手动刷新。
-2.  **克服决策情绪化**: 依靠代码逻辑（如动态 MA20 生命线、量价分析）强制进行冷酷的买卖判断。
-3.  **消除信息不对称**: 利用 Gemini 识别新闻背后的真伪，区分"杀估值"与"错杀"。
-4.  **数据源高可用**: 采用 **双源热备 (Dual Source Strategy)**，确保在单一数据源挂掉时仍能正常工作。
+![CLI Preview](./assets/preview-cli.svg)
 
-## 功能特性
+WebUI Preview:
 
-- **韧性数据采集 (Resilient Collection)**:
-  - **三源热备**: 采用 **Tencent (腾讯)** 作为首选源，**Efinance** 和 **AkShare** 作为二级备用。
-  - **智能路由**: 当首选源超时或失败时，自动无缝切换至备用源，确保数据高可用。
-  - **超时熔断**: 为所有网络请求内置 30秒 熔断机制，防止任务挂起。
-  - **全维覆盖**: 实时行情、北向资金、财联社电报 (>500字长文自动摘要)。
-- **动态指标计算**:
-  - 独创 **实时均线拼接 (Real-time MA Stitching)** 算法，盘中即可计算当日 MA20，解决数据延迟问题。
-  - 自动计算乖离率 (Bias)，作为趋势判断辅助。
-- **Gemini 智能分析**:
-  - **盘前战备 (Morning Brief)**: 08:00 运行，扫描隔夜外盘（美股/大宗/美债），推演对 A 股持仓的影响，给出开盘策略。
-  - **午间哨兵 (Midday Check)**: 11:40 运行，判断下午开盘策略（DANGER/WATCH/HOLD）。
-  - **收盘复盘 (Close Review)**: 15:10 运行，总结全天行情，利用 AI 生成明日支撑/压力位及操作建议。
-  - **智能追问 (Q&A)**: 基于缓存数据回答用户关于个股、板块的追问。
-  - **趋势分析 (Trend)**: 自动检测趋势关键词，加载多日历史数据进行中短期趋势研判。
-- **全球市场联动**:
-  - 自动采集美股三大指数（S&P500/NASDAQ/道琼斯）、恒生指数、美元指数。
-  - 追踪大宗商品期货（黄金/白银/铜/原油）与美债收益率（2Y/10Y/利差）。
-  - 智能映射：外盘变动 → A 股持仓影响（如黄金涨 → 利好 159934/601899）。
-- **飞书实时推送**:
-  - 图文并茂的卡片消息，支持红涨绿跌展示。
-  - 推送由 `--publish` 显式控制，默认仅输出到终端。
-- **OpenClaw Skill 集成**:
-  - 注册为 OpenClaw Skill 后，可通过飞书群聊 @bot 进行自然语言交互。
-  - 支持聊天式追问："黄金ETF今天怎么样"、"最近一周市场走势"。
-- **轻量级 WebUI**:
-  - 内置零依赖 Dashboard (`http://localhost:8000`)。
-  - 支持查看监控列表、手动触发 AI 分析、健康状态检查。
+![WebUI Preview](./assets/preview-webui.svg)
 
-## 技术栈
+## Why This Project
 
-- **语言**: Python 3.9+
-- **数据源**: Tencent (Primary), Efinance (Secondary), AkShare (Fallback)
-- **AI 引擎**: Google Gemini Pro (`google-generativeai`)
-- **消息推送**: Feishu Webhook
-- **聊天集成**: [OpenClaw](https://github.com/nicepkg/openclaw) (可选)
-- **Web 服务**: Python `http.server` (Zero dependency)
-- **持久化**: SQLite
+你不需要再在行情软件、新闻流、群消息之间来回切换。
 
-## 快速开始
+`Project Sentinel` 的核心目标是把这件事自动化：
+- 采集层：多数据源容灾（Tencent -> Efinance -> AkShare）
+- 计算层：技术指标 + 规则信号 + 命中追踪
+- 分析层：Gemini 生成结构化结论
+- 触达层：终端 / JSON / 飞书 / WebUI
 
-### 1. 环境准备
+一句话：**不是自动交易，而是自动生成“可执行的下一步动作”。**
 
-确保您的本地环境已安装 Python 3.9 或更高版本。
+## 30 秒看效果
 
-### 2. 克隆项目
+```bash
+python -m src.main --mode midday
+```
+
+示例输出（节选）：
+
+```text
+=== 午盘分析 ===
+情绪: 分歧 (缩量整固)
+量能: 缩量阴跌 (买盘匮乏)
+指数: 上证指数 +0.142% / 深证成指 +0.074% / 创业板指 -0.258%
+  [510500] 中证500ETF | 信号:WATCH | 操作:观望
+  [563300] 中证2000ETF | 信号:SAFE  | 操作:锁仓
+```
+
+## Features
+
+- 三时段自动分析：`morning` / `midday` / `close`
+- 多源容灾采集：单一数据源异常时自动切换
+- 指标引擎：MA、MACD、RSI、BOLL、KDJ、ATR、OBV 等
+- 信号追踪：对昨日信号做命中回溯与统计
+- 智能追问：基于缓存上下文做二次问答（`--ask`）
+- 趋势分析：自动识别“最近一周/本月走势”等问题
+- 推送与展示：飞书卡片 + 本地 WebUI
+- 可扩展：清晰的 source / processor / analyst 分层
+
+## Quick Start
+
+### 1. 克隆项目
 
 ```bash
 git clone https://github.com/sunny-kobe/ai_sentiney.git
 cd ai_sentiney
 ```
 
-### 3. 安装依赖
-
-建议使用虚拟环境：
+### 2. 安装依赖
 
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate  # macOS/Linux
-# .venv\Scripts\activate   # Windows
-
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 4. 配置环境
-
-复制配置模板并填入您的密钥：
+### 3. 配置密钥
 
 ```bash
 cp .env.example .env
 ```
 
-编辑 `.env` 文件：
+编辑 `.env`：
 
 ```ini
-# Gemini API Key (申请地址: https://aistudio.google.com/app/apikey)
 GEMINI_API_KEY=your_gemini_api_key_here
-
-# 飞书机器人 Webhook (飞书群 -> 设置 -> 群机器人 -> 自定义机器人)
 FEISHU_WEBHOOK=https://open.feishu.cn/open-apis/bot/v2/hook/your_webhook_id
 ```
 
-### 5. 配置持仓
+### 4. 配置持仓
 
-编辑 `config.yaml` 文件，在 `portfolio` 列表中添加您关注的股票或 ETF。
+编辑 `config.yaml` 中的 `portfolio` 列表。
 
-```yaml
-portfolio:
-  - code: "600519"
-    name: "贵州茅台"
-    cost: 1700.0
-    strategy: "value" # 策略标签: value(价值) / trend(趋势)
-
-  - code: "300750"
-    name: "宁德时代"
-    cost: 180.0
-    strategy: "trend"
-```
-
-### 6. 网络代理 (Optional)
-
-如果您处于受限网络环境，可以在 `config.yaml` 中配置全局代理：
-
-```yaml
-system:
-  proxy: "http://127.0.0.1:7890"
-```
-
-## 运行指南
-
-### 定时分析模式
+### 5. 运行
 
 ```bash
-# 盘前战备 (建议 08:00)
-python -m src.main --mode morning
-
-# 午间风控 (建议 11:40)
+# 午盘分析（默认最常用）
 python -m src.main --mode midday
 
-# 收盘复盘 (建议 15:10)
+# 收盘复盘
 python -m src.main --mode close
-```
 
-### 推送到飞书
+# 盘前简报
+python -m src.main --mode morning
 
-默认情况下，分析结果仅输出到终端。加 `--publish` 推送飞书卡片消息：
-
-```bash
+# 推送到飞书
 python -m src.main --mode midday --publish
+
+# JSON 输出（便于二次开发）
+python -m src.main --mode midday --output json
 ```
 
-### 智能追问 (Q&A)
-
-基于最近一次分析的缓存数据，向 AI 提问：
+## Q&A / 趋势追问
 
 ```bash
-# 追问最近一次分析
+# 基于最近一次缓存追问
 python -m src.main --ask "黄金ETF今天怎么样"
 
-# 追问指定日期的收盘分析
+# 指定日期 + 模式追问
 python -m src.main --ask "半导体板块情况如何" --date 2026-02-07 --mode close
-```
 
-### 趋势分析
-
-包含"趋势/走势/一周/最近"等关键词时，自动加载多日历史数据进行趋势研判：
-
-```bash
-# 一周趋势
+# 趋势问题（自动走多日上下文）
 python -m src.main --ask "最近一周市场走势如何"
-
-# 一个月趋势
-python -m src.main --ask "这个月持仓表现怎么样"
 ```
 
-### 其他参数
-
-| 参数 | 说明 |
-|------|------|
-| `--mode {midday,close,morning}` | 分析模式 (默认: midday) |
-| `--publish` | 推送到飞书 (默认不推) |
-| `--dry-run` | 试运行，不调 API 不发消息 |
-| `--replay` | 使用上次缓存数据重新分析 |
-| `--output {text,json}` | 输出格式 (默认: text) |
-| `--ask "问题"` | 追问模式 |
-| `--date YYYY-MM-DD` | 指定日期 |
-| `--webui` | 启动 WebUI |
-
-### WebUI 管理界面
+## WebUI
 
 ```bash
 python -m src.main --webui
 ```
 
-访问 `http://localhost:8000`：Dashboard、手动触发分析、健康检查。
+打开 `http://localhost:8000`
 
-## OpenClaw Skill 集成
+支持：
+- 健康检查
+- 手动触发分析
+- 基础配置编辑
 
-本项目可作为 [OpenClaw](https://github.com/nicepkg/openclaw) 的 Skill 插件运行，实现通过飞书群聊自然语言交互。
+## CLI 参数
 
-### 接入方式
+| 参数 | 说明 |
+|---|---|
+| `--mode {midday,close,morning}` | 分析模式 |
+| `--publish` | 推送飞书（默认不推） |
+| `--dry-run` | 试运行，不调昂贵 API |
+| `--replay` | 使用历史缓存重放分析 |
+| `--output {text,json}` | 输出格式 |
+| `--ask "问题"` | 进入追问模式 |
+| `--date YYYY-MM-DD` | 指定日期上下文 |
+| `--webui` | 启动 WebUI |
 
-1. 安装 OpenClaw: `npm install -g openclaw@latest`
-2. 将项目注册为 Skill:
-   ```bash
-   ln -s /path/to/ai_sentiney ~/.openclaw/skills/sentinel
-   ```
-3. 启动 gateway: `openclaw gateway`
-4. 在飞书群 @bot 发送消息即可触发
+## Architecture
 
-### 支持的聊天指令
-
-| 消息示例 | 触发行为 |
-|---------|---------|
-| "跑一下午盘分析" | 执行午盘分析并返回结果 |
-| "黄金ETF今天怎么样" | 基于缓存数据追问 AI |
-| "最近一周市场走势" | 多日趋势分析 |
-| "把分析推到飞书" | 执行分析并推送飞书卡片 |
-
-## 自动化部署
-
-### GitHub Actions (推荐)
-
-项目自带 GitHub Actions 工作流 (`.github/workflows/daily_sentinel.yml`)，交易日自动运行：
-
-- Morning: 08:00 CST (Mon-Fri)
-- Midday: 11:40 CST (Mon-Fri)
-- Close: 15:10 CST (Mon-Fri)
-
-需在 GitHub Repo Settings → Secrets 中配置 `GEMINI_API_KEY` 和 `FEISHU_WEBHOOK`。
-
-### Crontab (本地部署)
-
-```bash
-crontab -e
+```text
+src/
+  collector/   # 数据采集与多源容灾
+  processor/   # 指标计算、信号生成、命中追踪
+  analyst/     # Gemini 分析与结构化输出
+  reporter/    # 飞书推送
+  service/     # 主流程编排
+  web/         # 轻量 WebUI
 ```
 
-```bash
-# 交易日周一到周五 (假设项目路径为 /root/ai_sentiney)
-30 8  * * 1-5 cd /root/ai_sentiney && .venv/bin/python -m src.main --mode morning --publish >> logs/cron.log 2>&1
-40 11 * * 1-5 cd /root/ai_sentiney && .venv/bin/python -m src.main --mode midday  --publish >> logs/cron.log 2>&1
-10 15 * * 1-5 cd /root/ai_sentiney && .venv/bin/python -m src.main --mode close   --publish >> logs/cron.log 2>&1
-```
+## Why Star This Repo
 
-## 开发者指南
+- 不是 demo：有完整数据链路、容灾、回放、推送、问答
+- 可直接改造：适合作为你的 AI 投研底座
+- 结构清晰：易于接入新数据源、新策略、新推送渠道
+- 对开源友好：MIT 协议，欢迎 Fork 二次开发
 
-```bash
-# 运行全链路测试
-PYTHONPATH=. .venv/bin/python tests/verify_full_flow.py
-```
+如果这个项目对你有帮助，欢迎点一个 Star。
 
-## 免责声明 (Disclaimer)
+## Good First Issues
 
-1.  **本项目仅供学习与技术研究使用**。
-2.  也就是作者写来自己玩的，**不构成任何投资建议**。
-3.  股市有风险，入市需谨慎。根据本系统生成的报告进行交易产生的盈亏，**作者概不负责**。
-4.  请遵守当地法律法规。
+适合首次贡献者：
+- [迁移 `google-generativeai` 到 `google.genai`（保持接口兼容）](https://github.com/sunny-kobe/ai_sentiney/issues)
+- [为 WebUI 增加只读模式和简单鉴权](https://github.com/sunny-kobe/ai_sentiney/issues)
+- [补充 `--replay` 与 `--ask` 的集成测试](https://github.com/sunny-kobe/ai_sentiney/issues)
+- [新增 Dockerfile 与 `docker-compose` 快速部署](https://github.com/sunny-kobe/ai_sentiney/issues)
+
+如果你愿意认领其中一个方向，欢迎先提一个 Issue 或 Draft PR。
+
+## Automation
+
+仓库内置 GitHub Actions 定时任务（交易日时段）用于自动运行与数据落库，详见：
+- `.github/workflows/daily_sentinel.yml`
+
+## Roadmap
+
+- [ ] 迁移到新版 `google.genai` SDK（替代 `google-generativeai`）
+- [ ] 增加回测与信号评估报告导出
+- [ ] 增加更多推送渠道（企业微信 / Telegram）
+- [ ] 提供 Docker 一键部署
+- [ ] 提供更完整的 API 文档与前端展示
+
+## Contributing
+
+欢迎 Issue / PR。建议先读：
+- `CONTRIBUTING.md`
+
+你可以从这些方向开始：
+- 接入新数据源
+- 新增或改进技术指标
+- 优化提示词与分析结果结构
+- 增强 UI / API / 自动化部署
+
+## Disclaimer
+
+本项目仅用于学习与研究，不构成任何投资建议。
+市场有风险，决策需独立判断，自行承担风险。
 
 ## License
 
-MIT License
+[MIT](./LICENSE)

@@ -1,0 +1,33 @@
+<svg width="1200" height="640" viewBox="0 0 1200 640" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Project Sentinel WebUI Preview">
+  <defs>
+    <linearGradient id="bg2" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f8fafc"/>
+      <stop offset="100%" stop-color="#e2e8f0"/>
+    </linearGradient>
+    <linearGradient id="hero" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#0369a1"/>
+      <stop offset="100%" stop-color="#0f766e"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="640" fill="url(#bg2)"/>
+  <rect x="30" y="28" width="1140" height="84" rx="14" fill="url(#hero)"/>
+  <text x="62" y="80" fill="#ffffff" font-family="Segoe UI,Helvetica,Arial,sans-serif" font-size="34" font-weight="700">AI Sentinel Dashboard</text>
+
+  <rect x="30" y="132" width="540" height="466" rx="14" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="58" y="180" fill="#0f172a" font-family="Segoe UI,Helvetica,Arial,sans-serif" font-size="28" font-weight="700">Actions</text>
+  <rect x="58" y="204" width="220" height="50" rx="10" fill="#0284c7"/>
+  <text x="85" y="237" fill="#ffffff" font-family="Segoe UI,Helvetica,Arial,sans-serif" font-size="22" font-weight="600">Run Analysis</text>
+  <rect x="58" y="274" width="484" height="300" rx="10" fill="#0f172a"/>
+  <text x="78" y="316" fill="#7dd3fc" font-family="Menlo,Consolas,monospace" font-size="18">{</text>
+  <text x="102" y="348" fill="#cbd5e1" font-family="Menlo,Consolas,monospace" font-size="18">"status": "running",</text>
+  <text x="102" y="380" fill="#cbd5e1" font-family="Menlo,Consolas,monospace" font-size="18">"mode": "midday",</text>
+  <text x="102" y="412" fill="#cbd5e1" font-family="Menlo,Consolas,monospace" font-size="18">"actions": [ ... ]</text>
+  <text x="78" y="444" fill="#7dd3fc" font-family="Menlo,Consolas,monospace" font-size="18">}</text>
+
+  <rect x="600" y="132" width="570" height="466" rx="14" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="628" y="180" fill="#0f172a" font-family="Segoe UI,Helvetica,Arial,sans-serif" font-size="28" font-weight="700">Configuration</text>
+  <rect x="628" y="206" width="514" height="322" rx="10" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="650" y="246" fill="#334155" font-family="Menlo,Consolas,monospace" font-size="18">510500, 512480, 588760, 563300, 159934 ...</text>
+  <rect x="628" y="548" width="190" height="40" rx="10" fill="#0ea5e9"/>
+  <text x="675" y="574" fill="#ffffff" font-family="Segoe UI,Helvetica,Arial,sans-serif" font-size="20" font-weight="600">Save Config</text>
+</svg>
