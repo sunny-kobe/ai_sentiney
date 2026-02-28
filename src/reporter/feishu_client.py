@@ -128,6 +128,7 @@ class FeishuClient:
             # HOLD组 (安全持有)
             "SAFE": "HOLD",
             "HOLD": "HOLD",
+            "BUY": "HOLD", # 买入或加仓放在绿色安全组
             # 涨跌停特殊处理
             "LIMIT_UP": "LIMIT",
             "LIMIT_DOWN": "LIMIT",

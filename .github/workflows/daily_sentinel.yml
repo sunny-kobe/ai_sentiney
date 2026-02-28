@@ -44,7 +44,7 @@ jobs:
           # 03:00 - 05:00 UTC -> Midday
           # 06:00 - 09:00 UTC -> Close
 
-          current_hour=$(date -u +%H)
+          current_hour=$(date -u +%-H)
           echo "Current UTC Hour: $current_hour"
 
           if [ "$current_hour" -lt 2 ]; then
