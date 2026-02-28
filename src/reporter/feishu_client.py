@@ -47,6 +47,8 @@ class FeishuClient:
         market_sentiment = data.get("market_sentiment", "N/A")
         macro_summary = data.get("macro_summary", "暂无大盘点评")
         risk_alert = data.get("risk_alert", "")
+        bull_case = data.get("bull_case", "")
+        bear_case = data.get("bear_case", "")
         actions = data.get("actions", [])
         
         # Pass indices data manually if we can, but usually 'data' is just the AI result.
@@ -95,6 +97,19 @@ class FeishuClient:
                 icon = "✅" if e['result'] == 'HIT' else "❌"
                 sc_text += f"{icon} {e['name']} {e['yesterday_signal']}→{e['today_change']}%\n"
             elements.append({"tag": "div", "text": {"tag": "lark_md", "content": sc_text}})
+            elements.append({"tag": "hr"})
+
+        # Bull/Bear case section
+        if bull_case or bear_case:
+            perspectives = "**⚖️ 多空视角**\n"
+            if bull_case:
+                perspectives += f"> 🟢 **看多逻辑**: {bull_case}\n"
+            if bear_case:
+                perspectives += f"> 🔴 **看空逻辑**: {bear_case}\n"
+            elements.append({
+                "tag": "div",
+                "text": {"tag": "lark_md", "content": perspectives}
+            })
             elements.append({"tag": "hr"})
 
         # 2. Portfolio Grouping (Danger first)
@@ -233,6 +248,15 @@ class FeishuClient:
         else:
             session = "收盘后"
             
+        # Risk disclaimer
+        elements.append({
+            "tag": "div",
+            "text": {
+                "tag": "lark_md",
+                "content": "> ⚠️ 以上分析由AI系统基于技术指标自动生成，不构成投资建议。市场存在不可预测的系统性风险，请结合自身风险承受能力独立决策。"
+            }
+        })
+
         elements.append({
              "tag": "note",
              "elements": [
@@ -431,6 +455,8 @@ class FeishuClient:
         """
         market_summary = data.get("market_summary", "暂无总结")
         market_temperature = data.get("market_temperature", "N/A")
+        bull_case = data.get("bull_case", "")
+        bear_case = data.get("bear_case", "")
         actions = data.get("actions", [])
 
         # Temperature-based color
@@ -453,6 +479,19 @@ class FeishuClient:
             },
             {"tag": "hr"}
         ]
+
+        # Bull/Bear case section
+        if bull_case or bear_case:
+            perspectives = "**⚖️ 多空视角**\n"
+            if bull_case:
+                perspectives += f"> 🟢 **看多逻辑**: {bull_case}\n"
+            if bear_case:
+                perspectives += f"> 🔴 **看空逻辑**: {bear_case}\n"
+            elements.append({
+                "tag": "div",
+                "text": {"tag": "lark_md", "content": perspectives}
+            })
+            elements.append({"tag": "hr"})
 
         # Signal Scorecard Section
         scorecard = data.get('signal_scorecard')
@@ -510,6 +549,15 @@ class FeishuClient:
                 }
             })
         elements.append({"tag": "hr"})
+
+        # Risk disclaimer
+        elements.append({
+            "tag": "div",
+            "text": {
+                "tag": "lark_md",
+                "content": "> ⚠️ 以上分析由AI系统基于技术指标自动生成，不构成投资建议。市场存在不可预测的系统性风险，请结合自身风险承受能力独立决策。"
+            }
+        })
 
         # Footer
         elements.append({

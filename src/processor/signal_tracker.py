@@ -196,6 +196,26 @@ def calculate_rolling_stats(records: List[Dict], days: int = 7) -> Dict:
     }
 
 
+def _compute_risk_stats(by_signal: Dict) -> Dict:
+    """
+    Compute hit rate for risk signals only (excluding SAFE).
+    SAFE signals are easy to hit (next day > -1%) and inflate overall accuracy.
+    Risk signals (DANGER, WARNING, OVERBOUGHT) are the real value of the system.
+    """
+    risk_signals = {'DANGER', 'WARNING', 'OVERBOUGHT'}
+    risk_total = 0
+    risk_hits = 0
+    for sig, stats in by_signal.items():
+        if sig in risk_signals:
+            risk_total += stats.get('total', 0)
+            risk_hits += stats.get('hits', 0)
+    return {
+        'total': risk_total,
+        'hits': risk_hits,
+        'rate': round(risk_hits / risk_total, 2) if risk_total > 0 else 0,
+    }
+
+
 def _empty_stats(days: int) -> Dict:
     return {
         'period_days': days,
@@ -229,6 +249,13 @@ def build_scorecard(yesterday_eval: List[Dict], rolling_stats: Dict) -> Dict:
 
     if total > 0:
         parts.append(f"近{rolling_stats['period_days']}日命中率{int(rate * 100)}%({rolling_stats['hits']}/{total})")
+
+        # 风险信号命中率（DANGER/WARNING/OVERBOUGHT，剥离 SAFE）
+        by_signal = rolling_stats.get('by_signal', {})
+        risk_stats = _compute_risk_stats(by_signal)
+        if risk_stats['total'] > 0:
+            parts.append(f"风险信号{int(risk_stats['rate'] * 100)}%({risk_stats['hits']}/{risk_stats['total']})")
+        rolling_stats['risk_stats'] = risk_stats
 
         # 高置信度命中率
         high_conf = rolling_stats.get('by_confidence', {}).get('高', {})

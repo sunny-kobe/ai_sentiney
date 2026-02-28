@@ -49,6 +49,8 @@ class MiddayAnalysis(BaseModel):
     market_sentiment: str = Field(default="未知")
     volume_analysis: str = Field(default="")
     macro_summary: str = Field(default="暂无大盘点评")
+    bull_case: str = Field(default="")
+    bear_case: str = Field(default="")
     actions: List[MiddayAction] = Field(default_factory=list)
 
 
@@ -66,6 +68,8 @@ class CloseAnalysis(BaseModel):
     """收盘复盘结果"""
     market_summary: str = Field(default="暂无总结")
     market_temperature: str = Field(default="未知")
+    bull_case: str = Field(default="")
+    bear_case: str = Field(default="")
     actions: List[CloseAction] = Field(default_factory=list)
 
 

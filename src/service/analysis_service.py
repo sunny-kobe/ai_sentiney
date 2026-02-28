@@ -12,7 +12,7 @@ from src.processor.data_processor import DataProcessor
 from src.analyst.gemini_client import GeminiClient
 from src.reporter.feishu_client import FeishuClient
 from src.storage.database import SentinelDB
-from src.processor.signal_tracker import evaluate_yesterday, calculate_rolling_stats, build_scorecard
+from src.processor.signal_tracker import evaluate_yesterday, calculate_rolling_stats, build_scorecard, _compute_risk_stats
 
 class AnalysisService:
     def __init__(self):
@@ -379,6 +379,10 @@ class AnalysisService:
             if total == 0:
                 return [f"**{label}**: 数据不足，暂无统计"]
             parts = [f"**{label}**: 命中率 {int(stats['hit_rate']*100)}% ({stats['hits']}/{total})"]
+            # 风险信号命中率（剥离SAFE）
+            risk = _compute_risk_stats(stats.get('by_signal', {}))
+            if risk['total'] > 0:
+                parts.append(f"  - 风险信号(DANGER/WARNING/OVERBOUGHT): {int(risk['rate']*100)}% ({risk['hits']}/{risk['total']})")
             for conf, cs in stats.get('by_confidence', {}).items():
                 if cs['total'] > 0:
                     parts.append(f"  - {conf}置信度: {int(cs['rate']*100)}% ({cs['hits']}/{cs['total']})")
