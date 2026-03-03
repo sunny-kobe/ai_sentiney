@@ -97,7 +97,8 @@ def entry_point():
     parser.add_argument('--dry-run', action='store_true', help='Run without calling expensive APIs or sending notifications')
     parser.add_argument('--replay', action='store_true', help='Replay analysis using last saved data')
     parser.add_argument('--webui', action='store_true', help='Start WebUI server')
-    parser.add_argument('--publish', action='store_true', help='Push results to Feishu (default: no push)')
+    parser.add_argument('--publish', action='store_true', help='Push results to configured channel (default: no push)')
+    parser.add_argument('--publish-target', type=str, default='feishu', choices=['feishu', 'telegram'], help='Publish destination')
     parser.add_argument('--output', type=str, default='text', choices=['text', 'json'], help='Output format')
     parser.add_argument('--ask', type=str, default=None, help='Ask a follow-up question about cached analysis')
     parser.add_argument('--date', type=str, default=None, help='Target date (YYYY-MM-DD) for analysis or Q&A')
@@ -132,7 +133,8 @@ def entry_point():
             mode=args.mode,
             dry_run=args.dry_run,
             replay=args.replay,
-            publish=args.publish
+            publish=args.publish,
+            publish_target=args.publish_target
         ))
         if args.output == 'json':
             print(json.dumps(result, ensure_ascii=False))

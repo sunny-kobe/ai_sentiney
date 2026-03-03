@@ -24,8 +24,8 @@ cd /Users/lan/Desktop/code/ai_sentiney && source .venv/bin/activate && python -m
 # 早报
 cd /Users/lan/Desktop/code/ai_sentiney && source .venv/bin/activate && python -m src.main --mode morning
 
-# 生成并推送到飞书
-cd /Users/lan/Desktop/code/ai_sentiney && source .venv/bin/activate && python -m src.main --mode midday --publish
+# 生成并推送到 Telegram
+cd /Users/lan/Desktop/code/ai_sentiney && source .venv/bin/activate && python -m src.main --mode midday --publish --publish-target telegram
 
 # JSON 格式输出（供程序消费）
 cd /Users/lan/Desktop/code/ai_sentiney && source .venv/bin/activate && python -m src.main --mode midday --output json
@@ -57,7 +57,7 @@ cd /Users/lan/Desktop/code/ai_sentiney && source .venv/bin/activate && python -m
 ## 使用场景
 
 **⚠️ 核心路由规则（必须严格遵守）**:
-- 只有用户**明确要求"跑分析/生成报告/推送飞书"**时，才执行 `--mode` 命令
+- 只有用户**明确要求"跑分析/生成报告/推送"**时，才执行 `--mode` 命令
 - **所有其他问题**（包括追问、评价、询问准确率、闲聊等）一律使用 `--ask "用户的原始问题"` 转发给 Sentinel CLI
 - **禁止**自行编造回答来代替 CLI 输出。必须执行命令并将 stdout 原样返回给用户
 - 当不确定该用哪个命令时，默认使用 `--ask`
@@ -68,17 +68,17 @@ cd /Users/lan/Desktop/code/ai_sentiney && source .venv/bin/activate && python -m
 - "跑一下午盘分析"
 - "生成收盘复盘"
 - "早报分析一下"
-- "推送到飞书"
 
 执行：`cd /Users/lan/Desktop/code/ai_sentiney && source .venv/bin/activate && python -m src.main --mode midday`
 
-### 推送飞书
+### 推送 Telegram
 
 当用户说：
-- "把分析推到飞书"
+- "把分析推到 Telegram"
+- "推送到 Telegram"
 - "发一下午盘报告"
 
-执行：`cd /Users/lan/Desktop/code/ai_sentiney && source .venv/bin/activate && python -m src.main --mode midday --publish`
+执行：`cd /Users/lan/Desktop/code/ai_sentiney && source .venv/bin/activate && python -m src.main --mode midday --publish --publish-target telegram`
 
 ### 所有其他问题（追问、准确率、评价、闲聊等）
 

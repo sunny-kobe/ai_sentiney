@@ -64,8 +64,11 @@ class AkshareSource(DataSource):
 
     def _get_tencent_symbol(self, code: str) -> str:
         """Helper to convert 600xxx -> sh600xxx"""
-        if code.startswith('6'): return f"sh{code}"
-        if code.startswith('0') or code.startswith('3'): return f"sz{code}"
+        # SH: 6 (A shares), 5 (ETFs)
+        if code.startswith('6') or code.startswith('5'): return f"sh{code}"
+        # SZ: 0 (A shares), 3 (ChiNext), 1 (ETFs)
+        if code.startswith('0') or code.startswith('3') or code.startswith('1'): return f"sz{code}"
+        # BJ: 4, 8 (BSE)
         if code.startswith('4') or code.startswith('8'): return f"bj{code}"
         raise ValueError(f"Unsupported stock code format for Tencent API: {code}")
 

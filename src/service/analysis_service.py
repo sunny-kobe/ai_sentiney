@@ -11,6 +11,7 @@ from src.collector.data_fetcher import DataCollector
 from src.processor.data_processor import DataProcessor
 from src.analyst.gemini_client import GeminiClient
 from src.reporter.feishu_client import FeishuClient
+from src.reporter.telegram_client import TelegramClient
 from src.storage.database import SentinelDB
 from src.processor.signal_tracker import evaluate_yesterday, calculate_rolling_stats, build_scorecard, _compute_risk_stats
 
@@ -183,7 +184,14 @@ class AnalysisService:
 
         return analysis_result
 
-    async def run_analysis(self, mode: str, dry_run: bool = False, replay: bool = False, publish: bool = False) -> Dict:
+    async def run_analysis(
+        self,
+        mode: str,
+        dry_run: bool = False,
+        replay: bool = False,
+        publish: bool = False,
+        publish_target: str = "feishu"
+    ) -> Dict:
         """
         Runs the full analysis pipeline.
         Returns the analysis result dict.
@@ -273,18 +281,27 @@ class AnalysisService:
             return {"error": f"AI Analysis Failed: {e}"}
 
         # --- Step 3: Reporting ---
-        reporter = FeishuClient()
         if dry_run:
-            logger.info("Dry Run Mode: Skipping Feishu Push.")
+            logger.info("Dry Run Mode: Skipping push.")
         elif publish:
-            if mode == 'midday':
-                reporter.send_card(analysis_result)
-            elif mode == 'close':
-                reporter.send_close_card(analysis_result)
-            elif mode == 'morning':
-                reporter.send_morning_card(analysis_result)
+            if publish_target == "telegram":
+                reporter = TelegramClient()
+                if mode == 'midday':
+                    reporter.send_midday_report(analysis_result)
+                elif mode == 'close':
+                    reporter.send_close_report(analysis_result)
+                elif mode == 'morning':
+                    reporter.send_morning_report(analysis_result)
+            else:
+                reporter = FeishuClient()
+                if mode == 'midday':
+                    reporter.send_card(analysis_result)
+                elif mode == 'close':
+                    reporter.send_close_card(analysis_result)
+                elif mode == 'morning':
+                    reporter.send_morning_card(analysis_result)
         else:
-            logger.info("Publish not requested: Skipping Feishu Push.")
+            logger.info("Publish not requested: Skipping push.")
 
         # --- Step 4: Persistence ---
         if not dry_run or (dry_run and replay):

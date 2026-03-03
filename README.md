@@ -93,6 +93,8 @@ cp .env.example .env
 ```ini
 GEMINI_API_KEY=your_gemini_api_key_here
 FEISHU_WEBHOOK=https://open.feishu.cn/open-apis/bot/v2/hook/your_webhook_id
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
+TELEGRAM_CHAT_ID=your_telegram_chat_id_here
 ```
 
 ### 4. 配置持仓
@@ -111,8 +113,11 @@ python -m src.main --mode close
 # 盘前简报
 python -m src.main --mode morning
 
-# 推送到飞书
+# 推送到飞书（默认）
 python -m src.main --mode midday --publish
+
+# 推送到 Telegram
+python -m src.main --mode midday --publish --publish-target telegram
 
 # JSON 输出（便于二次开发）
 python -m src.main --mode midday --output json
@@ -149,7 +154,8 @@ python -m src.main --webui
 | 参数 | 说明 |
 |---|---|
 | `--mode {midday,close,morning}` | 分析模式 |
-| `--publish` | 推送飞书（默认不推） |
+| `--publish` | 推送到发布渠道（默认不推） |
+| `--publish-target {feishu,telegram}` | 推送目标（默认 feishu） |
 | `--dry-run` | 试运行，不调昂贵 API |
 | `--replay` | 使用历史缓存重放分析 |
 | `--output {text,json}` | 输出格式 |
@@ -164,7 +170,7 @@ src/
   collector/   # 数据采集与多源容灾
   processor/   # 指标计算、信号生成、命中追踪
   analyst/     # Gemini 分析与结构化输出
-  reporter/    # 飞书推送
+  reporter/    # 推送渠道（飞书 / Telegram）
   service/     # 主流程编排
   web/         # 轻量 WebUI
 ```

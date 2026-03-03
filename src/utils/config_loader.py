@@ -34,9 +34,13 @@ class ConfigLoader:
             # but simple string replacement works for our defined keys.
             gemini_key = os.getenv("GEMINI_API_KEY", "")
             feishu_webhook = os.getenv("FEISHU_WEBHOOK", "")
+            telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+            telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
             
             content = content.replace("${GEMINI_API_KEY}", gemini_key)
             content = content.replace("${FEISHU_WEBHOOK}", feishu_webhook)
+            content = content.replace("${TELEGRAM_BOT_TOKEN}", telegram_bot_token)
+            content = content.replace("${TELEGRAM_CHAT_ID}", telegram_chat_id)
             
             self._config: Dict[str, Any] = {}
             self._config.update(yaml.safe_load(content))
