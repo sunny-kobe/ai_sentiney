@@ -56,6 +56,20 @@ def evaluate_signal(signal: str, next_day_pct: float) -> str:
             return 'MISS'
         return 'NEUTRAL'
 
+    if signal == 'OPPORTUNITY':
+        if next_day_pct > 1.0:
+            return 'HIT'
+        elif next_day_pct < -1.0:
+            return 'MISS'
+        return 'NEUTRAL'
+
+    if signal == 'ACCUMULATE':
+        if next_day_pct > 0:
+            return 'HIT'
+        elif next_day_pct < -1.5:
+            return 'MISS'
+        return 'NEUTRAL'
+
     return 'NEUTRAL'
 
 
@@ -216,6 +230,25 @@ def _compute_risk_stats(by_signal: Dict) -> Dict:
     }
 
 
+def _compute_buy_stats(by_signal: Dict) -> Dict:
+    """
+    Compute hit rate for buy signals (OPPORTUNITY/ACCUMULATE).
+    Symmetric to _compute_risk_stats for sell signals.
+    """
+    buy_signals = {'OPPORTUNITY', 'ACCUMULATE'}
+    buy_total = 0
+    buy_hits = 0
+    for sig, stats in by_signal.items():
+        if sig in buy_signals:
+            buy_total += stats.get('total', 0)
+            buy_hits += stats.get('hits', 0)
+    return {
+        'total': buy_total,
+        'hits': buy_hits,
+        'rate': round(buy_hits / buy_total, 2) if buy_total > 0 else 0,
+    }
+
+
 def _empty_stats(days: int) -> Dict:
     return {
         'period_days': days,
@@ -256,6 +289,12 @@ def build_scorecard(yesterday_eval: List[Dict], rolling_stats: Dict) -> Dict:
         if risk_stats['total'] > 0:
             parts.append(f"风险信号{int(risk_stats['rate'] * 100)}%({risk_stats['hits']}/{risk_stats['total']})")
         rolling_stats['risk_stats'] = risk_stats
+
+        # 买入信号命中率（OPPORTUNITY/ACCUMULATE）
+        buy_stats = _compute_buy_stats(by_signal)
+        if buy_stats['total'] > 0:
+            parts.append(f"买入信号{int(buy_stats['rate'] * 100)}%({buy_stats['hits']}/{buy_stats['total']})")
+        rolling_stats['buy_stats'] = buy_stats
 
         # 高置信度命中率
         high_conf = rolling_stats.get('by_confidence', {}).get('高', {})

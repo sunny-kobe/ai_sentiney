@@ -13,7 +13,7 @@ from src.analyst.gemini_client import GeminiClient
 from src.reporter.feishu_client import FeishuClient
 from src.reporter.telegram_client import TelegramClient
 from src.storage.database import SentinelDB
-from src.processor.signal_tracker import evaluate_yesterday, calculate_rolling_stats, build_scorecard, _compute_risk_stats
+from src.processor.signal_tracker import evaluate_yesterday, calculate_rolling_stats, build_scorecard, _compute_risk_stats, _compute_buy_stats
 
 class AnalysisService:
     def __init__(self):
@@ -190,7 +190,7 @@ class AnalysisService:
         dry_run: bool = False,
         replay: bool = False,
         publish: bool = False,
-        publish_target: str = "feishu"
+        publish_target: list = None
     ) -> Dict:
         """
         Runs the full analysis pipeline.
@@ -284,22 +284,28 @@ class AnalysisService:
         if dry_run:
             logger.info("Dry Run Mode: Skipping push.")
         elif publish:
-            if publish_target == "telegram":
-                reporter = TelegramClient()
-                if mode == 'midday':
-                    reporter.send_midday_report(analysis_result)
-                elif mode == 'close':
-                    reporter.send_close_report(analysis_result)
-                elif mode == 'morning':
-                    reporter.send_morning_report(analysis_result)
-            else:
-                reporter = FeishuClient()
-                if mode == 'midday':
-                    reporter.send_card(analysis_result)
-                elif mode == 'close':
-                    reporter.send_close_card(analysis_result)
-                elif mode == 'morning':
-                    reporter.send_morning_card(analysis_result)
+            targets = publish_target or ["feishu"]
+            for target in targets:
+                try:
+                    if target == "telegram":
+                        reporter = TelegramClient()
+                        if mode == 'midday':
+                            reporter.send_midday_report(analysis_result)
+                        elif mode == 'close':
+                            reporter.send_close_report(analysis_result)
+                        elif mode == 'morning':
+                            reporter.send_morning_report(analysis_result)
+                    else:
+                        reporter = FeishuClient()
+                        if mode == 'midday':
+                            reporter.send_card(analysis_result)
+                        elif mode == 'close':
+                            reporter.send_close_card(analysis_result)
+                        elif mode == 'morning':
+                            reporter.send_morning_card(analysis_result)
+                    logger.info(f"Published to {target}")
+                except Exception as e:
+                    logger.error(f"Failed to publish to {target}: {e}")
         else:
             logger.info("Publish not requested: Skipping push.")
 
@@ -400,6 +406,10 @@ class AnalysisService:
             risk = _compute_risk_stats(stats.get('by_signal', {}))
             if risk['total'] > 0:
                 parts.append(f"  - 风险信号(DANGER/WARNING/OVERBOUGHT): {int(risk['rate']*100)}% ({risk['hits']}/{risk['total']})")
+            # 买入信号命中率
+            buy = _compute_buy_stats(stats.get('by_signal', {}))
+            if buy['total'] > 0:
+                parts.append(f"  - 买入信号(OPPORTUNITY/ACCUMULATE): {int(buy['rate']*100)}% ({buy['hits']}/{buy['total']})")
             for conf, cs in stats.get('by_confidence', {}).items():
                 if cs['total'] > 0:
                     parts.append(f"  - {conf}置信度: {int(cs['rate']*100)}% ({cs['hits']}/{cs['total']})")

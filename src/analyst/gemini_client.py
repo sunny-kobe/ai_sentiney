@@ -30,15 +30,18 @@ class MiddayAction(BaseModel):
     @classmethod
     def normalize_action(cls, v: str) -> str:
         valid = {'DANGER', 'WARNING', 'WATCH', 'OBSERVED', 'SAFE', 'OVERBOUGHT',
-                 'HOLD', 'BUY', 'LIMIT_UP', 'LIMIT_DOWN', 'LOCKED_DANGER', 'N/A'}
+                 'HOLD', 'BUY', 'LIMIT_UP', 'LIMIT_DOWN', 'LOCKED_DANGER',
+                 'OPPORTUNITY', 'ACCUMULATE', 'N/A'}
         v_upper = v.upper()
         if v_upper in valid:
             return v_upper
         # 尝试模糊匹配
         if '危' in v or '卖' in v or 'SELL' in v_upper or '减仓' in v:
             return 'DANGER'
+        if '机会' in v or '抄底' in v:
+            return 'OPPORTUNITY'
         if '买' in v or '加仓' in v or '建仓' in v:
-            return 'BUY'
+            return 'OPPORTUNITY'
         if '观' in v or '看' in v:
             return 'WATCH'
         return 'HOLD'
@@ -58,6 +61,7 @@ class CloseAction(BaseModel):
     """收盘个股复盘"""
     code: str
     name: str
+    signal: str = Field(default="N/A")
     today_review: str = Field(default="")
     tomorrow_plan: str = Field(default="")
     support_level: float = Field(default=0.0)

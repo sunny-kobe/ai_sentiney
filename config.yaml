@@ -124,6 +124,20 @@ risk_management:
   #   KDJ_OVERSOLD, KDJ_OVERBOUGHT, KDJ_OVERSOLD_GOLDEN, KDJ_OVERBOUGHT_DEATH,
   #   ATR_HIGH_VOLATILE, ATR_LOW_VOLATILE
   signal_rules:
+    # === 买入侧规则（条件更严格，优先匹配） ===
+    - name: "底背驰反转触底"
+      triggers: ["DANGER", "WARNING"]
+      conditions_all: ["MACD_BOTTOM_DIV", "VOLUME_SHRINK", "OBV_INFLOW"]
+      conditions_any: []
+      result: "OPPORTUNITY"
+      confidence: "高"
+    - name: "超卖金叉反转"
+      triggers: ["DANGER", "WARNING"]
+      conditions_all: ["KDJ_OVERSOLD_GOLDEN", "OBV_INFLOW"]
+      conditions_any: []
+      result: "OPPORTUNITY"
+      confidence: "高"
+    # === 原有降级规则 ===
     - name: "底背驰洗盘降级"
       triggers: ["DANGER"]
       conditions_all: ["MACD_BOTTOM_DIV", "VOLUME_SHRINK"]
@@ -142,6 +156,20 @@ risk_management:
       conditions_any: []
       result: "DANGER"
       confidence: "高"
+    # === 多头买入侧规则 ===
+    - name: "放量突破加仓"
+      triggers: ["SAFE"]
+      conditions_all: ["MACD_GOLDEN_CROSS", "VOLUME_HIGH", "OBV_INFLOW"]
+      conditions_any: []
+      result: "OPPORTUNITY"
+      confidence: "高"
+    - name: "多头蓄势加仓"
+      triggers: ["SAFE"]
+      conditions_all: ["MACD_BULLISH", "OBV_INFLOW", "ATR_LOW_VOLATILE"]
+      conditions_any: []
+      result: "ACCUMULATE"
+      confidence: "中"
+    # === 原有 SAFE 调整规则 ===
     - name: "顶背离超买"
       triggers: ["SAFE"]
       conditions_all: []
@@ -160,6 +188,20 @@ risk_management:
       conditions_any: []
       result: "SAFE"
       confidence: "低"
+    # === 水下买入侧规则 ===
+    - name: "水下底背驰加仓"
+      triggers: ["WATCH", "OBSERVED"]
+      conditions_all: ["MACD_BOTTOM_DIV", "OBV_INFLOW"]
+      conditions_any: []
+      result: "ACCUMULATE"
+      confidence: "高"
+    - name: "超卖企稳加仓"
+      triggers: ["WATCH", "OBSERVED"]
+      conditions_all: ["KDJ_OVERSOLD", "VOLUME_CONTINUOUS_SHRINK"]
+      conditions_any: []
+      result: "ACCUMULATE"
+      confidence: "中"
+    # === 原有水下规则 ===
     - name: "弱势金叉"
       triggers: ["WATCH", "OBSERVED"]
       conditions_all: ["MACD_GOLDEN_CROSS", "RSI_WEAK"]
@@ -256,6 +298,9 @@ prompts:
             *   **CASE A (洗盘回踩)**: 股价跌破 MA20，但成交量显著萎缩，且 **OBV资金平衡或流入**，或出现 **MACD底背驰** -> 判定为**洗盘假摔** -> 建议 `WATCH` (观察能否收回)。
             *   **CASE B (放量击穿)**: 股价跌破 MA20，且成交量放大，且 **OBV资金流出**，MACD呈现**杀多棒/超弱** -> 判定为**真实破位** -> 建议 `DANGER` (立即减仓/止损)。
             *   **CASE C (上涨中继)**: 股价在 MA20 上方震荡，MACD多头且OBV流入 -> 建议 `HOLD`。
+            *   **CASE D (MA20支撑回踩)**: 乖离率在 -1%~+2% 区间（MA20附近），成交量萎缩，且 OBV资金流入或持平 -> 判定为**趋势回踩** -> 建议 `ACCUMULATE`（加仓10%-20%）。若次日放量跌破MA20则加仓判断失效。
+            *   **CASE E (底部反转)**: 股价跌破MA20，但出现 **MACD底背驰** + 量能干枯（连续缩量）+ **OBV资金流入** + **KDJ超卖金叉** -> 判定为**底部反转信号** -> 建议 `OPPORTUNITY`（分批建仓20%-30%）。若次日放量跌破前低则反转判断失效。
+            *   **CASE F (放量突破)**: 股价从下方突破MA20，量比>1.5，且 **MACD金叉** + **OBV资金流入** -> 判定为**放量突破** -> 建议 `OPPORTUNITY`（加仓20%-30%）。若次日缩量回落MA20下方则突破判断失效。
         *   **板块共振**:
             *   若个股跌，但所属板块（如有色、电力）整体强势 -> 错杀机会 -> `WATCH/BUY`。
             *   若个股跌，且板块不仅跌还领跌市场 -> 还要跌 -> `DANGER`。
@@ -282,8 +327,9 @@ prompts:
     在生成 JSON 前，必须在 Markdown 引用块中打印 **策略运算日志**：
     1.  **宏观扫描**: 今天的市场是“杀估值”（大票跌）还是“杀情绪”（小票跌）？
     2.  **量价与能量微雕**: 扫描破位个股的 Tech 摘要，有无 `[底背驰]` 结构？OBV能量是流入还是流出？缩量假摔还是放量真跌？
+    2.5 **机会识别**: 扫描所有个股，有无底背驰+缩量+OBV流入的底部反转结构？有无KDJ超卖金叉？有无放量突破MA20？这些是加仓机会信号（OPPORTUNITY/ACCUMULATE）。
     3.  **博弈推演**: “如果下午不收回MA20，这只票的技术形态是否彻底破坏？”
-    4.  **最终裁决**: 根据上述多维交叉得出 DANGER/WATCH/HOLD/SAFE。
+    4.  **最终裁决**: 根据上述多维交叉得出 DANGER/WATCH/HOLD/SAFE/OPPORTUNITY/ACCUMULATE。
     </thinking_process_protocol>
 
     <output_format>
@@ -298,8 +344,8 @@ prompts:
         {
           "code": "string",
           "name": "string",
-          "signal": "DANGER|WARNING|WATCH|OBSERVED|SAFE|OVERBOUGHT|LIMIT_UP|LIMIT_DOWN",
-          "action": "DANGER|WATCH|HOLD|BUY",
+          "signal": "DANGER|WARNING|WATCH|OBSERVED|SAFE|OVERBOUGHT|OPPORTUNITY|ACCUMULATE|LIMIT_UP|LIMIT_DOWN",
+          "action": "DANGER|WATCH|HOLD|BUY|OPPORTUNITY|ACCUMULATE",
           "operation": "string (具体: 减仓30%-50%/清仓/做T/锁仓/观望/加仓20%-30%/建仓，必须包含比例)",
           "reason": "string (核心逻辑：必须包含'量/价/线/指标'四要素，引用Tech字段数据。当指标矛盾时必须指出)",
           "news_impact": "string"
@@ -314,6 +360,8 @@ prompts:
     - OBSERVED: 刚触及MA20(-1%以内)，密切关注
     - SAFE: MA20上方运行，安全持有
     - OVERBOUGHT: 乖离率超+5%，警惕回调
+    - OPPORTUNITY: 底部反转或放量突破信号，建议分批加仓20%-30%
+    - ACCUMULATE: MA20支撑回踩或超卖企稳，建议温和加仓10%-20%
     - LIMIT_UP: 涨停锁定，无法买入
     - LIMIT_DOWN: 跌停锁定，无法卖出
     </output_format>
@@ -480,7 +528,12 @@ prompts:
             *   `[日线_KDJ_超买_0]` 或 `[日线_KDJ_超买死叉_0]` + 价格创新高 = 顶背离风险提示，需关注是否有量能配合确认。
             *   `[日线_MACD_死叉_无背驰_0]` + `[日线_OBV_资金流出_0]` = 动能衰竭信号，偏空但需观察次日验证。
             *   `[日线_ATR_高波动_0]` = 变盘窗口期，方向取决于接下来的放量方向。
-    3.  **明日剧本**:
+    3.  **机会识别 (Opportunity Detection)**:
+        *   扫描持仓中是否存在底部反转结构：MACD底背驰 + 缩量 + OBV流入 + KDJ超卖金叉 = `OPPORTUNITY`（建议分批建仓20%-30%）。
+        *   MA20附近缩量回踩 + OBV持平/流入 = `ACCUMULATE`（建议加仓10%-20%）。
+        *   放量突破MA20 + MACD金叉 + OBV流入 = `OPPORTUNITY`。
+        *   注意：买入信号必须包含失效条件（如"若次日放量跌破前低则判断失效"）。
+    4.  **明日剧本**:
         *   若今日缩量回调且伴随底背驰 -> 明日强看“反包”。
         *   若今日放量下杀且OBV大幅流出 -> 明日关键看“惯性低开后的绝望承接”。
     </logic_core>
@@ -496,6 +549,7 @@ prompts:
         {
           "code": "string",
           "name": "string",
+          "signal": "DANGER|WARNING|WATCH|OBSERVED|SAFE|OVERBOUGHT|OPPORTUNITY|ACCUMULATE|N/A",
           "today_review": "string (量价与板块表现)",
           "tomorrow_plan": "string (操作计划，必须包含建议仓位比例和失效条件)",
           "support_level": "float (动态计算: 现价*0.98 或 MA20)",

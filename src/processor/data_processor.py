@@ -830,6 +830,22 @@ class DataProcessor:
                     logger.debug(f"Rule [{rule.get('name')}] fired for [{name}]: signal={signal}, confidence={confidence}")
                     break # First-match-wins: stop after first matching rule
 
+            # Buy-side confidence scoring
+            if signal in ("OPPORTUNITY", "ACCUMULATE"):
+                bullish_count = sum([
+                    "MACD_BOTTOM_DIV" in flags,
+                    "MACD_GOLDEN_CROSS" in flags,
+                    "OBV_INFLOW" in flags,
+                    "KDJ_OVERSOLD_GOLDEN" in flags,
+                    "RSI_OVERSOLD" in flags,
+                    "BB_BELOW_LOWER" in flags,
+                    "VOLUME_CONTINUOUS_SHRINK" in flags,
+                ])
+                if signal == "OPPORTUNITY" and bullish_count >= 3:
+                    confidence = "高"
+                elif signal == "ACCUMULATE" and bullish_count >= 2:
+                    confidence = "高"
+
             stock['signal'] = signal
             stock['confidence'] = confidence
             stock['tech_summary'] = _build_tech_summary(stock)

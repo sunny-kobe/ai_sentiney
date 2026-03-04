@@ -1,7 +1,16 @@
 ---
 name: sentinel
-description: A股智能投顾哨兵 - AI驱动的市场分析、追问与趋势研判
-metadata: { 'openclaw': { 'emoji': '🛡️', 'requires': { 'bins': ['python3'] } } }
+description: A股智能投顾哨兵 - AI驱动的市场分析、追问与趋势研判。Use when the user asks about A-share market analysis, Chinese stock/ETF trading signals, portfolio review, or market trends.
+user-invocable: true
+metadata:
+  openclaw:
+    emoji: '🛡️'
+    requires:
+      bins:
+        - python3
+      env:
+        - GEMINI_API_KEY
+    primaryEnv: GEMINI_API_KEY
 ---
 
 # Project Sentinel
@@ -26,6 +35,9 @@ cd /Users/lan/Desktop/code/ai_sentiney && source .venv/bin/activate && python -m
 
 # 生成并推送到 Telegram
 cd /Users/lan/Desktop/code/ai_sentiney && source .venv/bin/activate && python -m src.main --mode midday --publish --publish-target telegram
+
+# 同时推送到飞书和 Telegram
+cd /Users/lan/Desktop/code/ai_sentiney && source .venv/bin/activate && python -m src.main --mode midday --publish --publish-target feishu telegram
 
 # JSON 格式输出（供程序消费）
 cd /Users/lan/Desktop/code/ai_sentiney && source .venv/bin/activate && python -m src.main --mode midday --output json
@@ -79,6 +91,14 @@ cd /Users/lan/Desktop/code/ai_sentiney && source .venv/bin/activate && python -m
 - "发一下午盘报告"
 
 执行：`cd /Users/lan/Desktop/code/ai_sentiney && source .venv/bin/activate && python -m src.main --mode midday --publish --publish-target telegram`
+
+### 同时推送飞书和 Telegram
+
+当用户说：
+- "推送到所有渠道"
+- "飞书和 Telegram 都发"
+
+执行：`cd /Users/lan/Desktop/code/ai_sentiney && source .venv/bin/activate && python -m src.main --mode midday --publish --publish-target feishu telegram`
 
 ### 所有其他问题（追问、准确率、评价、闲聊等）
 

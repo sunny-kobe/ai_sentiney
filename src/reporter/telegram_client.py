@@ -54,8 +54,15 @@ class TelegramClient:
             f"点评: {data.get('macro_summary', 'N/A')}",
         ]
         for action in data.get("actions", [])[:8]:
+            signal = action.get('signal', action.get('action', '')).upper()
+            if signal in ('OPPORTUNITY', 'ACCUMULATE'):
+                prefix = "🟣"
+            elif signal in ('DANGER', 'WARNING'):
+                prefix = "🔴"
+            else:
+                prefix = "-"
             lines.append(
-                f"- {action.get('name', '')}({action.get('code', '')}) "
+                f"{prefix} {action.get('name', '')}({action.get('code', '')}) "
                 f"{action.get('pct_change_str', '')} "
                 f"{action.get('operation', action.get('signal', ''))}"
             )

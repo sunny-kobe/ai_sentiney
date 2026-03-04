@@ -123,6 +123,7 @@ class FeishuClient:
 
         grouped_actions: Dict[str, List[Dict[str, Any]]] = {
             "SELL": [],
+            "OPPORTUNITY": [],
             "WATCH": [],
             "HOLD": [],
             "LIMIT": [],  # 涨跌停特殊组
@@ -136,6 +137,10 @@ class FeishuClient:
             "WARNING": "SELL",
             "SELL": "SELL",
             "LOCKED_DANGER": "SELL",  # T+1锁定但处于危险状态，仍需警示
+            # OPPORTUNITY组 (加仓机会)
+            "OPPORTUNITY": "OPPORTUNITY",
+            "ACCUMULATE": "OPPORTUNITY",
+            "BUY": "OPPORTUNITY",
             # WATCH组 (需要观察)
             "WATCH": "WATCH",
             "OBSERVED": "WATCH",
@@ -143,7 +148,6 @@ class FeishuClient:
             # HOLD组 (安全持有)
             "SAFE": "HOLD",
             "HOLD": "HOLD",
-            "BUY": "HOLD", # 买入或加仓放在绿色安全组
             # 涨跌停特殊处理
             "LIMIT_UP": "LIMIT",
             "LIMIT_DOWN": "LIMIT",
@@ -226,9 +230,10 @@ class FeishuClient:
                 })
             elements.append({"tag": "hr"})
 
-        # Render Order: SELL -> LIMIT -> WATCH -> HOLD -> UNKNOWN
+        # Render Order: SELL -> LIMIT -> OPPORTUNITY -> WATCH -> HOLD -> UNKNOWN
         render_group("建议离场/减仓", "🔴", grouped_actions["SELL"])
         render_group("涨跌停锁定", "🔒", grouped_actions["LIMIT"])
+        render_group("加仓机会", "🟣", grouped_actions["OPPORTUNITY"])
         render_group("重点观察/洗盘", "🟡", grouped_actions["WATCH"])
         render_group("持仓安好/躺赢", "🟢", grouped_actions["HOLD"])
         if grouped_actions["UNKNOWN"]:
