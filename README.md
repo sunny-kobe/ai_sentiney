@@ -33,7 +33,7 @@ WebUI Preview:
 - 采集层：多数据源容灾（Tencent -> Efinance -> AkShare）
 - 计算层：技术指标 + 规则信号 + 命中追踪
 - 分析层：Gemini 生成结构化结论
-- 触达层：终端 / JSON / 飞书 / WebUI
+- 触达层：终端 / JSON / 飞书 / Telegram / WebUI
 
 一句话：**不是自动交易，而是自动生成“可执行的下一步动作”。**
 
@@ -50,8 +50,10 @@ python -m src.main --mode midday
 情绪: 分歧 (缩量整固)
 量能: 缩量阴跌 (买盘匮乏)
 指数: 上证指数 +0.142% / 深证成指 +0.074% / 创业板指 -0.258%
-  [510500] 中证500ETF | 信号:WATCH | 操作:观望
-  [563300] 中证2000ETF | 信号:SAFE  | 操作:锁仓
+  [510500] 中证500ETF    | 信号:WATCH       | 操作:观望
+  [563300] 中证2000ETF   | 信号:SAFE        | 操作:锁仓
+  [601899] 紫金矿业      | 信号:OPPORTUNITY | 操作:加仓20%-30%
+  [000603] 盛达资源      | 信号:ACCUMULATE  | 操作:加仓10%-20%
 ```
 
 ## Features
@@ -59,10 +61,11 @@ python -m src.main --mode midday
 - 三时段自动分析：`morning` / `midday` / `close`
 - 多源容灾采集：单一数据源异常时自动切换
 - 指标引擎：MA、MACD、RSI、BOLL、KDJ、ATR、OBV 等
-- 信号追踪：对昨日信号做命中回溯与统计
+- 对称信号体系：卖出侧（DANGER/WARNING/WATCH）+ 买入侧（OPPORTUNITY/ACCUMULATE）
+- 信号追踪：对昨日信号做命中回溯与统计（含风险信号和买入信号分组命中率）
 - 智能追问：基于缓存上下文做二次问答（`--ask`）
-- 趋势分析：自动识别“最近一周/本月走势”等问题
-- 推送与展示：飞书卡片 + 本地 WebUI
+- 趋势分析：自动识别”最近一周/本月走势”等问题
+- 推送与展示：飞书卡片 + Telegram + 本地 WebUI
 - 可扩展：清晰的 source / processor / analyst 分层
 
 ## Quick Start
@@ -203,7 +206,8 @@ src/
 
 - [ ] 迁移到新版 `google.genai` SDK（替代 `google-generativeai`）
 - [ ] 增加回测与信号评估报告导出
-- [ ] 增加更多推送渠道（企业微信 / Telegram）
+- [x] 增加 Telegram 推送渠道
+- [x] 买入侧信号体系（OPPORTUNITY / ACCUMULATE）
 - [ ] 提供 Docker 一键部署
 - [ ] 提供更完整的 API 文档与前端展示
 
