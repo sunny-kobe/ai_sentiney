@@ -3,6 +3,7 @@ from typing import Dict, Any, List, Optional
 import json
 import re
 import os
+from datetime import datetime
 from tenacity import retry, stop_after_attempt, wait_exponential
 from pydantic import BaseModel, Field, field_validator
 from src.utils.logger import logger
@@ -123,7 +124,7 @@ class GeminiClient:
         logger.info(f"Initializing Gemini Client with model: {model_name}")
         self.model = genai.GenerativeModel(model_name)
 
-    def _build_context(self, market_breadth: str, north_funds: float, indices: Dict, macro_news: Dict, portfolio: List[Dict], yesterday_context: Dict = None, scorecard: Dict = None) -> str:
+    def _build_context(self, market_breadth: str, north_funds: float, indices: Dict, macro_news: Dict, portfolio: List[Dict], yesterday_context: Dict = None, scorecard: Dict = None, context_date: str = None) -> str:
         """Constructs the prompt context (slim version for token efficiency)."""
         portfolio_summary = []
         for stock in portfolio:
@@ -143,10 +144,10 @@ class GeminiClient:
                 entry["News"] = news[:3]
             portfolio_summary.append(entry)
 
-        from datetime import datetime
         context = {
-            "Date": datetime.now().strftime('%Y-%m-%d'),
+            "Date": context_date or datetime.now().strftime('%Y-%m-%d'),
             "Market_Breadth": market_breadth,
+            "North_Money": north_funds,
             "Indices": {name: f"{'+' if d.get('change_pct',0)>0 else ''}{d.get('change_pct',0)}%"
                         for name, d in indices.items()},
             "Portfolio": portfolio_summary,
@@ -193,8 +194,9 @@ class GeminiClient:
         macro_news = market_data.get('macro_news', {})
         yesterday_context = market_data.get('yesterday_context')
         scorecard = market_data.get('signal_scorecard')
+        context_date = market_data.get('context_date')
 
-        context_json = self._build_context(market_breadth, north_funds, indices, macro_news, portfolio, yesterday_context, scorecard)
+        context_json = self._build_context(market_breadth, north_funds, indices, macro_news, portfolio, yesterday_context, scorecard, context_date)
 
         # Load Prompt Template
         # Using the midday focus from config
@@ -228,8 +230,9 @@ class GeminiClient:
         indices = market_data.get('indices', {})
         macro_news = market_data.get('macro_news', {})
         scorecard = market_data.get('signal_scorecard')
+        context_date = market_data.get('context_date')
 
-        context_json = self._build_context(market_breadth, north_funds, indices, macro_news, portfolio, scorecard=scorecard)
+        context_json = self._build_context(market_breadth, north_funds, indices, macro_news, portfolio, scorecard=scorecard, context_date=context_date)
         
         full_prompt = f"""
 {system_prompt}
@@ -392,6 +395,7 @@ class GeminiClient:
             })
 
         context = {
+            "Date": morning_data.get('context_date') or datetime.now().strftime('%Y-%m-%d'),
             "Global_Indices": morning_data.get('global_indices', []),
             "Commodities": morning_data.get('commodities', []),
             "US_Treasury": morning_data.get('us_treasury', {}),

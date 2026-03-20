@@ -1,6 +1,7 @@
 import akshare as ak
 import pandas as pd
 from typing import Optional
+from datetime import datetime, timedelta
 from src.collector.source_interface import DataSource
 from src.utils.logger import logger
 

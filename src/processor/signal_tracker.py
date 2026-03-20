@@ -164,6 +164,27 @@ def calculate_rolling_stats(records: List[Dict], days: int = 7) -> Dict:
         evals = evaluate_yesterday(actions, next_stocks)
         all_evals.extend(evals)
 
+    return _build_stats_from_evaluations(all_evals, days)
+
+
+def calculate_pair_rolling_stats(pairs: List[Dict[str, Any]], days: int = 7) -> Dict:
+    """
+    Calculate rolling stats from explicitly paired signal/action records.
+
+    pairs: [{"actions": [...], "stocks": [...]}]
+    """
+    all_evals = []
+    for pair in pairs:
+        actions = pair.get('actions', [])
+        stocks = pair.get('stocks', [])
+        if not actions or not stocks:
+            continue
+        all_evals.extend(evaluate_yesterday(actions, stocks))
+
+    return _build_stats_from_evaluations(all_evals, days)
+
+
+def _build_stats_from_evaluations(all_evals: List[Dict], days: int) -> Dict:
     # 过滤 NEUTRAL
     scored = [e for e in all_evals if e['result'] != 'NEUTRAL']
 
@@ -264,7 +285,12 @@ def _empty_stats(days: int) -> Dict:
 # 组装 Scorecard
 # ============================================================
 
-def build_scorecard(yesterday_eval: List[Dict], rolling_stats: Dict) -> Dict:
+def build_scorecard(
+    yesterday_eval: List[Dict],
+    rolling_stats: Dict,
+    comparison_mode: str = "overnight_followup",
+    comparison_label: str = "昨日信号 -> 今日验证",
+) -> Dict:
     """
     组装完整信号追踪报告。
 
@@ -306,6 +332,8 @@ def build_scorecard(yesterday_eval: List[Dict], rolling_stats: Dict) -> Dict:
     summary_text = " | ".join(parts)
 
     return {
+        'comparison_mode': comparison_mode,
+        'comparison_label': comparison_label,
         'yesterday_evaluation': yesterday_eval,
         'rolling_stats': rolling_stats,
         'summary_text': summary_text,

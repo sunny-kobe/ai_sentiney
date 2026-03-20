@@ -29,15 +29,15 @@ if [ ! -f "$PYTHON_PATH" ]; then
 fi
 
 # Generate crontab entries
-MIDDAY_CRON="40 11 * * 1-5 cd $PROJECT_DIR && $PYTHON_PATH -m src.main --mode midday >> $PROJECT_DIR/logs/cron.log 2>&1"
-CLOSE_CRON="10 15 * * 1-5 cd $PROJECT_DIR && $PYTHON_PATH -m src.main --mode close >> $PROJECT_DIR/logs/cron.log 2>&1"
+MIDDAY_CRON="40 11 * * 1-5 cd $PROJECT_DIR && ( $PYTHON_PATH -m src.utils.trading_calendar --mode midday --publish >> $PROJECT_DIR/logs/cron.log 2>&1 && $PYTHON_PATH -m src.main --mode midday --publish >> $PROJECT_DIR/logs/cron.log 2>&1 || [ \$? -eq 78 ] )"
+CLOSE_CRON="10 15 * * 1-5 cd $PROJECT_DIR && ( $PYTHON_PATH -m src.utils.trading_calendar --mode close --publish >> $PROJECT_DIR/logs/cron.log 2>&1 && $PYTHON_PATH -m src.main --mode close --publish >> $PROJECT_DIR/logs/cron.log 2>&1 || [ \$? -eq 78 ] )"
 
 echo "📅 Crontab entries to be added:"
 echo ""
-echo "# Sentinel Midday Check (11:40 AM, Mon-Fri)"
+echo "# Sentinel Midday Check (11:40 AM, Mon-Fri, exchange-calendar guarded)"
 echo "$MIDDAY_CRON"
 echo ""
-echo "# Sentinel Close Review (15:10 PM, Mon-Fri)"
+echo "# Sentinel Close Review (15:10 PM, Mon-Fri, exchange-calendar guarded)"
 echo "$CLOSE_CRON"
 echo ""
 
@@ -51,14 +51,14 @@ if [ "$CONFIRM" = "y" ] || [ "$CONFIRM" = "Y" ]; then
     if grep -q "src.main --mode midday" /tmp/crontab_backup.txt 2>/dev/null; then
         echo "⚠️  Midday entry already exists in crontab"
     else
-        (crontab -l 2>/dev/null; echo ""; echo "# Sentinel Midday Check (11:40 AM, Mon-Fri)"; echo "$MIDDAY_CRON") | crontab -
+        (crontab -l 2>/dev/null; echo ""; echo "# Sentinel Midday Check (11:40 AM, Mon-Fri, exchange-calendar guarded)"; echo "$MIDDAY_CRON") | crontab -
         echo "✅ Midday entry added"
     fi
     
     if grep -q "src.main --mode close" /tmp/crontab_backup.txt 2>/dev/null; then
         echo "⚠️  Close entry already exists in crontab"
     else
-        (crontab -l 2>/dev/null; echo ""; echo "# Sentinel Close Review (15:10 PM, Mon-Fri)"; echo "$CLOSE_CRON") | crontab -
+        (crontab -l 2>/dev/null; echo ""; echo "# Sentinel Close Review (15:10 PM, Mon-Fri, exchange-calendar guarded)"; echo "$CLOSE_CRON") | crontab -
         echo "✅ Close entry added"
     fi
     

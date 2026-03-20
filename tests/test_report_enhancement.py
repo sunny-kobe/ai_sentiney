@@ -1,17 +1,17 @@
 import unittest
 import sys
-import os
 from pathlib import Path
 
 # Add project root to python path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.main import post_process_result
+from src.service.analysis_service import AnalysisService
 from src.reporter.feishu_client import FeishuClient
 
 class TestReportEnhancement(unittest.TestCase):
     def setUp(self):
+        self.service = AnalysisService()
         self.processed_stocks = [
             {
                 "code": "600519",
@@ -19,7 +19,9 @@ class TestReportEnhancement(unittest.TestCase):
                 "current_price": 1700.5,
                 "pct_change": 1.25,
                 "ma20": 1680.0,
-                "signal": "SAFE"
+                "signal": "SAFE",
+                "confidence": "高",
+                "tech_summary": "[日线_MACD_多头_无背驰_0]"
             },
             {
                 "code": "300750",
@@ -27,7 +29,9 @@ class TestReportEnhancement(unittest.TestCase):
                 "current_price": 180.2,
                 "pct_change": -0.5,
                 "ma20": 185.0,
-                "signal": "WATCH"
+                "signal": "WATCH",
+                "confidence": "中",
+                "tech_summary": "[日线_MACD_空头_无背驰_0]"
             }
         ]
         self.ai_input = {
@@ -38,18 +42,21 @@ class TestReportEnhancement(unittest.TestCase):
     def test_post_process_result_injection(self):
         analysis_result = {
             "actions": [
-                {"code": "600519", "name": "贵州茅台", "today_review": "稳健", "tomorrow_plan": "持股", "support_level": 1650, "resistance_level": 1750},
+                {"code": "600519", "name": "贵州茅台", "signal": "DANGER", "today_review": "稳健", "tomorrow_plan": "持股", "support_level": 1650, "resistance_level": 1750},
                 {"code": "300750", "name": "宁德时代", "today_review": "调整", "tomorrow_plan": "观望", "support_level": 175, "resistance_level": 190}
             ]
         }
         
-        processed_result = post_process_result(analysis_result, self.ai_input)
+        processed_result = self.service.post_process_result(analysis_result, self.ai_input, mode="close")
         
         # Verify injection for first stock
         action1 = processed_result['actions'][0]
         self.assertEqual(action1['current_price'], 1700.5)
         self.assertIn("1.25%", action1['pct_change_str'])
         self.assertIn("🔴", action1['pct_change_str'])
+        self.assertEqual(action1['signal'], "SAFE")
+        self.assertEqual(action1['confidence'], "高")
+        self.assertEqual(action1['tech_summary'], "[日线_MACD_多头_无背驰_0]")
         
         # Verify injection for second stock
         action2 = processed_result['actions'][1]

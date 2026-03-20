@@ -1,7 +1,6 @@
-
 import pytest
 import pandas as pd
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import MagicMock
 from src.collector.data_fetcher import DataCollector, ak
 
 @pytest.fixture
@@ -21,27 +20,27 @@ def collector():
     return DataCollector()
 
 @pytest.mark.asyncio
-async def test_get_market_breadth_success(collector, mock_akshare):
-    """Test successful market breadth fetch."""
-    # Mock return data
-    mock_df = pd.DataFrame({
-        '代码': ['000001', '000002', '000003'],
-        '涨跌幅': [1.5, -2.0, 0.0]
-    })
-    mock_akshare.stock_zh_a_spot_em.return_value = mock_df
+async def test_get_market_breadth_success(collector):
+    """Test successful market breadth fetch through source fallback."""
+    collector.sources = [MagicMock(), MagicMock(), MagicMock()]
+    collector.sources[0].get_source_name.return_value = "Tencent"
+    collector.sources[0].fetch_market_breadth.return_value = None
+    collector.sources[1].get_source_name.return_value = "Efinance"
+    collector.sources[1].fetch_market_breadth.return_value = "涨: 1 / 跌: 1 (平: 1)"
 
     breadth = await collector.get_market_breadth()
-    assert "涨: 1 / 跌: 1 (平: 1)" in breadth
+    assert breadth == "涨: 1 / 跌: 1 (平: 1)"
 
 @pytest.mark.asyncio
-async def test_get_market_breadth_failure(collector, mock_akshare):
-    """Test market breadth fetch failure handling."""
-    mock_akshare.stock_zh_a_spot_em.side_effect = Exception("Network Error")
-    
-    # Needs to fail 3 times due to retry
+async def test_get_market_breadth_failure(collector):
+    """Test market breadth fetch failure handling after all sources fail."""
+    collector.sources = [MagicMock(), MagicMock(), MagicMock()]
+    for source, name in zip(collector.sources, ["Tencent", "Efinance", "AkShare"]):
+        source.get_source_name.return_value = name
+        source.fetch_market_breadth.side_effect = Exception("Network Error")
+
     breadth = await collector.get_market_breadth()
-    assert breadth == "Error"
-    assert mock_akshare.stock_zh_a_spot_em.call_count == 3
+    assert breadth == "Unknown"
 
 @pytest.mark.asyncio
 async def test_get_north_funds(collector, mock_akshare):
@@ -59,38 +58,42 @@ async def test_get_north_funds(collector, mock_akshare):
     assert funds == 12.34
 
 @pytest.mark.asyncio
-async def test_collect_all_integration(collector, mock_akshare):
+async def test_collect_all_integration(collector, mock_akshare, monkeypatch):
     """Test the main collect_all orchestration."""
-    # Setup mocks for all calls
-    mock_akshare.stock_zh_a_spot_em.return_value = pd.DataFrame({'代码': ['600519'], '涨跌幅': [1.0], '名称': ['茅台']})
     mock_akshare.stock_hsgt_fund_flow_summary_em.return_value = pd.DataFrame()
     mock_akshare.stock_zh_index_spot_sina.return_value = pd.DataFrame()
-    mock_akshare.news_cctv.return_value = pd.DataFrame() # No news
-    mock_akshare.stock_zh_a_hist.return_value = pd.DataFrame({'收盘': [100.0]*20}) # Mock history
-    
+    mock_akshare.news_cctv.return_value = pd.DataFrame()  # No news
+
+    async def fake_fetch_with_fallback(method_name, *args, **kwargs):
+        if method_name == "fetch_spot_data":
+            return pd.DataFrame({
+                "code": ["600519"],
+                "name": ["茅台"],
+                "current_price": [1800.0],
+                "pct_change": [1.0],
+            })
+        if method_name == "fetch_prices":
+            return pd.DataFrame({
+                "date": pd.date_range("2026-02-01", periods=30, freq="D"),
+                "close": [100.0] * 30,
+                "open": [100.0] * 30,
+                "high": [101.0] * 30,
+                "low": [99.0] * 30,
+                "volume": [1000.0] * 30,
+            })
+        if method_name == "fetch_news":
+            return "新闻1; 新闻2"
+        if method_name == "fetch_single_quote":
+            return None
+        return None
+
+    monkeypatch.setattr(collector, "_fetch_with_fallback", fake_fetch_with_fallback)
+
     portfolio = [{'code': '600519', 'name': '茅台'}]
-    
+
     result = await collector.collect_all(portfolio)
-    
+
     assert 'stocks' in result
     assert len(result['stocks']) == 1
     assert result['stocks'][0]['code'] == '600519'
-    assert result['stocks'][0]['current_price'] == 0.0 # B/c we mocked spot to return specific DF but logic uses df_all_spot which comes from stock_zh_a_spot_em
-    # Wait, in collect_all logic:
-    # 1. it calls stock_zh_a_spot_em -> returns mock_df
-    # 2. it passes mock_df to _fetch_individual_stock_extras
-    # 3. _fetch checks code '600519' in mock_df
-    # So it SHOULD find it.
-    
-    # Let's check why my assertion might be risky.
-    # mock_df has '代码', '涨跌幅', '名称', '最新价' (missing '最新价' in my setup above)
-    # Fix setup:
-    mock_akshare.stock_zh_a_spot_em.return_value = pd.DataFrame({
-        '代码': ['600519'], 
-        '最新价': [1800.0],
-        '涨跌幅': [1.0], 
-        '名称': ['茅台']
-    })
-    
-    result = await collector.collect_all(portfolio)
     assert result['stocks'][0]['current_price'] == 1800.0

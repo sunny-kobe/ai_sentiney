@@ -90,7 +90,7 @@ class FeishuClient:
         # Signal Scorecard Section
         scorecard = data.get('signal_scorecard')
         if scorecard:
-            sc_text = f"**📊 信号追踪** | {scorecard.get('summary_text', '')}\n"
+            sc_text = f"**📊 {scorecard.get('comparison_label', '信号追踪')}** | {scorecard.get('summary_text', '')}\n"
             for e in scorecard.get('yesterday_evaluation', []):
                 if e['result'] == 'NEUTRAL':
                     continue
@@ -501,7 +501,7 @@ class FeishuClient:
         # Signal Scorecard Section
         scorecard = data.get('signal_scorecard')
         if scorecard:
-            sc_text = f"**📊 信号追踪** | {scorecard.get('summary_text', '')}\n"
+            sc_text = f"**📊 {scorecard.get('comparison_label', '信号追踪')}** | {scorecard.get('summary_text', '')}\n"
             for e in scorecard.get('yesterday_evaluation', []):
                 if e['result'] == 'NEUTRAL':
                     continue

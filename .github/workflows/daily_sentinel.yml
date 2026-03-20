@@ -48,14 +48,25 @@ jobs:
           echo "Current UTC Hour: $current_hour"
 
           if [ "$current_hour" -lt 2 ]; then
+            TARGET_MODE="morning"
             echo "Running Morning Brief..."
-            python -m src.main --mode morning --publish
           elif [ "$current_hour" -lt 6 ]; then
+            TARGET_MODE="midday"
             echo "Running Midday Check..."
-            python -m src.main --mode midday --publish
           else
+            TARGET_MODE="close"
             echo "Running Close Review..."
-            python -m src.main --mode close --publish
+          fi
+
+          if python -m src.utils.trading_calendar --mode "$TARGET_MODE" --publish; then
+            python -m src.main --mode "$TARGET_MODE" --publish
+          else
+            status=$?
+            if [ "$status" -eq 78 ]; then
+              echo "Skip run: non-trading day"
+              exit 0
+            fi
+            exit "$status"
           fi
 
       - name: Commit Database Changes (Persistence)

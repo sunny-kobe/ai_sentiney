@@ -13,7 +13,8 @@ from src.analyst.gemini_client import GeminiClient
 from src.reporter.feishu_client import FeishuClient
 from src.reporter.telegram_client import TelegramClient
 from src.storage.database import SentinelDB
-from src.processor.signal_tracker import evaluate_yesterday, calculate_rolling_stats, build_scorecard, _compute_risk_stats, _compute_buy_stats
+from src.processor.signal_tracker import evaluate_yesterday, calculate_rolling_stats, calculate_pair_rolling_stats, build_scorecard, _compute_risk_stats, _compute_buy_stats
+from src.utils.trading_calendar import should_run_market_report
 
 class AnalysisService:
     def __init__(self):
@@ -54,6 +55,7 @@ class AnalysisService:
         processed_stocks = processor.generate_signals(processed_stocks)
 
         return {
+            "context_date": datetime.now().strftime('%Y-%m-%d'),
             "market_breadth": market_breadth,
             "north_funds": north_funds,
             "indices": indices,
@@ -68,6 +70,7 @@ class AnalysisService:
 
         processor = DataProcessor()
         processed_data = processor.process_morning_data(raw_data, portfolio)
+        processed_data["context_date"] = datetime.now().strftime('%Y-%m-%d')
 
         logger.info(f"Morning data collected. Global indices: {len(processed_data.get('global_indices', []))}, "
                      f"Commodities: {len(processed_data.get('commodities', []))}, "
@@ -124,13 +127,12 @@ class AnalysisService:
                 if 'signal_note' in stock_obj:
                     action['signal_note'] = stock_obj['signal_note']
                 # 传递多维指标字段
+                if 'signal' in stock_obj:
+                    action['signal'] = stock_obj['signal']
                 if 'confidence' in stock_obj:
                     action['confidence'] = stock_obj['confidence']
                 if 'tech_summary' in stock_obj:
                     action['tech_summary'] = stock_obj['tech_summary']
-                # 如果 processor 生成了 LOCKED_DANGER，覆盖 AI 的 signal
-                if stock_obj.get('signal') == 'LOCKED_DANGER':
-                    action['signal'] = 'LOCKED_DANGER'
             else:
                 action['pct_change_str'] = ""
 
@@ -197,6 +199,22 @@ class AnalysisService:
         Returns the analysis result dict.
         """
         logger.info(f"=== Starting Analysis ({mode.upper()}) ===")
+
+        run_guard = should_run_market_report(
+            mode=mode,
+            publish=publish,
+            replay=replay,
+            dry_run=dry_run,
+        )
+        if not run_guard["should_run"]:
+            message = f"Skipping {mode} analysis on non-trading day {run_guard['calendar']['date']}"
+            logger.info(message)
+            return {
+                "skipped": True,
+                "reason": run_guard["skip_reason"],
+                "message": message,
+                "calendar": run_guard["calendar"],
+            }
         
         portfolio = self.config.get('portfolio', [])
         ai_input = None
@@ -234,16 +252,20 @@ class AnalysisService:
 
         # --- Step 1.5: Signal Tracking ---
         if mode in ('midday', 'close') and not dry_run:
-            scorecard = self._compute_signal_scorecard(ai_input.get('stocks', []))
+            analysis_date = ai_input.get("context_date") or datetime.now().strftime('%Y-%m-%d')
+            scorecard = self._compute_signal_scorecard(
+                ai_input.get('stocks', []),
+                mode=mode,
+                analysis_date=analysis_date,
+            )
             if scorecard:
                 ai_input['signal_scorecard'] = scorecard
 
         # --- Step 2: AI Analysis ---
-        analyst = GeminiClient()
         analysis_result = {}
         
         try:
-            if dry_run and not replay:
+            if dry_run:
                 logger.info("Dry Run Mode: Mocking AI response.")
                 for s in ai_input.get('stocks', []):
                     logger.info(f"[DRY-RUN TAGS] {s['name']} Tech: {s.get('tech_summary')}")
@@ -253,6 +275,7 @@ class AnalysisService:
                     "actions": []
                 }
             else:
+                analyst = GeminiClient()
                 if mode == 'midday':
                     last_close = self.db.get_last_close_analysis()
                     ai_input['yesterday_context'] = last_close
@@ -284,7 +307,7 @@ class AnalysisService:
         if dry_run:
             logger.info("Dry Run Mode: Skipping push.")
         elif publish:
-            targets = publish_target or ["feishu"]
+            targets = self._normalize_publish_targets(publish_target)
             for target in targets:
                 try:
                     if target == "telegram":
@@ -358,30 +381,71 @@ class AnalysisService:
         trend_keywords = ['趋势', '走势', '一周', '一个月', '近期', '最近', '这周', '本周', '上周', '本月', '上月', '几天', '多天']
         return any(kw in question for kw in trend_keywords)
 
-    def _compute_signal_scorecard(self, today_stocks: List[Dict]) -> Optional[Dict]:
-        """Compute signal scorecard by evaluating yesterday's signals against today's prices."""
+    def _normalize_publish_targets(self, publish_target) -> List[str]:
+        if not publish_target:
+            return ["feishu"]
+        if isinstance(publish_target, str):
+            return [publish_target]
+        return list(publish_target)
+
+    def _compute_signal_scorecard(
+        self,
+        today_stocks: List[Dict],
+        mode: str = 'midday',
+        analysis_date: str = None,
+    ) -> Optional[Dict]:
+        """Compute scorecard by mode-specific signal follow-up semantics."""
         try:
-            yesterday = self.db.get_last_analysis(mode='midday')
-            if not yesterday or not yesterday.get('ai_result'):
-                logger.info("Signal Tracker: No yesterday data, skipping scorecard.")
+            analysis_date = analysis_date or datetime.now().strftime('%Y-%m-%d')
+
+            if mode == 'close':
+                baseline = self.db.get_latest_analysis_for_date(mode='midday', target_date=analysis_date)
+                comparison_mode = 'intraday_followup'
+                comparison_label = '今日午盘信号 -> 今日收盘验证'
+                rolling = self._compute_intraday_scorecard_stats(days=7)
+            else:
+                baseline = self.db.get_previous_analysis(mode='midday', before_date=analysis_date)
+                comparison_mode = 'overnight_followup'
+                comparison_label = '昨日午盘信号 -> 今日午盘验证'
+                records = self.db.get_records_range(mode='midday', days=8)
+                rolling = calculate_rolling_stats(records, days=7)
+
+            if not baseline or not baseline.get('ai_result'):
+                logger.info("Signal Tracker: No baseline data, skipping scorecard.")
                 return None
 
-            yesterday_actions = yesterday['ai_result'].get('actions', [])
+            yesterday_actions = baseline['ai_result'].get('actions', [])
             if not yesterday_actions or not today_stocks:
                 return None
 
             eval_results = evaluate_yesterday(yesterday_actions, today_stocks)
-
-            # Rolling stats: fetch 8 records to get 7 day-pairs
-            records = self.db.get_records_range(mode='midday', days=8)
-            rolling = calculate_rolling_stats(records, days=7)
-
-            scorecard = build_scorecard(eval_results, rolling)
+            scorecard = build_scorecard(
+                eval_results,
+                rolling,
+                comparison_mode=comparison_mode,
+                comparison_label=comparison_label,
+            )
             logger.info(f"Signal Tracker: {scorecard.get('summary_text', '')}")
             return scorecard
         except Exception as e:
             logger.warning(f"Signal Tracker failed: {e}")
             return None
+
+    def _compute_intraday_scorecard_stats(self, days: int = 7) -> Dict:
+        midday_records = self.db.get_records_range(mode='midday', days=days)
+        pairs = []
+        for midday_record in midday_records:
+            target_date = midday_record.get('date')
+            if not target_date:
+                continue
+            close_record = self.db.get_latest_analysis_for_date(mode='close', target_date=target_date)
+            if not close_record:
+                continue
+            pairs.append({
+                "actions": midday_record.get('ai_result', {}).get('actions', []),
+                "stocks": close_record.get('raw_data', {}).get('stocks', []),
+            })
+        return calculate_pair_rolling_stats(pairs, days=days)
 
     def _detect_accuracy_query(self, question: str) -> bool:
         """Detect if the question is about signal accuracy."""

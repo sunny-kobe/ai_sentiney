@@ -25,6 +25,9 @@ def _print_text_summary(result: Dict[str, Any], mode: str):
     if "error" in result:
         print(f"Error: {result['error']}")
         return
+    if result.get("skipped"):
+        print(f"Skipped: {result.get('message', 'non-trading day')}")
+        return
 
     lines = []
     if mode == 'morning':
@@ -46,7 +49,7 @@ def _print_text_summary(result: Dict[str, Any], mode: str):
         scorecard = result.get('signal_scorecard')
         if scorecard:
             lines.append(f"")
-            lines.append(f"📊 信号追踪: {scorecard.get('summary_text', '')}")
+            lines.append(f"📊 {scorecard.get('comparison_label', '信号追踪')}: {scorecard.get('summary_text', '')}")
             for e in scorecard.get('yesterday_evaluation', []):
                 if e['result'] == 'NEUTRAL':
                     continue
@@ -71,7 +74,7 @@ def _print_text_summary(result: Dict[str, Any], mode: str):
         scorecard = result.get('signal_scorecard')
         if scorecard:
             lines.append(f"")
-            lines.append(f"📊 信号追踪: {scorecard.get('summary_text', '')}")
+            lines.append(f"📊 {scorecard.get('comparison_label', '信号追踪')}: {scorecard.get('summary_text', '')}")
             for e in scorecard.get('yesterday_evaluation', []):
                 if e['result'] == 'NEUTRAL':
                     continue
