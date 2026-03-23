@@ -32,6 +32,9 @@ data/*.db
 *.swp
 *.swo
 
+# Local git worktrees
+.worktrees/
+
 # 系统文件
 .DS_Store
 Thumbs.db
