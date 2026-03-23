@@ -333,25 +333,19 @@ prompts:
     </thinking_process_protocol>
 
     <output_format>
-    JSON 格式（严禁 Markdown 代码块，Actions 必须包含所有持仓）：
-    {
-      "market_sentiment": "string (情绪: 冰点/分歧/修复/高潮)",
-      "volume_analysis": "string (量能: 放量滞涨/缩量阴跌/放量突破/无量空跌)",
-      "macro_summary": "string (基于量价和情绪的午间复盘，100字)",
-      "bull_case": "string (不少于50字的看多论述：当前数据中哪些信号支持继续持有或加仓？必须引用具体的OBV/MACD/KDJ数据)",
-      "bear_case": "string (不少于50字的看空论述：当前数据中哪些信号提示风险？必须引用具体的技术指标数据)",
-      "actions": [
-        {
-          "code": "string",
-          "name": "string",
-          "signal": "DANGER|WARNING|WATCH|OBSERVED|SAFE|OVERBOUGHT|OPPORTUNITY|ACCUMULATE|LIMIT_UP|LIMIT_DOWN",
-          "action": "DANGER|WATCH|HOLD|BUY|OPPORTUNITY|ACCUMULATE",
-          "operation": "string (具体: 减仓30%-50%/清仓/做T/锁仓/观望/加仓20%-30%/建仓，必须包含比例)",
-          "reason": "string (核心逻辑：必须包含'量/价/线/指标'四要素，引用Tech字段数据。当指标矛盾时必须指出)",
-          "news_impact": "string"
-        }
-      ]
-    }
+    返回 JSON 对象（严禁 Markdown 代码块，`actions` 必须覆盖所有持仓）。字段语义如下：
+    - `market_sentiment`: 情绪分层，如冰点/分歧/修复/高潮
+    - `volume_analysis`: 量能结论，如放量滞涨/缩量阴跌/放量突破/无量空跌
+    - `macro_summary`: 基于量价和情绪的午间复盘，约100字
+    - `bull_case`: 不少于50字的看多论述，必须引用具体的 OBV/MACD/KDJ 证据
+    - `bear_case`: 不少于50字的看空论述，必须引用具体的技术指标证据
+    - `actions[].code`: 标的代码
+    - `actions[].name`: 标的名称
+    - `actions[].signal`: DANGER/WARNING/WATCH/OBSERVED/SAFE/OVERBOUGHT/OPPORTUNITY/ACCUMULATE/LIMIT_UP/LIMIT_DOWN
+    - `actions[].action`: DANGER/WATCH/HOLD/BUY/OPPORTUNITY/ACCUMULATE
+    - `actions[].operation`: 具体操作，必须包含仓位比例
+    - `actions[].reason`: 必须包含量/价/线/指标四要素，且指出指标矛盾
+    - `actions[].news_impact`: 消息面对判断的修正
 
     **信号说明**:
     - DANGER: 跌破MA20且放量，建议止损
@@ -411,25 +405,19 @@ prompts:
     </mapping_logic>
 
     <output_format>
-    JSON 格式（严禁 Markdown 代码块）：
-    {
-      "global_overnight_summary": "string (隔夜全球市场综述，100字)",
-      "commodity_summary": "string (大宗商品与汇率变动总结，50字)",
-      "us_treasury_impact": "string (美债收益率变动对风险资产的影响，30字)",
-      "a_share_outlook": "string (今日A股开盘预判: 高开/低开/平开 + 理由)",
-      "risk_events": ["string (当日需关注的风险事件列表)"],
-      "actions": [
-        {
-          "code": "string",
-          "name": "string",
-          "overnight_driver": "string (隔夜驱动因素: 如'黄金+1.2%')",
-          "opening_expectation": "HIGH_OPEN|LOW_OPEN|FLAT (预期开盘方向)",
-          "strategy": "string (开盘策略: 如'观望首30分钟走势再决策')",
-          "ma20_status": "ABOVE|BELOW|NEAR (昨收相对MA20位置)",
-          "key_level": "float (今日关键观察价位)"
-        }
-      ]
-    }
+    返回 JSON 对象（严禁 Markdown 代码块）。字段语义如下：
+    - `global_overnight_summary`: 隔夜全球市场综述，约100字
+    - `commodity_summary`: 大宗商品与汇率变动总结，约50字
+    - `us_treasury_impact`: 美债收益率变动对风险资产的影响，约30字
+    - `a_share_outlook`: 今日A股开盘预判，高开/低开/平开并附理由
+    - `risk_events`: 当日需关注的风险事件列表
+    - `actions[].code`: 标的代码
+    - `actions[].name`: 标的名称
+    - `actions[].overnight_driver`: 隔夜驱动因素，如黄金+1.2%
+    - `actions[].opening_expectation`: HIGH_OPEN/LOW_OPEN/FLAT
+    - `actions[].strategy`: 开盘策略
+    - `actions[].ma20_status`: ABOVE/BELOW/NEAR
+    - `actions[].key_level`: 今日关键观察价位
     </output_format>
 
   qa_prompt: |
@@ -539,22 +527,16 @@ prompts:
     </logic_core>
 
     <output_format>
-    JSON 格式（严禁 Markdown 代码块）：
-    {
-      "market_summary": "string (复盘: 量能与主线分析)",
-      "market_temperature": "string (冰点/过热/存量博弈)",
-      "bull_case": "string (不少于50字的看多反面论述：当前数据中哪些信号支持继续持有或加仓？必须引用具体的OBV/MACD/KDJ数据)",
-      "bear_case": "string (不少于50字的看空正面论述：当前数据中哪些信号提示风险？必须引用具体的技术指标数据)",
-      "actions": [
-        {
-          "code": "string",
-          "name": "string",
-          "signal": "DANGER|WARNING|WATCH|OBSERVED|SAFE|OVERBOUGHT|OPPORTUNITY|ACCUMULATE|N/A",
-          "today_review": "string (量价与板块表现)",
-          "tomorrow_plan": "string (操作计划，必须包含建议仓位比例和失效条件)",
-          "support_level": "float (动态计算: 现价*0.98 或 MA20)",
-          "resistance_level": "float (动态计算: 现价*1.05 或 前高)"
-        }
-      ]
-    }
+    返回 JSON 对象（严禁 Markdown 代码块）。字段语义如下：
+    - `market_summary`: 量能与主线分析
+    - `market_temperature`: 冰点/过热/存量博弈
+    - `bull_case`: 不少于50字的看多论述，必须引用具体 OBV/MACD/KDJ 数据
+    - `bear_case`: 不少于50字的看空论述，必须引用具体技术指标数据
+    - `actions[].code`: 标的代码
+    - `actions[].name`: 标的名称
+    - `actions[].signal`: DANGER/WARNING/WATCH/OBSERVED/SAFE/OVERBOUGHT/OPPORTUNITY/ACCUMULATE/N/A
+    - `actions[].today_review`: 今日量价与板块表现
+    - `actions[].tomorrow_plan`: 操作计划，必须包含建议仓位比例和失效条件
+    - `actions[].support_level`: 动态支撑位
+    - `actions[].resistance_level`: 动态压力位
     </output_format>

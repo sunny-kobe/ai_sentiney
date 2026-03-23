@@ -1,8 +1,8 @@
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from typing import Dict, Any, List, Optional
 import json
 import re
-import os
 from datetime import datetime
 from tenacity import retry, stop_after_attempt, wait_exponential
 from pydantic import BaseModel, Field, field_validator
@@ -117,12 +117,10 @@ class GeminiClient:
         self.api_key = self.config['api_keys']['gemini_api_key']
         if not self.api_key:
             logger.warning("Gemini API Key is missing!")
-        
-        genai.configure(api_key=self.api_key)
-        
-        model_name = self.config.get('ai', {}).get('model_name', 'gemini-3.1-pro-preview')
-        logger.info(f"Initializing Gemini Client with model: {model_name}")
-        self.model = genai.GenerativeModel(model_name)
+
+        self.model_name = self.config.get('ai', {}).get('model_name', 'gemini-3.1-pro-preview')
+        logger.info(f"Initializing Gemini Client with model: {self.model_name}")
+        self.client = genai.Client(api_key=self.api_key)
 
     def _build_context(self, market_breadth: str, north_funds: float, indices: Dict, macro_news: Dict, portfolio: List[Dict], yesterday_context: Dict = None, scorecard: Dict = None, context_date: str = None) -> str:
         """Constructs the prompt context (slim version for token efficiency)."""
@@ -181,6 +179,51 @@ class GeminiClient:
 
         return json.dumps(context, ensure_ascii=False, indent=1)
 
+    def _build_structured_config(self, system_prompt: str, response_schema: type[BaseModel]) -> types.GenerateContentConfig:
+        return types.GenerateContentConfig(
+            system_instruction=system_prompt,
+            response_mime_type="application/json",
+            response_schema=response_schema,
+        )
+
+    def _build_text_config(self, system_prompt: str) -> types.GenerateContentConfig:
+        return types.GenerateContentConfig(system_instruction=system_prompt)
+
+    def _extract_structured_payload(self, response: Any) -> Dict[str, Any]:
+        parsed = getattr(response, "parsed", None)
+        if parsed is not None:
+            if isinstance(parsed, BaseModel):
+                return parsed.model_dump()
+            if hasattr(parsed, "model_dump"):
+                return parsed.model_dump()
+            if isinstance(parsed, dict):
+                return parsed
+        text = getattr(response, "text", "") or ""
+        return self._parse_response(text)
+
+    def _generate_structured_content(
+        self,
+        *,
+        system_prompt: str,
+        context_label: str,
+        context_json: str,
+        response_schema: type[BaseModel],
+    ) -> Dict[str, Any]:
+        response = self.client.models.generate_content(
+            model=self.model_name,
+            contents=f"{context_label}\n{context_json}",
+            config=self._build_structured_config(system_prompt, response_schema),
+        )
+        return self._extract_structured_payload(response)
+
+    def _generate_text_content(self, *, system_prompt: str, content: str) -> str:
+        response = self.client.models.generate_content(
+            model=self.model_name,
+            contents=content,
+            config=self._build_text_config(system_prompt),
+        )
+        return (getattr(response, "text", "") or "").strip()
+
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
     def analyze(self, market_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -206,17 +249,14 @@ class GeminiClient:
         # Using the midday focus from config
         system_prompt = self.config['prompts']['midday_focus']
 
-        full_prompt = f"""
-{system_prompt}
-
----
-[REAL-TIME DATA CONTEXT]
-{context_json}
-"""
         logger.info("Sending request to Gemini...")
         try:
-            response = self.model.generate_content(full_prompt)
-            parsed = self._parse_response(response.text)
+            parsed = self._generate_structured_content(
+                system_prompt=system_prompt,
+                context_label="[REAL-TIME DATA CONTEXT]",
+                context_json=context_json,
+                response_schema=MiddayAnalysis,
+            )
             return self._validate_midday_response(parsed)
 
         except Exception as e:
@@ -242,17 +282,14 @@ class GeminiClient:
         else:
             context_json = self._build_context(market_breadth, north_funds, indices, macro_news, portfolio, scorecard=scorecard, context_date=context_date)
         
-        full_prompt = f"""
-{system_prompt}
-
----
-[REAL-TIME DATA CONTEXT]
-{context_json}
-"""
         logger.info("Sending request to Gemini (custom prompt)...")
         try:
-            response = self.model.generate_content(full_prompt)
-            parsed = self._parse_response(response.text)
+            parsed = self._generate_structured_content(
+                system_prompt=system_prompt,
+                context_label="[REAL-TIME DATA CONTEXT]",
+                context_json=context_json,
+                response_schema=CloseAnalysis,
+            )
             return self._validate_close_response(parsed)
 
         except Exception as e:
@@ -422,17 +459,14 @@ class GeminiClient:
         """
         context_json = self._build_morning_context(morning_data)
 
-        full_prompt = f"""
-{system_prompt}
-
----
-[OVERNIGHT DATA CONTEXT]
-{context_json}
-"""
         logger.info("Sending morning brief request to Gemini...")
         try:
-            response = self.model.generate_content(full_prompt)
-            parsed = self._parse_response(response.text)
+            parsed = self._generate_structured_content(
+                system_prompt=system_prompt,
+                context_label="[OVERNIGHT DATA CONTEXT]",
+                context_json=context_json,
+                response_schema=MorningAnalysis,
+            )
             return self._validate_morning_response(parsed)
         except Exception as e:
             logger.error(f"Gemini API call failed (morning): {e}")
@@ -467,10 +501,7 @@ class GeminiClient:
         from datetime import datetime
         today_str = datetime.now().strftime('%Y年%m月%d日')
 
-        full_prompt = f"""{system_prompt}
-
----
-[当前日期]
+        full_prompt = f"""[当前日期]
 {today_str}
 
 ---
@@ -487,8 +518,7 @@ class GeminiClient:
 """
         logger.info(f"Sending Q&A request to Gemini: {question[:50]}...")
         try:
-            response = self.model.generate_content(full_prompt)
-            return response.text.strip()
+            return self._generate_text_content(system_prompt=system_prompt, content=full_prompt)
         except Exception as e:
             logger.error(f"Gemini Q&A call failed: {e}")
             raise

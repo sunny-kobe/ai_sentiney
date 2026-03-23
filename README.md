@@ -190,7 +190,6 @@ src/
 ## Good First Issues
 
 适合首次贡献者：
-- [迁移 `google-generativeai` 到 `google.genai`（保持接口兼容）](https://github.com/sunny-kobe/ai_sentiney/issues)
 - [为 WebUI 增加只读模式和简单鉴权](https://github.com/sunny-kobe/ai_sentiney/issues)
 - [补充 `--replay` 与 `--ask` 的集成测试](https://github.com/sunny-kobe/ai_sentiney/issues)
 - [新增 Dockerfile 与 `docker-compose` 快速部署](https://github.com/sunny-kobe/ai_sentiney/issues)
@@ -204,7 +203,7 @@ src/
 
 ## Roadmap
 
-- [ ] 迁移到新版 `google.genai` SDK（替代 `google-generativeai`）
+- [x] 迁移到新版 `google.genai` SDK（替代 `google-generativeai`）
 - [ ] 增加回测与信号评估报告导出
 - [x] 增加 Telegram 推送渠道
 - [x] 买入侧信号体系（OPPORTUNITY / ACCUMULATE）
