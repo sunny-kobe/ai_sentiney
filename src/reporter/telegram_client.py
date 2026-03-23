@@ -50,6 +50,9 @@ class TelegramClient:
     def _build_midday_text(self, data: Dict[str, Any]) -> str:
         lines = [
             "🛡️ Sentinel 午盘分析",
+            f"质量: {data.get('quality_status', 'normal')}",
+            f"时间: {data.get('data_timestamp', 'N/A')}",
+            f"来源: {', '.join(data.get('source_labels', []))}" if data.get('source_labels') else "来源: N/A",
             f"情绪: {data.get('market_sentiment', 'N/A')}",
             f"点评: {data.get('macro_summary', 'N/A')}",
         ]
@@ -71,6 +74,9 @@ class TelegramClient:
     def _build_close_text(self, data: Dict[str, Any]) -> str:
         lines = [
             "🛡️ Sentinel 收盘复盘",
+            f"质量: {data.get('quality_status', 'normal')}",
+            f"时间: {data.get('data_timestamp', 'N/A')}",
+            f"来源: {', '.join(data.get('source_labels', []))}" if data.get('source_labels') else "来源: N/A",
             f"总结: {data.get('market_summary', 'N/A')}",
             f"温度: {data.get('market_temperature', 'N/A')}",
         ]

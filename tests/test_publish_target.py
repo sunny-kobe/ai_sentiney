@@ -20,17 +20,19 @@ def test_publish_target_telegram_routes_to_telegram(monkeypatch):
 
     async def _fake_collect(_portfolio):
         return {
-            "market_breadth": "N/A",
+            "context_date": "2026-03-23",
+            "market_breadth": "涨: 10 / 跌: 5",
             "north_funds": 0,
-            "indices": {},
-            "macro_news": {},
-            "stocks": [],
+            "indices": {"上证指数": {"change_pct": 0.5}},
+            "macro_news": {"telegraph": ["流动性平稳"]},
+            "stocks": [{"code": "600519", "name": "贵州茅台", "signal": "SAFE", "news": ["公司回购进展"]}],
         }
 
     monkeypatch.setattr(service, "collect_and_process_data", _fake_collect)
     monkeypatch.setattr(service, "post_process_result", lambda result, _ai_input, mode='midday': result)
     monkeypatch.setattr(service.db, "get_last_close_analysis", lambda: None)
     monkeypatch.setattr(service.db, "save_record", lambda **_kwargs: None)
+    monkeypatch.setattr(service, "_compute_signal_scorecard", lambda *args, **kwargs: None)
 
     monkeypatch.setattr("src.service.analysis_service.GeminiClient", lambda: _DummyGemini())
 
@@ -50,17 +52,19 @@ def test_publish_target_default_routes_to_feishu(monkeypatch):
 
     async def _fake_collect(_portfolio):
         return {
-            "market_breadth": "N/A",
+            "context_date": "2026-03-23",
+            "market_breadth": "涨: 10 / 跌: 5",
             "north_funds": 0,
-            "indices": {},
-            "macro_news": {},
-            "stocks": [],
+            "indices": {"上证指数": {"change_pct": 0.5}},
+            "macro_news": {"telegraph": ["流动性平稳"]},
+            "stocks": [{"code": "600519", "name": "贵州茅台", "signal": "SAFE", "news": ["公司回购进展"]}],
         }
 
     monkeypatch.setattr(service, "collect_and_process_data", _fake_collect)
     monkeypatch.setattr(service, "post_process_result", lambda result, _ai_input, mode='midday': result)
     monkeypatch.setattr(service.db, "get_last_close_analysis", lambda: None)
     monkeypatch.setattr(service.db, "save_record", lambda **_kwargs: None)
+    monkeypatch.setattr(service, "_compute_signal_scorecard", lambda *args, **kwargs: None)
 
     monkeypatch.setattr("src.service.analysis_service.GeminiClient", lambda: _DummyGemini())
 
@@ -80,16 +84,18 @@ def test_publish_target_telegram_routes_close_to_telegram(monkeypatch):
 
     async def _fake_collect(_portfolio):
         return {
-            "market_breadth": "N/A",
+            "context_date": "2026-03-23",
+            "market_breadth": "涨: 10 / 跌: 5",
             "north_funds": 0,
-            "indices": {},
-            "macro_news": {},
-            "stocks": [],
+            "indices": {"上证指数": {"change_pct": 0.5}},
+            "macro_news": {"telegraph": ["流动性平稳"]},
+            "stocks": [{"code": "600519", "name": "贵州茅台", "signal": "SAFE", "news": ["公司回购进展"]}],
         }
 
     monkeypatch.setattr(service, "collect_and_process_data", _fake_collect)
     monkeypatch.setattr(service, "post_process_result", lambda result, _ai_input, mode='midday': result)
     monkeypatch.setattr(service.db, "save_record", lambda **_kwargs: None)
+    monkeypatch.setattr(service, "_compute_signal_scorecard", lambda *args, **kwargs: None)
     monkeypatch.setattr("src.service.analysis_service.GeminiClient", lambda: _DummyGemini())
 
     feishu = Mock()
@@ -108,6 +114,7 @@ def test_publish_target_telegram_routes_morning_to_telegram(monkeypatch):
 
     async def _fake_collect_morning(_portfolio):
         return {
+            "context_date": "2026-03-23",
             "global_indices": [],
             "commodities": [],
             "us_treasury": {},

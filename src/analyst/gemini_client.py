@@ -120,7 +120,7 @@ class GeminiClient:
         
         genai.configure(api_key=self.api_key)
         
-        model_name = self.config.get('ai', {}).get('model_name', 'gemini-3-pro-preview')
+        model_name = self.config.get('ai', {}).get('model_name', 'gemini-3.1-pro-preview')
         logger.info(f"Initializing Gemini Client with model: {model_name}")
         self.model = genai.GenerativeModel(model_name)
 
@@ -196,7 +196,11 @@ class GeminiClient:
         scorecard = market_data.get('signal_scorecard')
         context_date = market_data.get('context_date')
 
-        context_json = self._build_context(market_breadth, north_funds, indices, macro_news, portfolio, yesterday_context, scorecard, context_date)
+        structured_report = market_data.get("structured_report")
+        if structured_report:
+            context_json = json.dumps({"Structured_Report": structured_report}, ensure_ascii=False, indent=1)
+        else:
+            context_json = self._build_context(market_breadth, north_funds, indices, macro_news, portfolio, yesterday_context, scorecard, context_date)
 
         # Load Prompt Template
         # Using the midday focus from config
@@ -232,7 +236,11 @@ class GeminiClient:
         scorecard = market_data.get('signal_scorecard')
         context_date = market_data.get('context_date')
 
-        context_json = self._build_context(market_breadth, north_funds, indices, macro_news, portfolio, scorecard=scorecard, context_date=context_date)
+        structured_report = market_data.get("structured_report")
+        if structured_report:
+            context_json = json.dumps({"Structured_Report": structured_report}, ensure_ascii=False, indent=1)
+        else:
+            context_json = self._build_context(market_breadth, north_funds, indices, macro_news, portfolio, scorecard=scorecard, context_date=context_date)
         
         full_prompt = f"""
 {system_prompt}

@@ -30,6 +30,10 @@ def _print_text_summary(result: Dict[str, Any], mode: str):
         return
 
     lines = []
+    quality_status = result.get("quality_status")
+    data_timestamp = result.get("data_timestamp")
+    source_labels = result.get("source_labels", [])
+
     if mode == 'morning':
         lines.append(f"=== 早报分析 ===")
         lines.append(f"隔夜综述: {result.get('global_overnight_summary', 'N/A')}")
@@ -43,6 +47,12 @@ def _print_text_summary(result: Dict[str, Any], mode: str):
             lines.append(f"  [{a.get('code')}] {a.get('name')} | 预期:{a.get('opening_expectation')} | 策略:{a.get('strategy')}")
     elif mode == 'close':
         lines.append(f"=== 收盘复盘 ===")
+        if quality_status:
+            lines.append(f"质量: {quality_status}")
+        if data_timestamp:
+            lines.append(f"时间: {data_timestamp}")
+        if source_labels:
+            lines.append(f"来源: {', '.join(source_labels)}")
         lines.append(f"总结: {result.get('market_summary', 'N/A')}")
         lines.append(f"温度: {result.get('market_temperature', 'N/A')}")
         # Signal Scorecard
@@ -66,6 +76,12 @@ def _print_text_summary(result: Dict[str, Any], mode: str):
                 lines.append(f"    指标: {tech}")
     else:  # midday
         lines.append(f"=== 午盘分析 ===")
+        if quality_status:
+            lines.append(f"质量: {quality_status}")
+        if data_timestamp:
+            lines.append(f"时间: {data_timestamp}")
+        if source_labels:
+            lines.append(f"来源: {', '.join(source_labels)}")
         lines.append(f"情绪: {result.get('market_sentiment', 'N/A')}")
         lines.append(f"量能: {result.get('volume_analysis', 'N/A')}")
         lines.append(f"指数: {result.get('indices_info', 'N/A')}")

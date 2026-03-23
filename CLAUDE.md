@@ -138,7 +138,7 @@ The system uses `asyncio` with a `ThreadPoolExecutor` (16 workers) to paralleliz
 ### config.yaml Structure
 
 - `system`: Log level, retry count, timeout, timezone
-- `ai`: Model name (default: `gemini-3-pro-preview`)
+- `ai`: Model name (default: `gemini-3.1-pro-preview`)
 - `api_keys`: Gemini API key and Feishu webhook (use `${VAR}` syntax for env vars)
 - `portfolio`: List of stock/ETF positions with code, name, cost basis, strategy (trend/value)
 - `risk_management`: Stop loss %, MA window, north money threshold

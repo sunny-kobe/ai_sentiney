@@ -50,6 +50,9 @@ class FeishuClient:
         bull_case = data.get("bull_case", "")
         bear_case = data.get("bear_case", "")
         actions = data.get("actions", [])
+        quality_status = data.get("quality_status", "normal")
+        data_timestamp = data.get("data_timestamp", "N/A")
+        source_labels = ", ".join(data.get("source_labels", [])) or "N/A"
         
         # Pass indices data manually if we can, but usually 'data' is just the AI result.
         # Wait, the AI result doesn't contain the raw indices data unless we put it there or pass it separately.
@@ -69,6 +72,14 @@ class FeishuClient:
 
         # 1. Header Section
         elements: List[Dict[str, Any]] = [
+            {
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": f"🧪 质量: {quality_status}\n🕒 时间: {data_timestamp}\n🔎 来源: {source_labels}"
+                }
+            },
+            {"tag": "hr"},
             {
                 "tag": "div",
                 "text": {
@@ -463,6 +474,9 @@ class FeishuClient:
         bull_case = data.get("bull_case", "")
         bear_case = data.get("bear_case", "")
         actions = data.get("actions", [])
+        quality_status = data.get("quality_status", "normal")
+        data_timestamp = data.get("data_timestamp", "N/A")
+        source_labels = ", ".join(data.get("source_labels", [])) or "N/A"
 
         # Temperature-based color
         header_color = "blue"
@@ -475,6 +489,14 @@ class FeishuClient:
         date_str = datetime.now().strftime('%Y年%m月%d日')
 
         elements = [
+            {
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": f"🧪 质量: {quality_status}\n🕒 时间: {data_timestamp}\n🔎 来源: {source_labels}"
+                }
+            },
+            {"tag": "hr"},
             {
                 "tag": "div",
                 "text": {

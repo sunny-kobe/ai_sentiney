@@ -15,6 +15,8 @@ from src.reporter.telegram_client import TelegramClient
 from src.storage.database import SentinelDB
 from src.processor.signal_tracker import evaluate_yesterday, calculate_rolling_stats, calculate_pair_rolling_stats, build_scorecard, _compute_risk_stats, _compute_buy_stats
 from src.utils.trading_calendar import should_run_market_report
+from src.service.report_quality import evaluate_input_quality, evaluate_output_quality
+from src.service.structured_report import build_structured_report
 
 class AnalysisService:
     def __init__(self):
@@ -84,6 +86,11 @@ class AnalysisService:
 
         indices = ai_input.get('indices', {})
         processed_stocks = ai_input.get('stocks', [])
+        structured_map = {
+            stock.get("code"): stock
+            for stock in ai_input.get("structured_report", {}).get("stocks", [])
+            if stock.get("code")
+        }
         
         # 1. Format Indices Info
         indices_str = []
@@ -133,6 +140,12 @@ class AnalysisService:
                     action['confidence'] = stock_obj['confidence']
                 if 'tech_summary' in stock_obj:
                     action['tech_summary'] = stock_obj['tech_summary']
+                structured_stock = structured_map.get(code)
+                if structured_stock:
+                    action['operation'] = structured_stock.get('operation', action.get('operation', ''))
+                    action['source_labels'] = structured_stock.get('source_labels', [])
+                    action['data_timestamp'] = structured_stock.get('data_timestamp')
+                    action['news_evidence'] = structured_stock.get('news_evidence', [])
             else:
                 action['pct_change_str'] = ""
 
@@ -140,6 +153,11 @@ class AnalysisService:
         scorecard = ai_input.get('signal_scorecard')
         if scorecard:
             analysis_result['signal_scorecard'] = scorecard
+        structured_report = ai_input.get("structured_report")
+        if structured_report:
+            analysis_result["structured_report"] = structured_report
+            analysis_result["data_timestamp"] = structured_report.get("data_timestamp")
+            analysis_result["source_labels"] = structured_report.get("source_labels", [])
 
         return analysis_result
 
@@ -261,6 +279,18 @@ class AnalysisService:
             if scorecard:
                 ai_input['signal_scorecard'] = scorecard
 
+        quality_input = {"status": "normal", "issues": []}
+        if mode in ('midday', 'close'):
+            quality_input = evaluate_input_quality(ai_input, mode=mode)
+            ai_input["quality_input"] = quality_input
+            ai_input["structured_report"] = build_structured_report(
+                ai_input,
+                mode=mode,
+                quality_status=quality_input["status"],
+            )
+            if quality_input["status"] == "blocked" and not dry_run:
+                return self._build_blocked_report(mode, ai_input["structured_report"], quality_input["issues"])
+
         # --- Step 2: AI Analysis ---
         analysis_result = {}
         
@@ -272,8 +302,15 @@ class AnalysisService:
                 analysis_result = {
                     "market_sentiment": "DryRun", 
                     "summary": "This is a dry run.", 
-                    "actions": []
+                    "actions": [],
+                    "quality_status": quality_input["status"],
+                    "quality_issues": quality_input["issues"],
+                    "structured_report": ai_input.get("structured_report"),
+                    "data_timestamp": ai_input.get("structured_report", {}).get("data_timestamp"),
+                    "source_labels": ai_input.get("structured_report", {}).get("source_labels", []),
                 }
+            elif mode in ("midday", "close") and quality_input["status"] == "degraded":
+                analysis_result = self._build_degraded_report(mode, ai_input["structured_report"], quality_input["issues"])
             else:
                 analyst = GeminiClient()
                 if mode == 'midday':
@@ -296,6 +333,25 @@ class AnalysisService:
 
             # Unified Post-Processing
             analysis_result = self.post_process_result(analysis_result, ai_input, mode=mode)
+            if mode in ("midday", "close") and not dry_run:
+                output_quality = evaluate_output_quality(
+                    analysis_result,
+                    ai_input.get("structured_report", {}),
+                    mode=mode,
+                )
+                if quality_input["status"] == "normal" and output_quality["status"] == "degraded":
+                    analysis_result = self._build_degraded_report(
+                        mode,
+                        ai_input["structured_report"],
+                        output_quality["issues"],
+                    )
+                    analysis_result = self.post_process_result(analysis_result, ai_input, mode=mode)
+                if "quality_status" not in analysis_result:
+                    analysis_result["quality_status"] = "normal" if output_quality["status"] == "normal" else "degraded"
+                analysis_result["quality_issues"] = output_quality["issues"] if output_quality["issues"] else quality_input["issues"]
+            elif mode in ("midday", "close"):
+                analysis_result.setdefault("quality_status", quality_input["status"])
+                analysis_result.setdefault("quality_issues", quality_input["issues"])
             
             logger.info(f"{mode.capitalize()} Analysis Completed.")
             
@@ -339,6 +395,63 @@ class AnalysisService:
 
         logger.info(f"=== Analysis ({mode.upper()}) Finished ===")
         return analysis_result
+
+    def _build_blocked_report(self, mode: str, structured_report: Dict[str, Any], issues: List[str]) -> Dict[str, Any]:
+        return {
+            "error": "Insufficient input quality for report generation",
+            "mode": mode,
+            "quality_status": "blocked",
+            "quality_issues": issues,
+            "structured_report": structured_report,
+            "data_timestamp": structured_report.get("data_timestamp"),
+            "source_labels": structured_report.get("source_labels", []),
+        }
+
+    def _build_degraded_report(self, mode: str, structured_report: Dict[str, Any], issues: List[str]) -> Dict[str, Any]:
+        actions = []
+        for stock in structured_report.get("stocks", []):
+            base_action = {
+                "code": stock.get("code"),
+                "name": stock.get("name"),
+                "signal": stock.get("signal"),
+                "confidence": stock.get("confidence"),
+                "operation": stock.get("operation"),
+                "current_price": stock.get("current_price", 0.0),
+                "pct_change_str": "",
+                "tech_summary": stock.get("tech_evidence", ""),
+                "source_labels": stock.get("source_labels", []),
+                "data_timestamp": stock.get("data_timestamp"),
+            }
+            evidence_text = " / ".join(stock.get("news_evidence", [])[:2]) or stock.get("tech_evidence", "")
+            if mode == "close":
+                base_action["today_review"] = "结构化快报"
+                base_action["tomorrow_plan"] = stock.get("operation")
+                base_action["reason"] = evidence_text
+            else:
+                base_action["reason"] = evidence_text or "证据不足，采用结构化技术快报"
+            actions.append(base_action)
+
+        top = {
+            "quality_status": "degraded",
+            "quality_issues": issues,
+            "structured_report": structured_report,
+            "data_timestamp": structured_report.get("data_timestamp"),
+            "source_labels": structured_report.get("source_labels", []),
+            "actions": actions,
+        }
+        if mode == "close":
+            top.update({
+                "market_summary": "证据不足，降级输出",
+                "market_temperature": "结构化快报",
+            })
+        else:
+            top.update({
+                "market_sentiment": "结构化快报",
+                "volume_analysis": "N/A",
+                "macro_summary": "证据不足，降级输出",
+                "indices_info": structured_report.get("market", {}).get("indices_info", ""),
+            })
+        return top
 
     async def ask_question(self, question: str, date: str = None, mode: str = 'midday') -> str:
         """

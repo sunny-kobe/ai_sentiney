@@ -35,3 +35,6 @@ def test_replay_dry_run_skips_ai_call(tmp_path, monkeypatch):
 
     assert result["market_sentiment"] == "DryRun"
     assert result["actions"] == []
+    assert result["quality_status"] == "blocked"
+    assert "missing_stocks" in result["quality_issues"]
+    assert result["structured_report"]["mode"] == "midday"
