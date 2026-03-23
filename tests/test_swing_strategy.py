@@ -4,6 +4,7 @@ from src.service.swing_strategy import (
     apply_cluster_risk_overlay,
     build_swing_report,
     classify_market_regime,
+    resolve_benchmark_code,
     score_holding,
 )
 
@@ -53,6 +54,33 @@ def _make_history(code, prices):
             }
         )
     return records
+
+
+def _make_multi_history(price_map):
+    records = []
+    start = date(2026, 1, 5)
+    total_days = len(next(iter(price_map.values())))
+    for idx in range(total_days):
+        stocks = []
+        for code, prices in price_map.items():
+            stocks.append({"code": code, "name": code, "current_price": prices[idx]})
+        records.append(
+            {
+                "date": (start + timedelta(days=idx)).isoformat(),
+                "raw_data": {"stocks": stocks},
+                "ai_result": {"actions": []},
+            }
+        )
+    return records
+
+
+def test_resolve_benchmark_code_prefers_cluster_proxy_and_avoids_self():
+    available_codes = {"510300", "510500", "159338", "159819"}
+
+    assert resolve_benchmark_code(_make_stock("300308", "人工智能龙头"), available_codes) == "159819"
+    assert resolve_benchmark_code(_make_stock("563300", "中证2000ETF"), available_codes) == "510500"
+    assert resolve_benchmark_code(_make_stock("512480", "半导体ETF"), available_codes) == "159338"
+    assert resolve_benchmark_code(_make_stock("159934", "黄金ETF"), {"159934", "510300"}) == "510300"
 
 
 def test_classify_market_regime_covers_attack_balance_defense_and_retreat():
@@ -218,3 +246,120 @@ def test_build_swing_report_returns_plain_language_portfolio_guidance():
     assert lead["risk_line"]
     assert "MACD" not in lead["reason"]
     assert "MACD" in report["technical_evidence"][0]["tech_summary"]
+
+
+def test_build_swing_report_uses_relative_strength_to_promote_and_demote_actions():
+    history = _make_multi_history(
+        {
+            "510300": [100 + (idx * 0.5) for idx in range(41)],
+            "LEAD": [100 + idx for idx in range(41)],
+            "LAG": [100 + (idx * 0.1) for idx in range(41)],
+        }
+    )
+    ai_input = {
+        "market_breadth": "2500家上涨，2400家下跌",
+        "indices": {"上证指数": {"change_pct": 0.1}, "创业板指": {"change_pct": 0.0}},
+        "macro_news": {"telegraph": ["消息偏中性"]},
+        "stocks": [
+            _make_stock(
+                "LEAD",
+                "强势龙头",
+                signal="SAFE",
+                confidence="中",
+                bias_pct=0.0,
+                pct_change=0.6,
+                current_price=140,
+                ma20=132,
+                tech_summary="站上20日线",
+                macd_trend="UNKNOWN",
+                obv_trend="UNKNOWN",
+            ),
+            _make_stock(
+                "LAG",
+                "弱势跟随",
+                signal="SAFE",
+                confidence="中",
+                bias_pct=-0.01,
+                pct_change=-0.4,
+                current_price=104,
+                ma20=108,
+                tech_summary="围绕20日线反复",
+                macd_trend="UNKNOWN",
+                obv_trend="UNKNOWN",
+            ),
+        ],
+    }
+
+    report = build_swing_report(ai_input, history, analysis_date="2026-03-23")
+    lead = next(item for item in report["actions"] if item["code"] == "LEAD")
+    lag = next(item for item in report["actions"] if item["code"] == "LAG")
+
+    assert lead["action_label"] == "持有"
+    assert "强于对照基准" in lead["reason"]
+    assert lag["action_label"] == "减配"
+    assert "弱于对照基准" in lag["reason"]
+
+
+def test_build_swing_report_retreat_overlay_uses_breakdown_and_bad_news_confirmation():
+    history = _make_multi_history(
+        {
+            "510300": [100 - (idx * 0.2) for idx in range(41)],
+            "159819": [100 - (idx * 1.0) for idx in range(41)],
+            "512480": [100 - (idx * 1.2) for idx in range(41)],
+            "560780": [100 - (idx * 1.1) for idx in range(41)],
+        }
+    )
+    ai_input = {
+        "market_breadth": "900家上涨，4100家下跌",
+        "indices": {"上证指数": {"change_pct": -2.4}, "创业板指": {"change_pct": -3.1}},
+        "macro_news": {"telegraph": ["科技板块业绩下修，外围暴跌，避险情绪升温"]},
+        "stocks": [
+            _make_stock(
+                "159819",
+                "人工智能ETF",
+                signal="SAFE",
+                confidence="高",
+                bias_pct=-0.08,
+                pct_change=-4.3,
+                current_price=0.82,
+                ma20=0.95,
+                tech_summary="跌破20日线，缩量反弹失败",
+                macd_trend="DEATH_CROSS",
+                obv_trend="OUTFLOW",
+            ),
+            _make_stock(
+                "512480",
+                "半导体ETF",
+                signal="WARNING",
+                confidence="高",
+                bias_pct=-0.07,
+                pct_change=-4.8,
+                current_price=0.78,
+                ma20=0.94,
+                tech_summary="放量跌破20日线",
+                macd_trend="DEATH_CROSS",
+                obv_trend="OUTFLOW",
+            ),
+            _make_stock(
+                "560780",
+                "半导体设备ETF",
+                signal="WARNING",
+                confidence="中",
+                bias_pct=-0.06,
+                pct_change=-3.7,
+                current_price=0.83,
+                ma20=0.93,
+                tech_summary="弱反抽后继续走低",
+                macd_trend="BEARISH",
+                obv_trend="OUTFLOW",
+            ),
+        ],
+    }
+
+    report = build_swing_report(ai_input, history, analysis_date="2026-03-23")
+    ai_etf = next(item for item in report["actions"] if item["code"] == "159819")
+
+    assert report["market_regime"] == "撤退"
+    assert ai_etf["action_label"] == "回避"
+    assert "利空确认" in ai_etf["reason"]
+    assert "反抽不能站回" in ai_etf["risk_line"]

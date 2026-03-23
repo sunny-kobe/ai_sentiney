@@ -1,11 +1,24 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, Iterable, List, Mapping, Sequence, Set
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set
+
+from src.processor.swing_tracker import build_price_matrix, calculate_max_drawdown
 
 
 ACTION_ORDER = ["增配", "持有", "减配", "回避", "观察"]
+ACTION_DOWNGRADE_ORDER = ["增配", "持有", "观察", "减配", "回避"]
 RISK_CLUSTERS = {"small_cap", "ai", "semiconductor"}
+BROAD_BETA_CODES = ("159338", "510300", "510980")
+BENCHMARK_CANDIDATES = {
+    "broad_beta": ["159338", "510300", "510980"],
+    "small_cap": ["510500", "563300", "159338", "510300"],
+    "ai": ["159819", "588760", "159338", "510300"],
+    "semiconductor": ["512480", "560780", "159338", "510300"],
+    "precious_metals": ["159934", "159937", "159338", "510300"],
+    "sector_etf": ["159338", "510300", "510980"],
+    "single_name": ["159338", "510300", "510980"],
+}
 
 SIGNAL_SCORES = {
     "OPPORTUNITY": 3,
@@ -68,6 +81,133 @@ def infer_cluster(stock: Mapping[str, Any]) -> str:
     if "ETF" in name:
         return "sector_etf"
     return "single_name"
+
+
+def _downgrade_action(action_label: str, steps: int = 1) -> str:
+    try:
+        index = ACTION_DOWNGRADE_ORDER.index(action_label)
+    except ValueError:
+        return action_label
+    return ACTION_DOWNGRADE_ORDER[min(index + max(steps, 0), len(ACTION_DOWNGRADE_ORDER) - 1)]
+
+
+def resolve_benchmark_code(stock: Mapping[str, Any], available_codes: Set[str]) -> Optional[str]:
+    code = str(stock.get("code", "") or "")
+    cluster = infer_cluster(stock)
+    candidate_codes = BENCHMARK_CANDIDATES.get(cluster, BENCHMARK_CANDIDATES["single_name"])
+
+    for candidate in candidate_codes:
+        if candidate == code:
+            continue
+        if candidate in available_codes:
+            return candidate
+
+    for candidate in BROAD_BETA_CODES:
+        if candidate == code:
+            continue
+        if candidate in available_codes:
+            return candidate
+
+    return None
+
+
+def _build_price_timeline(matrix: Mapping[str, Any], code: str) -> List[float]:
+    timeline: List[float] = []
+    for record_date in matrix.get("dates", []):
+        price = (matrix.get("prices", {}) or {}).get(code, {}).get(record_date)
+        if isinstance(price, (int, float)) and price > 0:
+            timeline.append(float(price))
+    return timeline
+
+
+def _window_return(prices: Sequence[float], window: int) -> Optional[float]:
+    if len(prices) <= window:
+        return None
+    entry = float(prices[-(window + 1)])
+    exit_price = float(prices[-1])
+    if entry <= 0:
+        return None
+    return round((exit_price / entry) - 1, 4)
+
+
+def _window_drawdown(prices: Sequence[float], window: int) -> Optional[float]:
+    if len(prices) < 2:
+        return None
+    window_prices = list(prices[-(window + 1):]) if len(prices) > window else list(prices)
+    if len(window_prices) < 2:
+        return None
+    return calculate_max_drawdown(window_prices)
+
+
+def _is_strong_relative(relative_20: Optional[float], relative_40: Optional[float]) -> bool:
+    return (relative_20 is not None and relative_20 >= 0.05) or (relative_40 is not None and relative_40 >= 0.08)
+
+
+def _is_weak_relative(relative_20: Optional[float], relative_40: Optional[float]) -> bool:
+    return (relative_20 is not None and relative_20 <= -0.05) or (relative_40 is not None and relative_40 <= -0.08)
+
+
+def build_benchmark_context(
+    stocks: Sequence[Mapping[str, Any]],
+    historical_records: Sequence[Mapping[str, Any]],
+    analysis_date: Optional[str] = None,
+) -> Dict[str, Any]:
+    records = list(historical_records)
+    if stocks:
+        snapshot_date = analysis_date or (historical_records[-1].get("date") if historical_records else "9999-12-31")
+        records.append(
+            {
+                "date": snapshot_date,
+                "raw_data": {"stocks": [dict(stock) for stock in stocks]},
+                "ai_result": {"actions": []},
+            }
+        )
+
+    matrix = build_price_matrix(records)
+    available_codes = set((matrix.get("prices") or {}).keys())
+    benchmark_snapshot: Dict[str, Dict[str, Any]] = {}
+
+    for stock in stocks:
+        code = str(stock.get("code", "") or "")
+        if not code:
+            continue
+
+        benchmark_code = resolve_benchmark_code(stock, available_codes)
+        asset_prices = _build_price_timeline(matrix, code)
+        benchmark_prices = _build_price_timeline(matrix, benchmark_code) if benchmark_code else []
+
+        asset_return_20 = _window_return(asset_prices, 20)
+        asset_return_40 = _window_return(asset_prices, 40)
+        benchmark_return_20 = _window_return(benchmark_prices, 20) if benchmark_prices else None
+        benchmark_return_40 = _window_return(benchmark_prices, 40) if benchmark_prices else None
+        relative_return_20 = (
+            round(asset_return_20 - benchmark_return_20, 4)
+            if asset_return_20 is not None and benchmark_return_20 is not None
+            else None
+        )
+        relative_return_40 = (
+            round(asset_return_40 - benchmark_return_40, 4)
+            if asset_return_40 is not None and benchmark_return_40 is not None
+            else None
+        )
+
+        benchmark_snapshot[code] = {
+            "benchmark_code": benchmark_code,
+            "asset_return_20": asset_return_20,
+            "asset_return_40": asset_return_40,
+            "benchmark_return_20": benchmark_return_20,
+            "benchmark_return_40": benchmark_return_40,
+            "relative_return_20": relative_return_20,
+            "relative_return_40": relative_return_40,
+            "drawdown_20": _window_drawdown(asset_prices, 20),
+            "drawdown_40": _window_drawdown(asset_prices, 40),
+        }
+
+    return {
+        "price_matrix": matrix,
+        "available_codes": available_codes,
+        "benchmark_snapshot": benchmark_snapshot,
+    }
 
 
 def _parse_breadth_score(market_breadth: str) -> int:
@@ -232,12 +372,17 @@ def _label_from_score(score: int) -> str:
 
 def score_holding(stock: Mapping[str, Any], benchmark_context: Mapping[str, Any]) -> Dict[str, Any]:
     signal = str(stock.get("signal", "SAFE")).upper()
+    code = str(stock.get("code", "") or "")
     cluster = infer_cluster(stock)
     regime = str(benchmark_context.get("regime", "均衡"))
     stressed_clusters = set(benchmark_context.get("stressed_clusters", set()) or set())
+    benchmark_snapshot = (benchmark_context.get("benchmark_snapshot") or {}).get(code, {})
 
     score = SIGNAL_SCORES.get(signal, 0)
 
+    current_price = float(stock.get("current_price", 0) or 0)
+    ma20 = float(stock.get("ma20", 0) or 0)
+    pct_change = float(stock.get("pct_change", 0) or 0)
     bias_pct = float(stock.get("bias_pct", 0) or 0)
     if bias_pct >= 0.02:
         score += 1
@@ -256,6 +401,23 @@ def score_holding(stock: Mapping[str, Any], benchmark_context: Mapping[str, Any]
     elif obv_trend == "OUTFLOW":
         score -= 1
 
+    if ma20 > 0 and current_price < ma20 and pct_change < 0:
+        score -= 1
+
+    relative_return_20 = benchmark_snapshot.get("relative_return_20")
+    relative_return_40 = benchmark_snapshot.get("relative_return_40")
+    drawdown_20 = benchmark_snapshot.get("drawdown_20")
+    if _is_strong_relative(relative_return_20, relative_return_40):
+        score += 2
+    elif _is_weak_relative(relative_return_20, relative_return_40):
+        score -= 2
+
+    if isinstance(drawdown_20, (int, float)):
+        if drawdown_20 <= -0.12:
+            score -= 2
+        elif drawdown_20 <= -0.08:
+            score -= 1
+
     if regime == "进攻" and cluster in RISK_CLUSTERS and signal in {"OPPORTUNITY", "ACCUMULATE"}:
         score += 1
     elif regime == "防守" and cluster in RISK_CLUSTERS:
@@ -269,8 +431,6 @@ def score_holding(stock: Mapping[str, Any], benchmark_context: Mapping[str, Any]
         score -= 1
 
     action_label = _label_from_score(score)
-    current_price = float(stock.get("current_price", 0) or 0)
-    ma20 = float(stock.get("ma20", 0) or 0)
 
     if ma20 > 0 and current_price >= ma20:
         position_phrase = f"还站在20日线 {ma20:.2f} 上方"
@@ -280,7 +440,18 @@ def score_holding(stock: Mapping[str, Any], benchmark_context: Mapping[str, Any]
         risk_line = f"不能重新站上20日线 {ma20:.2f} 之前，先别加仓。"
 
     flow_phrase = "承接还在配合" if obv_trend == "INFLOW" else "承接偏弱"
-    reason = f"{position_phrase}，{SIGNAL_PHRASES.get(signal, '方向还不明朗')}，{flow_phrase}。"
+    reason_parts = [
+        position_phrase,
+        SIGNAL_PHRASES.get(signal, "方向还不明朗"),
+        flow_phrase,
+    ]
+    if _is_strong_relative(relative_return_20, relative_return_40):
+        reason_parts.append("强于对照基准")
+    elif _is_weak_relative(relative_return_20, relative_return_40):
+        reason_parts.append("弱于对照基准")
+    if isinstance(drawdown_20, (int, float)) and drawdown_20 <= -0.08:
+        reason_parts.append("近一段回撤偏深")
+    reason = "，".join(reason_parts) + "。"
 
     return {
         "code": stock.get("code"),
@@ -297,6 +468,10 @@ def score_holding(stock: Mapping[str, Any], benchmark_context: Mapping[str, Any]
         "technical_evidence": stock.get("tech_summary", ""),
         "current_price": current_price,
         "ma20": ma20,
+        "benchmark_code": benchmark_snapshot.get("benchmark_code"),
+        "relative_return_20": relative_return_20,
+        "relative_return_40": relative_return_40,
+        "drawdown_20": drawdown_20,
     }
 
 
@@ -307,24 +482,78 @@ def apply_cluster_risk_overlay(
     if len(stressed_clusters & RISK_CLUSTERS) < 2:
         return [dict(item) for item in decisions]
 
-    downgrade_map = {
-        "增配": "持有",
-        "持有": "观察",
-        "观察": "减配",
-        "减配": "回避",
-        "回避": "回避",
-    }
-
     adjusted: List[Dict[str, Any]] = []
     for item in decisions:
         updated = dict(item)
         if updated.get("cluster") in stressed_clusters and updated.get("cluster") in RISK_CLUSTERS:
-            updated["action_label"] = downgrade_map.get(updated["action_label"], updated["action_label"])
+            updated["action_label"] = _downgrade_action(str(updated.get("action_label", "观察")))
             updated["conclusion"] = updated["action_label"]
             updated["operation"] = updated["action_label"]
             updated["plan"] = ACTION_PLANS[updated["action_label"]]
             updated["reason"] = f"{updated['reason']} 板块联动走弱，先把动作降一级。"
         adjusted.append(updated)
+    return adjusted
+
+
+def apply_emergency_retreat_overlay(
+    decisions: Sequence[Mapping[str, Any]],
+    ai_input: Mapping[str, Any],
+    regime_info: Mapping[str, Any],
+    benchmark_context: Mapping[str, Any],
+) -> List[Dict[str, Any]]:
+    stocks_by_code = {
+        str(stock.get("code", "") or ""): stock
+        for stock in ai_input.get("stocks", []) or []
+        if stock.get("code")
+    }
+    negative_news = _news_score((ai_input.get("macro_news", {}) or {}).get("telegraph", []) or []) < 0
+    stressed_clusters = set(regime_info.get("stressed_clusters", set()) or set())
+    market_retreat = str(regime_info.get("regime", "均衡")) == "撤退"
+    benchmark_snapshot = benchmark_context.get("benchmark_snapshot", {}) or {}
+
+    adjusted: List[Dict[str, Any]] = []
+    for item in decisions:
+        updated = dict(item)
+        code = str(updated.get("code", "") or "")
+        stock = stocks_by_code.get(code, {})
+        snapshot = benchmark_snapshot.get(code, {})
+
+        pct_change = float(stock.get("pct_change", 0) or 0)
+        bias_pct = float(stock.get("bias_pct", 0) or 0)
+        current_price = float(updated.get("current_price", 0) or 0)
+        ma20 = float(updated.get("ma20", 0) or 0)
+        cluster = updated.get("cluster")
+        weak_relative = _is_weak_relative(snapshot.get("relative_return_20"), snapshot.get("relative_return_40"))
+        structure_break = ma20 > 0 and current_price < ma20 and (pct_change <= -2 or bias_pct <= -0.03)
+        severe_drop = pct_change <= -3.5 or bias_pct <= -0.06 or float(snapshot.get("drawdown_20") or 0) <= -0.12
+        cluster_break = cluster in stressed_clusters and cluster in RISK_CLUSTERS
+
+        downgrade_steps = 0
+        extra_reasons: List[str] = []
+
+        if market_retreat and cluster_break:
+            downgrade_steps = max(downgrade_steps, 1)
+            extra_reasons.append("市场进入撤退阶段，高波动方向先按防守处理。")
+        if structure_break and weak_relative:
+            downgrade_steps = max(downgrade_steps, 1)
+            extra_reasons.append("走势破位并且弱于对照基准。")
+        if severe_drop and cluster_break:
+            downgrade_steps = max(downgrade_steps, 2)
+            extra_reasons.append("同类高波动方向一起失守，先把仓位降到低风险。")
+        if negative_news and structure_break and weak_relative:
+            downgrade_steps = max(downgrade_steps, 2 if market_retreat or cluster_break else 1)
+            extra_reasons.append("利空确认后，先按撤退处理。")
+
+        if downgrade_steps > 0:
+            updated["action_label"] = _downgrade_action(str(updated.get("action_label", "观察")), steps=downgrade_steps)
+            updated["conclusion"] = updated["action_label"]
+            updated["operation"] = updated["action_label"]
+            updated["plan"] = ACTION_PLANS[updated["action_label"]]
+            updated["reason"] = f"{updated['reason']} {' '.join(extra_reasons)}".strip()
+            if ma20 > 0 and structure_break:
+                updated["risk_line"] = f"反抽不能站回20日线 {ma20:.2f}，且继续弱于对照基准时，就先退出。"
+        adjusted.append(updated)
+
     return adjusted
 
 
@@ -334,13 +563,16 @@ def build_swing_report(
     analysis_date: str,
 ) -> Dict[str, Any]:
     regime_info = classify_market_regime(ai_input, historical_records)
+    benchmark_context = build_benchmark_context(ai_input.get("stocks", []) or [], historical_records, analysis_date=analysis_date)
     context = {
         "regime": regime_info["regime"],
         "stressed_clusters": regime_info["stressed_clusters"],
+        "benchmark_snapshot": benchmark_context.get("benchmark_snapshot", {}),
     }
 
     decisions = [score_holding(stock, context) for stock in ai_input.get("stocks", []) or []]
     decisions = apply_cluster_risk_overlay(decisions, regime_info["stressed_clusters"])
+    decisions = apply_emergency_retreat_overlay(decisions, ai_input, regime_info, benchmark_context)
 
     ordered_actions = sorted(
         decisions,

@@ -18,7 +18,7 @@ from src.processor.swing_tracker import build_swing_scorecard
 from src.utils.trading_calendar import should_run_market_report
 from src.service.report_quality import evaluate_input_quality, evaluate_output_quality
 from src.service.structured_report import build_structured_report
-from src.service.swing_strategy import build_swing_report, infer_cluster
+from src.service.swing_strategy import build_swing_report, resolve_benchmark_code
 
 class AnalysisService:
     def __init__(self):
@@ -655,25 +655,21 @@ class AnalysisService:
 
     def _build_swing_benchmark_map(self, records: List[Dict]) -> Dict[str, str]:
         benchmark_map = {}
+        available_codes = {
+            str(stock.get("code"))
+            for record in records
+            for stock in ((record.get("raw_data") or {}).get("stocks", []) or [])
+            if stock.get("code")
+        }
         for record in records:
             for stock in (record.get("raw_data") or {}).get("stocks", []) or []:
                 code = stock.get("code")
                 if not code or code in benchmark_map:
                     continue
 
-                cluster = infer_cluster(stock)
-                benchmark_code = "510300"
-                if cluster in {"ai", "semiconductor"}:
-                    benchmark_code = "159338"
-                elif cluster == "small_cap":
-                    benchmark_code = "510500"
-                elif cluster == "broad_beta":
-                    benchmark_code = "159338" if code == "510300" else "510300"
-
-                if benchmark_code == code:
-                    benchmark_code = "159338" if code != "159338" else "510300"
-
-                benchmark_map[code] = benchmark_code
+                benchmark_code = resolve_benchmark_code(stock, available_codes)
+                if benchmark_code:
+                    benchmark_map[code] = benchmark_code
         return benchmark_map
 
     def _compute_swing_scorecard(self, historical_records: List[Dict]) -> Optional[Dict]:

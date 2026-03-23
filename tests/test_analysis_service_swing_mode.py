@@ -112,3 +112,40 @@ def test_ask_question_accuracy_query_in_swing_mode_uses_medium_term_report(monke
     assert "10日样本" in answer
     assert "平均收益" in answer
     assert "命中率" not in answer
+
+
+def test_build_swing_benchmark_map_reuses_shared_resolution(monkeypatch):
+    service = AnalysisService()
+    calls = []
+    records = [
+        {
+            "date": "2026-03-20",
+            "raw_data": {
+                "stocks": [
+                    {"code": "300308", "name": "人工智能龙头"},
+                    {"code": "563300", "name": "中证2000ETF"},
+                    {"code": "510300", "name": "沪深300ETF"},
+                ]
+            },
+            "ai_result": {"actions": []},
+        }
+    ]
+
+    def fake_resolve(stock, available_codes):
+        calls.append((stock["code"], tuple(sorted(available_codes))))
+        return {
+            "300308": "159819",
+            "563300": "510500",
+            "510300": "159338",
+        }[stock["code"]]
+
+    monkeypatch.setattr("src.service.analysis_service.resolve_benchmark_code", fake_resolve)
+
+    benchmark_map = service._build_swing_benchmark_map(records)
+
+    assert benchmark_map == {"300308": "159819", "563300": "510500", "510300": "159338"}
+    assert calls == [
+        ("300308", ("300308", "510300", "563300")),
+        ("563300", ("300308", "510300", "563300")),
+        ("510300", ("300308", "510300", "563300")),
+    ]
