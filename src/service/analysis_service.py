@@ -30,7 +30,11 @@ class AnalysisService:
     def _load_cached_context(self, mode: str) -> Optional[Dict[str, Any]]:
         if self.data_path.exists():
             with open(self.data_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
+                cached = json.load(f)
+            if mode != "swing":
+                return cached
+            if (cached.get("stocks") or []):
+                return cached
 
         candidate_modes = [mode]
         if mode == "swing":
@@ -769,6 +773,14 @@ class AnalysisService:
         scorecard = self._compute_swing_scorecard(historical_records)
 
         lines = [f"市场结论: {report.get('market_conclusion', '暂无结论')}"]
+        position_plan = report.get("position_plan") or {}
+        if position_plan:
+            lines.append(
+                f"仓位计划: 总仓位{position_plan.get('total_exposure', 'N/A')}，"
+                f"核心仓{position_plan.get('core_target', 'N/A')}，"
+                f"卫星仓{position_plan.get('satellite_target', 'N/A')}，"
+                f"现金{position_plan.get('cash_target', 'N/A')}"
+            )
         if scorecard:
             lines.append(f"中期跟踪: {scorecard.get('summary_text', '')}")
         lines.append("组合动作:")

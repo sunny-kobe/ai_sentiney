@@ -105,11 +105,17 @@ class TelegramClient:
         return "\n".join(lines)
 
     def _build_swing_text(self, data: Dict[str, Any]) -> str:
+        position_plan = data.get("position_plan") or {}
         lines = [
             "🛡️ Sentinel 中期策略",
             f"时间: {data.get('data_timestamp', 'N/A')}",
             f"来源: {', '.join(data.get('source_labels', []))}" if data.get('source_labels') else "来源: N/A",
             f"市场结论: {data.get('market_conclusion', '暂无结论')}",
+            "仓位计划:",
+            f"总仓位: {position_plan.get('total_exposure', 'N/A')}",
+            f"核心仓: {position_plan.get('core_target', 'N/A')}",
+            f"卫星仓: {position_plan.get('satellite_target', 'N/A')}",
+            f"现金: {position_plan.get('cash_target', 'N/A')}",
             "组合动作:",
         ]
         for label in ("增配", "持有", "减配", "回避", "观察"):
@@ -121,7 +127,10 @@ class TelegramClient:
 
         lines.append("持仓清单:")
         for action in data.get("actions", [])[:8]:
-            lines.append(f"- {action.get('name', '')} | {action.get('conclusion', action.get('action_label', '观察'))}")
+            lines.append(
+                f"- {action.get('name', '')} | {action.get('conclusion', action.get('action_label', '观察'))}"
+                f" | {action.get('position_bucket', 'N/A')} | {action.get('target_weight', 'N/A')}"
+            )
             lines.append(f"  计划: {action.get('plan', '')}")
             lines.append(f"  风险线: {action.get('risk_line', '')}")
         return "\n".join(lines)

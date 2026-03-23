@@ -363,3 +363,152 @@ def test_build_swing_report_retreat_overlay_uses_breakdown_and_bad_news_confirma
     assert ai_etf["action_label"] == "回避"
     assert "利空确认" in ai_etf["reason"]
     assert "反抽不能站回" in ai_etf["risk_line"]
+
+
+def test_build_swing_report_adds_core_satellite_cash_position_plan():
+    history = _make_multi_history(
+        {
+            "510300": [100 + (idx * 0.6) for idx in range(41)],
+            "512480": [100 + (idx * 0.9) for idx in range(41)],
+            "563300": [100 - (idx * 0.5) for idx in range(41)],
+        }
+    )
+    ai_input = {
+        "market_breadth": "3600家上涨，1200家下跌",
+        "indices": {"上证指数": {"change_pct": 1.1}, "创业板指": {"change_pct": 1.6}},
+        "macro_news": {"telegraph": ["风险偏好回升，成交改善"]},
+        "stocks": [
+            _make_stock(
+                "510300",
+                "沪深300ETF",
+                signal="SAFE",
+                confidence="高",
+                bias_pct=0.03,
+                pct_change=1.0,
+                current_price=124.0,
+                ma20=118.0,
+                tech_summary="站上20日线",
+                macd_trend="BULLISH",
+                obv_trend="INFLOW",
+            ),
+            _make_stock(
+                "512480",
+                "半导体ETF",
+                signal="OPPORTUNITY",
+                confidence="高",
+                bias_pct=0.05,
+                pct_change=2.8,
+                current_price=136.0,
+                ma20=128.0,
+                tech_summary="强势突破",
+                macd_trend="GOLDEN_CROSS",
+                obv_trend="INFLOW",
+            ),
+            _make_stock(
+                "563300",
+                "中证2000ETF",
+                signal="DANGER",
+                confidence="高",
+                bias_pct=-0.05,
+                pct_change=-3.8,
+                current_price=80.0,
+                ma20=90.0,
+                tech_summary="跌破20日线",
+                macd_trend="DEATH_CROSS",
+                obv_trend="OUTFLOW",
+            ),
+        ],
+    }
+
+    report = build_swing_report(ai_input, history, analysis_date="2026-03-23")
+
+    assert "position_plan" in report
+    plan = report["position_plan"]
+    assert plan["total_exposure"] == "80%-100%"
+    assert plan["core_target"] == "50%-60%"
+    assert plan["satellite_target"] == "30%-40%"
+    assert "每周五收盘后" in plan["weekly_rebalance"]
+    assert "日级只减不加" in plan["daily_rule"]
+
+    core_items = plan["buckets"]["核心仓"]
+    satellite_items = plan["buckets"]["卫星仓"]
+    assert core_items[0]["name"] == "沪深300ETF"
+    assert core_items[0]["target_weight"] == "50%-60%"
+    assert satellite_items[0]["name"] == "半导体ETF"
+    assert satellite_items[0]["target_weight"] == "30%-40%"
+
+    broad = next(item for item in report["actions"] if item["code"] == "510300")
+    semi = next(item for item in report["actions"] if item["code"] == "512480")
+    small = next(item for item in report["actions"] if item["code"] == "563300")
+    assert broad["position_bucket"] == "核心仓"
+    assert broad["target_weight"] == "50%-60%"
+    assert semi["position_bucket"] == "卫星仓"
+    assert semi["target_weight"] == "30%-40%"
+    assert small["target_weight"] == "0%"
+
+
+def test_build_swing_report_caps_watch_and_reduce_positions_to_small_weights():
+    history = _make_multi_history(
+        {
+            "510300": [100 + (idx * 0.4) for idx in range(41)],
+            "WATCH": [100 + (idx * 0.35) for idx in range(41)],
+            "REDUCE": [100 + (idx * 0.2) for idx in range(41)],
+        }
+    )
+    ai_input = {
+        "market_breadth": "2600家上涨，2300家下跌",
+        "indices": {"上证指数": {"change_pct": 0.1}, "创业板指": {"change_pct": 0.0}},
+        "macro_news": {"telegraph": ["消息偏中性"]},
+        "stocks": [
+            _make_stock(
+                "510300",
+                "沪深300ETF",
+                signal="SAFE",
+                confidence="中",
+                bias_pct=0.02,
+                pct_change=0.4,
+                current_price=116.0,
+                ma20=114.0,
+                tech_summary="维持强势",
+                macd_trend="BULLISH",
+                obv_trend="INFLOW",
+            ),
+            _make_stock(
+                "WATCH",
+                "观察标的",
+                signal="WATCH",
+                confidence="中",
+                bias_pct=0.0,
+                pct_change=0.1,
+                current_price=114.0,
+                ma20=113.0,
+                tech_summary="待确认",
+                macd_trend="UNKNOWN",
+                obv_trend="UNKNOWN",
+            ),
+            _make_stock(
+                "REDUCE",
+                "减配标的",
+                signal="WARNING",
+                confidence="中",
+                bias_pct=-0.01,
+                pct_change=-0.6,
+                current_price=108.0,
+                ma20=110.0,
+                tech_summary="转弱",
+                macd_trend="UNKNOWN",
+                obv_trend="UNKNOWN",
+            ),
+        ],
+    }
+
+    report = build_swing_report(ai_input, history, analysis_date="2026-03-23")
+    watch = next(item for item in report["actions"] if item["code"] == "WATCH")
+    reduce = next(item for item in report["actions"] if item["code"] == "REDUCE")
+
+    assert watch["action_label"] == "观察"
+    assert watch["target_weight"] == "0%-5%"
+    assert reduce["action_label"] == "减配"
+    assert reduce["target_weight"] == "0%-3%"
+    assert "每周五收盘后" in report["position_plan"]["weekly_rebalance"]
+    assert "日级只减不加" in report["position_plan"]["daily_rule"]

@@ -45,6 +45,15 @@ def _print_text_summary(result: Dict[str, Any], mode: str):
         scorecard = result.get("swing_scorecard")
         if scorecard:
             lines.append(f"中期跟踪: {scorecard.get('summary_text', '')}")
+        position_plan = result.get("position_plan") or {}
+        if position_plan:
+            lines.append("仓位计划:")
+            lines.append(f"  总仓位: {position_plan.get('total_exposure', 'N/A')}")
+            lines.append(f"  核心仓: {position_plan.get('core_target', 'N/A')}")
+            lines.append(f"  卫星仓: {position_plan.get('satellite_target', 'N/A')}")
+            lines.append(f"  现金: {position_plan.get('cash_target', 'N/A')}")
+            lines.append(f"  周调仓: {position_plan.get('weekly_rebalance', '')}")
+            lines.append(f"  日规则: {position_plan.get('daily_rule', '')}")
         lines.append("市场结论:")
         lines.append(f"  {result.get('market_conclusion', '暂无结论')}")
         lines.append("组合动作:")
@@ -56,7 +65,10 @@ def _print_text_summary(result: Dict[str, Any], mode: str):
             lines.append(f"  {label}: {names}")
         lines.append("持仓清单:")
         for action in result.get("actions", []):
-            lines.append(f"  [{action.get('code')}] {action.get('name')} | 结论:{action.get('conclusion', action.get('action_label', '观察'))}")
+            lines.append(
+                f"  [{action.get('code')}] {action.get('name')} | 结论:{action.get('conclusion', action.get('action_label', '观察'))}"
+                f" | 层级:{action.get('position_bucket', 'N/A')} | 目标仓位:{action.get('target_weight', 'N/A')}"
+            )
             lines.append(f"    原因: {action.get('reason', '')}")
             lines.append(f"    计划: {action.get('plan', '')}")
             lines.append(f"    风险线: {action.get('risk_line', '')}")

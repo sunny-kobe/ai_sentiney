@@ -633,6 +633,15 @@ class FeishuClient:
                 continue
             names = "、".join(item.get("name", "") for item in items if item.get("name"))
             action_lines.append(f"- **{label}**: {names}")
+        position_plan = data.get("position_plan") or {}
+        position_lines = [
+            f"- **总仓位**: {position_plan.get('total_exposure', 'N/A')}",
+            f"- **核心仓**: {position_plan.get('core_target', 'N/A')}",
+            f"- **卫星仓**: {position_plan.get('satellite_target', 'N/A')}",
+            f"- **现金**: {position_plan.get('cash_target', 'N/A')}",
+            f"- **周调仓**: {position_plan.get('weekly_rebalance', '')}",
+            f"- **日规则**: {position_plan.get('daily_rule', '')}",
+        ]
 
         elements = [
             {
@@ -648,6 +657,14 @@ class FeishuClient:
                 "text": {
                     "tag": "lark_md",
                     "content": f"**市场结论**\n{data.get('market_conclusion', '暂无结论')}"
+                }
+            },
+            {"tag": "hr"},
+            {
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": "**仓位计划**\n" + "\n".join(position_lines)
                 }
             },
             {"tag": "hr"},
@@ -672,6 +689,8 @@ class FeishuClient:
             content = (
                 f"**{action.get('name', '')}** ({action.get('code', '')})\n"
                 f"> 结论: {action.get('conclusion', action.get('action_label', '观察'))}\n"
+                f"> 层级: {action.get('position_bucket', 'N/A')}\n"
+                f"> 目标仓位: {action.get('target_weight', 'N/A')}\n"
                 f"> 原因: {action.get('reason', '')}\n"
                 f"> 计划: {action.get('plan', '')}\n"
                 f"> 风险线: {action.get('risk_line', '')}"

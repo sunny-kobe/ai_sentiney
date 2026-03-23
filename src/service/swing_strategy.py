@@ -62,6 +62,14 @@ REGIME_CONCLUSIONS = {
     "防守": "当前偏防守，先守住已有成果，弱势方向以收缩仓位为主。",
     "撤退": "当前进入撤退阶段，先把高波动方向降下来，等市场重新企稳再回来。",
 }
+POSITION_TEMPLATES = {
+    "进攻": {"total_exposure": (90, 100), "core": (50, 60), "satellite": (30, 40), "cash": (0, 10)},
+    "均衡": {"total_exposure": (65, 80), "core": (40, 50), "satellite": (15, 25), "cash": (20, 35)},
+    "防守": {"total_exposure": (35, 55), "core": (20, 35), "satellite": (0, 10), "cash": (45, 65)},
+    "撤退": {"total_exposure": (0, 20), "core": (0, 15), "satellite": (0, 0), "cash": (80, 100)},
+}
+ACTION_WEIGHT_PRIORITY = {"增配": 5, "持有": 4, "观察": 2, "减配": 1, "回避": 0}
+SMALL_POSITION_RANGES = {"观察": (0, 5), "减配": (0, 3), "回避": (0, 0)}
 
 
 def infer_cluster(stock: Mapping[str, Any]) -> str:
@@ -89,6 +97,170 @@ def _downgrade_action(action_label: str, steps: int = 1) -> str:
     except ValueError:
         return action_label
     return ACTION_DOWNGRADE_ORDER[min(index + max(steps, 0), len(ACTION_DOWNGRADE_ORDER) - 1)]
+
+
+def _format_pct_range(min_weight: int, max_weight: int) -> str:
+    min_weight = max(int(round(min_weight)), 0)
+    max_weight = max(int(round(max_weight)), 0)
+    if max_weight <= 0:
+        return "0%"
+    if min_weight == max_weight:
+        return f"{max_weight}%"
+    return f"{min_weight}%-{max_weight}%"
+
+
+def _assign_position_bucket(decision: Mapping[str, Any]) -> str:
+    action_label = str(decision.get("action_label", "观察"))
+    cluster = str(decision.get("cluster", "single_name"))
+
+    if action_label == "回避":
+        return "空仓"
+    if action_label in {"观察", "减配"}:
+        return "卫星仓"
+    if cluster in RISK_CLUSTERS or cluster == "single_name":
+        return "卫星仓"
+    if cluster in {"broad_beta", "precious_metals"}:
+        return "核心仓"
+    if cluster == "sector_etf" and not _is_weak_relative(
+        decision.get("relative_return_20"),
+        decision.get("relative_return_40"),
+    ):
+        return "核心仓"
+    return "卫星仓"
+
+
+def _weight_score(decision: Mapping[str, Any]) -> int:
+    base = ACTION_WEIGHT_PRIORITY.get(str(decision.get("action_label", "观察")), 1)
+    raw_score = int(decision.get("score", 0) or 0)
+    return max(base + max(raw_score, 0), 1)
+
+
+def _allocate_bucket_ranges(
+    decisions: Sequence[Mapping[str, Any]],
+    target_range: Sequence[int],
+) -> Dict[str, Dict[str, int]]:
+    allocations: Dict[str, Dict[str, int]] = {}
+    if not decisions:
+        return allocations
+
+    fixed_items = [item for item in decisions if str(item.get("action_label")) in SMALL_POSITION_RANGES]
+    strong_items = [item for item in decisions if str(item.get("action_label")) not in SMALL_POSITION_RANGES]
+
+    fixed_min = 0
+    fixed_max = 0
+    for item in fixed_items:
+        min_weight, max_weight = SMALL_POSITION_RANGES[str(item.get("action_label"))]
+        allocations[str(item.get("code"))] = {"min": min_weight, "max": max_weight}
+        fixed_min += min_weight
+        fixed_max += max_weight
+
+    remaining_min = max(int(target_range[0]) - fixed_min, 0)
+    remaining_max = max(int(target_range[1]) - fixed_max, 0)
+
+    if not strong_items:
+        return allocations
+
+    total_score = sum(_weight_score(item) for item in strong_items)
+    for item in strong_items:
+        code = str(item.get("code"))
+        score = _weight_score(item)
+        min_weight = int(round(remaining_min * score / total_score))
+        max_weight = int(round(remaining_max * score / total_score))
+        allocations[code] = {"min": min_weight, "max": max_weight}
+
+    return allocations
+
+
+def _summarize_bucket_ranges(items: Sequence[Mapping[str, Any]]) -> Dict[str, int]:
+    total_min = 0
+    total_max = 0
+    for item in items:
+        weight = str(item.get("target_weight", "0%"))
+        if weight == "0%":
+            continue
+        if "-" in weight:
+            min_part, max_part = weight.replace("%", "").split("-", 1)
+            total_min += int(min_part)
+            total_max += int(max_part)
+        else:
+            value = int(weight.replace("%", ""))
+            total_min += value
+            total_max += value
+    return {"min": total_min, "max": total_max}
+
+
+def build_position_plan(decisions: Sequence[Mapping[str, Any]], regime: str) -> Dict[str, Any]:
+    template = POSITION_TEMPLATES.get(regime, POSITION_TEMPLATES["均衡"])
+    enriched = [dict(item) for item in decisions]
+
+    core_candidates: List[Dict[str, Any]] = []
+    satellite_candidates: List[Dict[str, Any]] = []
+
+    for item in enriched:
+        bucket = _assign_position_bucket(item)
+        item["position_bucket"] = bucket
+        if bucket == "核心仓":
+            core_candidates.append(item)
+        elif bucket == "卫星仓":
+            satellite_candidates.append(item)
+        else:
+            item["target_weight"] = "0%"
+
+    core_allocations = _allocate_bucket_ranges(core_candidates, template["core"])
+    satellite_allocations = _allocate_bucket_ranges(satellite_candidates, template["satellite"])
+
+    for item in enriched:
+        code = str(item.get("code"))
+        bucket = item.get("position_bucket")
+        if bucket == "核心仓":
+            allocation = core_allocations.get(code, {"min": 0, "max": 0})
+            item["target_weight"] = _format_pct_range(allocation["min"], allocation["max"])
+        elif bucket == "卫星仓":
+            allocation = satellite_allocations.get(code, {"min": 0, "max": 0})
+            item["target_weight"] = _format_pct_range(allocation["min"], allocation["max"])
+        else:
+            item["target_weight"] = "0%"
+
+    buckets = {"核心仓": [], "卫星仓": [], "现金": []}
+    for item in enriched:
+        bucket = item.get("position_bucket")
+        if bucket not in {"核心仓", "卫星仓"}:
+            continue
+        buckets[bucket].append(
+            {
+                "code": item.get("code"),
+                "name": item.get("name"),
+                "target_weight": item.get("target_weight", "0%"),
+            }
+        )
+
+    core_summary = _summarize_bucket_ranges(buckets["核心仓"])
+    satellite_summary = _summarize_bucket_ranges(buckets["卫星仓"])
+    total_summary = {
+        "min": core_summary["min"] + satellite_summary["min"],
+        "max": core_summary["max"] + satellite_summary["max"],
+    }
+    cash_summary = {
+        "min": max(0, 100 - total_summary["max"]),
+        "max": max(0, 100 - total_summary["min"]),
+    }
+
+    return {
+        "actions": enriched,
+        "position_plan": {
+            "total_exposure": _format_pct_range(total_summary["min"], total_summary["max"]),
+            "core_target": _format_pct_range(core_summary["min"], core_summary["max"]),
+            "satellite_target": _format_pct_range(satellite_summary["min"], satellite_summary["max"]),
+            "cash_target": _format_pct_range(cash_summary["min"], cash_summary["max"]),
+            "regime_total_exposure": _format_pct_range(*template["total_exposure"]),
+            "regime_core_target": _format_pct_range(*template["core"]),
+            "regime_satellite_target": _format_pct_range(*template["satellite"]),
+            "regime_cash_target": _format_pct_range(*template["cash"]),
+            "weekly_rebalance": "每周五收盘后生成计划，下一交易日分批执行。",
+            "daily_rule": "日级只减不加，先减卫星仓，再减观察位。",
+            "buckets": buckets,
+        },
+    }
 
 
 def resolve_benchmark_code(stock: Mapping[str, Any], available_codes: Set[str]) -> Optional[str]:
@@ -458,6 +630,7 @@ def score_holding(stock: Mapping[str, Any], benchmark_context: Mapping[str, Any]
         "name": stock.get("name"),
         "cluster": cluster,
         "signal": signal,
+        "score": score,
         "confidence": stock.get("confidence", ""),
         "action_label": action_label,
         "conclusion": action_label,
@@ -573,6 +746,8 @@ def build_swing_report(
     decisions = [score_holding(stock, context) for stock in ai_input.get("stocks", []) or []]
     decisions = apply_cluster_risk_overlay(decisions, regime_info["stressed_clusters"])
     decisions = apply_emergency_retreat_overlay(decisions, ai_input, regime_info, benchmark_context)
+    position_output = build_position_plan(decisions, regime_info["regime"])
+    decisions = position_output["actions"]
 
     ordered_actions = sorted(
         decisions,
@@ -599,6 +774,7 @@ def build_swing_report(
         "market_regime": regime_info["regime"],
         "market_conclusion": REGIME_CONCLUSIONS[regime_info["regime"]],
         "market_drivers": regime_info["reasons"],
+        "position_plan": position_output["position_plan"],
         "portfolio_actions": portfolio_actions,
         "actions": ordered_actions,
         "technical_evidence": technical_evidence,
