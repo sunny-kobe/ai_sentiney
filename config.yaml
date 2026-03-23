@@ -9,6 +9,14 @@ system:
 ai:
   model_name: "gemini-3.1-pro-preview"
 
+strategy:
+  default_mode: "swing"
+  swing:
+    windows: [10, 20, 40]
+    action_labels: ["增配", "持有", "减配", "回避", "观察"]
+    primary_metrics: ["平均收益", "平均超额", "平均回撤"]
+    positioning: "以2-8周中期持仓调整为主，midday/close 只做战术诊断"
+
 api_keys:
   # Using env vars is recommended, but supporting config file for ease of use in local env
   gemini_api_key: "${GEMINI_API_KEY}"

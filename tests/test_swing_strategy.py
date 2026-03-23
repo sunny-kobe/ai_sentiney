@@ -1,0 +1,220 @@
+from datetime import date, timedelta
+
+from src.service.swing_strategy import (
+    apply_cluster_risk_overlay,
+    build_swing_report,
+    classify_market_regime,
+    score_holding,
+)
+
+
+def _make_stock(
+    code,
+    name,
+    *,
+    signal="SAFE",
+    confidence="中",
+    bias_pct=0.01,
+    pct_change=0.5,
+    current_price=1.0,
+    ma20=0.98,
+    tech_summary="站上20日线，趋势偏强",
+    macd_trend="BULLISH",
+    obv_trend="INFLOW",
+    kdj_signal="NEUTRAL",
+    atr_volatility="NORMAL",
+):
+    return {
+        "code": code,
+        "name": name,
+        "signal": signal,
+        "confidence": confidence,
+        "bias_pct": bias_pct,
+        "pct_change": pct_change,
+        "current_price": current_price,
+        "ma20": ma20,
+        "tech_summary": tech_summary,
+        "macd": {"trend": macd_trend},
+        "obv": {"trend": obv_trend},
+        "kdj": {"signal": kdj_signal},
+        "atr": {"volatility": atr_volatility},
+    }
+
+
+def _make_history(code, prices):
+    records = []
+    start = date(2026, 2, 2)
+    for idx, price in enumerate(prices):
+        records.append(
+            {
+                "date": (start + timedelta(days=idx)).isoformat(),
+                "raw_data": {"stocks": [{"code": code, "name": code, "current_price": price}]},
+                "ai_result": {"actions": []},
+            }
+        )
+    return records
+
+
+def test_classify_market_regime_covers_attack_balance_defense_and_retreat():
+    attack = classify_market_regime(
+        {
+            "market_breadth": "3800家上涨，1100家下跌",
+            "indices": {"上证指数": {"change_pct": 1.2}, "创业板指": {"change_pct": 1.8}},
+            "macro_news": {"telegraph": ["成交回暖，核心资产企稳"]},
+            "stocks": [_make_stock("510300", "沪深300ETF", signal="SAFE", bias_pct=0.04)],
+        },
+        _make_history("510300", [100, 101, 103, 105]),
+    )
+    balanced = classify_market_regime(
+        {
+            "market_breadth": "2500家上涨，2400家下跌",
+            "indices": {"上证指数": {"change_pct": 0.2}, "创业板指": {"change_pct": -0.1}},
+            "macro_news": {"telegraph": ["消息偏中性"]},
+            "stocks": [_make_stock("510300", "沪深300ETF", signal="SAFE", bias_pct=0.01)],
+        },
+        _make_history("510300", [100, 100.5, 100.2, 100.4]),
+    )
+    defense = classify_market_regime(
+        {
+            "market_breadth": "1700家上涨，3200家下跌",
+            "indices": {"上证指数": {"change_pct": -0.8}, "创业板指": {"change_pct": -1.2}},
+            "macro_news": {"telegraph": ["市场承压，观望情绪抬头"]},
+            "stocks": [_make_stock("563300", "中证2000ETF", signal="WARNING", bias_pct=-0.03, pct_change=-1.5)],
+        },
+        _make_history("510300", [100, 98.5, 97.5, 96]),
+    )
+    retreat = classify_market_regime(
+        {
+            "market_breadth": "800家上涨，4200家下跌",
+            "indices": {"上证指数": {"change_pct": -2.2}, "创业板指": {"change_pct": -3.4}},
+            "macro_news": {"telegraph": ["外围暴跌，关税升级，避险情绪升温"]},
+            "stocks": [
+                _make_stock("563300", "中证2000ETF", signal="DANGER", bias_pct=-0.06, pct_change=-4.0),
+                _make_stock("159819", "人工智能ETF", signal="WARNING", bias_pct=-0.04, pct_change=-3.2),
+                _make_stock("512480", "半导体ETF", signal="WARNING", bias_pct=-0.05, pct_change=-3.8),
+            ],
+        },
+        _make_history("510300", [100, 96, 93, 90]),
+    )
+
+    assert attack["regime"] == "进攻"
+    assert balanced["regime"] == "均衡"
+    assert defense["regime"] == "防守"
+    assert retreat["regime"] == "撤退"
+
+
+def test_score_holding_maps_to_plain_language_actions():
+    bullish = score_holding(
+        _make_stock(
+            "512480",
+            "半导体ETF",
+            signal="OPPORTUNITY",
+            confidence="高",
+            bias_pct=0.06,
+            pct_change=2.4,
+            current_price=1.08,
+            ma20=1.0,
+            tech_summary="MACD金叉，站上20日线，量价配合",
+            macd_trend="GOLDEN_CROSS",
+            obv_trend="INFLOW",
+        ),
+        {"regime": "进攻", "stressed_clusters": set()},
+    )
+    bearish = score_holding(
+        _make_stock(
+            "563300",
+            "中证2000ETF",
+            signal="DANGER",
+            confidence="高",
+            bias_pct=-0.06,
+            pct_change=-4.2,
+            current_price=0.44,
+            ma20=0.50,
+            tech_summary="跌破20日线，量能失守",
+            macd_trend="DEATH_CROSS",
+            obv_trend="OUTFLOW",
+        ),
+        {"regime": "防守", "stressed_clusters": {"small_cap"}},
+    )
+
+    assert bullish["action_label"] == "增配"
+    assert "20日线" in bullish["reason"]
+    assert "分批加" in bullish["plan"]
+    assert "20日线" in bullish["risk_line"]
+
+    assert bearish["action_label"] == "回避"
+    assert "先收缩" in bearish["plan"]
+    assert "20日线" in bearish["risk_line"]
+
+
+def test_apply_cluster_risk_overlay_downgrades_small_cap_ai_and_semis():
+    decisions = [
+        {"code": "512480", "name": "半导体ETF", "cluster": "semiconductor", "action_label": "增配", "reason": "趋势向上"},
+        {"code": "159819", "name": "人工智能ETF", "cluster": "ai", "action_label": "持有", "reason": "仍在观察"},
+        {"code": "563300", "name": "中证2000ETF", "cluster": "small_cap", "action_label": "持有", "reason": "弹性较大"},
+        {"code": "510300", "name": "沪深300ETF", "cluster": "broad_beta", "action_label": "持有", "reason": "核心底仓"},
+    ]
+
+    adjusted = apply_cluster_risk_overlay(decisions, stressed_clusters={"semiconductor", "ai", "small_cap"})
+
+    assert adjusted[0]["action_label"] == "持有"
+    assert adjusted[1]["action_label"] == "观察"
+    assert adjusted[2]["action_label"] == "观察"
+    assert adjusted[3]["action_label"] == "持有"
+    assert "板块联动走弱" in adjusted[0]["reason"]
+
+
+def test_build_swing_report_returns_plain_language_portfolio_guidance():
+    ai_input = {
+        "market_breadth": "3200家上涨，1700家下跌",
+        "indices": {"上证指数": {"change_pct": 0.8}, "创业板指": {"change_pct": 1.1}},
+        "macro_news": {"telegraph": ["成交温和回暖，风险偏好有所修复"]},
+        "stocks": [
+            _make_stock(
+                "512480",
+                "半导体ETF",
+                signal="OPPORTUNITY",
+                confidence="高",
+                bias_pct=0.06,
+                pct_change=2.2,
+                current_price=1.08,
+                ma20=1.0,
+                tech_summary="MACD金叉，站上20日线，量价配合",
+                macd_trend="GOLDEN_CROSS",
+                obv_trend="INFLOW",
+            ),
+            _make_stock("510300", "沪深300ETF", signal="SAFE", confidence="中", bias_pct=0.02, pct_change=0.8),
+            _make_stock(
+                "563300",
+                "中证2000ETF",
+                signal="WARNING",
+                confidence="中",
+                bias_pct=-0.03,
+                pct_change=-1.6,
+                current_price=0.48,
+                ma20=0.50,
+                tech_summary="跌回20日线附近，短线承压",
+                macd_trend="BEARISH",
+                obv_trend="OUTFLOW",
+            ),
+        ],
+    }
+
+    report = build_swing_report(
+        ai_input,
+        _make_history("510300", [100, 101, 103, 104]),
+        analysis_date="2026-03-23",
+    )
+
+    assert report["market_regime"] == "进攻"
+    assert report["market_conclusion"]
+    assert set(report["portfolio_actions"]) == {"增配", "持有", "减配", "回避", "观察"}
+    assert report["portfolio_actions"]["增配"][0]["name"] == "半导体ETF"
+
+    lead = next(item for item in report["actions"] if item["code"] == "512480")
+    assert lead["conclusion"] == "增配"
+    assert lead["reason"]
+    assert lead["plan"]
+    assert lead["risk_line"]
+    assert "MACD" not in lead["reason"]
+    assert "MACD" in report["technical_evidence"][0]["tech_summary"]

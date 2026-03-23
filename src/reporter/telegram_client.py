@@ -26,6 +26,10 @@ class TelegramClient:
         message = self._build_morning_text(data)
         self._send_message(message)
 
+    def send_swing_report(self, data: Dict[str, Any]):
+        message = self._build_swing_text(data)
+        self._send_message(message)
+
     def _send_message(self, message: str):
         if not self.bot_token or not self.chat_id:
             logger.warning("Skipping Telegram push (missing token/chat_id).")
@@ -98,4 +102,26 @@ class TelegramClient:
                 f"- {action.get('name', '')}({action.get('code', '')}) "
                 f"策略: {action.get('strategy', '')}"
             )
+        return "\n".join(lines)
+
+    def _build_swing_text(self, data: Dict[str, Any]) -> str:
+        lines = [
+            "🛡️ Sentinel 中期策略",
+            f"时间: {data.get('data_timestamp', 'N/A')}",
+            f"来源: {', '.join(data.get('source_labels', []))}" if data.get('source_labels') else "来源: N/A",
+            f"市场结论: {data.get('market_conclusion', '暂无结论')}",
+            "组合动作:",
+        ]
+        for label in ("增配", "持有", "减配", "回避", "观察"):
+            items = data.get("portfolio_actions", {}).get(label, [])
+            if not items:
+                continue
+            names = "、".join(item.get("name", "") for item in items if item.get("name"))
+            lines.append(f"{label}: {names}")
+
+        lines.append("持仓清单:")
+        for action in data.get("actions", [])[:8]:
+            lines.append(f"- {action.get('name', '')} | {action.get('conclusion', action.get('action_label', '观察'))}")
+            lines.append(f"  计划: {action.get('plan', '')}")
+            lines.append(f"  风险线: {action.get('risk_line', '')}")
         return "\n".join(lines)

@@ -334,6 +334,22 @@ class FeishuClient:
         except Exception as e:
             logger.error(f"Failed to send Feishu morning card: {e}")
 
+    def send_swing_card(self, data: Dict[str, Any]):
+        if not self.webhook_url:
+            logger.warning("Skipping Feishu push (No URL)")
+            return
+
+        try:
+            card_content = self._construct_swing_card(data)
+            payload = {
+                "msg_type": "interactive",
+                "card": card_content
+            }
+            response = requests.post(self.webhook_url, json=payload, timeout=10)
+            response.raise_for_status()
+        except Exception as e:
+            logger.error(f"Failed to send Feishu swing card: {e}")
+
     def _construct_morning_card(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Constructs the Feishu Interactive Card for morning pre-market brief.
@@ -604,6 +620,77 @@ class FeishuClient:
                 "title": {
                     "tag": "plain_text",
                     "content": "🌙 哨兵收盘复盘"
+                }
+            },
+            "elements": elements
+        }
+
+    def _construct_swing_card(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        action_lines = []
+        for label in ("增配", "持有", "减配", "回避", "观察"):
+            items = data.get("portfolio_actions", {}).get(label, [])
+            if not items:
+                continue
+            names = "、".join(item.get("name", "") for item in items if item.get("name"))
+            action_lines.append(f"- **{label}**: {names}")
+
+        elements = [
+            {
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": f"🕒 时间: {data.get('data_timestamp', 'N/A')}\n🔎 来源: {', '.join(data.get('source_labels', [])) or 'N/A'}"
+                }
+            },
+            {"tag": "hr"},
+            {
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": f"**市场结论**\n{data.get('market_conclusion', '暂无结论')}"
+                }
+            },
+            {"tag": "hr"},
+            {
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": "**组合动作**\n" + ("\n".join(action_lines) if action_lines else "- 暂无动作")
+                }
+            },
+            {"tag": "hr"},
+            {
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": f"**持仓清单 ({len(data.get('actions', []))}只)**"
+                }
+            },
+        ]
+
+        for action in data.get("actions", []):
+            content = (
+                f"**{action.get('name', '')}** ({action.get('code', '')})\n"
+                f"> 结论: {action.get('conclusion', action.get('action_label', '观察'))}\n"
+                f"> 原因: {action.get('reason', '')}\n"
+                f"> 计划: {action.get('plan', '')}\n"
+                f"> 风险线: {action.get('risk_line', '')}"
+            )
+            elements.append({
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": content
+                }
+            })
+
+        return {
+            "config": {"wide_screen_mode": True},
+            "header": {
+                "template": "blue",
+                "title": {
+                    "tag": "plain_text",
+                    "content": "🧭 哨兵中期策略"
                 }
             },
             "elements": elements

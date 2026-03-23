@@ -34,7 +34,38 @@ def _print_text_summary(result: Dict[str, Any], mode: str):
     data_timestamp = result.get("data_timestamp")
     source_labels = result.get("source_labels", [])
 
-    if mode == 'morning':
+    if mode == 'swing':
+        lines.append("=== 中期策略 ===")
+        if quality_status:
+            lines.append(f"质量: {quality_status}")
+        if data_timestamp:
+            lines.append(f"时间: {data_timestamp}")
+        if source_labels:
+            lines.append(f"来源: {', '.join(source_labels)}")
+        scorecard = result.get("swing_scorecard")
+        if scorecard:
+            lines.append(f"中期跟踪: {scorecard.get('summary_text', '')}")
+        lines.append("市场结论:")
+        lines.append(f"  {result.get('market_conclusion', '暂无结论')}")
+        lines.append("组合动作:")
+        for label in ("增配", "持有", "减配", "回避", "观察"):
+            items = result.get("portfolio_actions", {}).get(label, [])
+            if not items:
+                continue
+            names = "、".join(item.get("name", "") for item in items if item.get("name"))
+            lines.append(f"  {label}: {names}")
+        lines.append("持仓清单:")
+        for action in result.get("actions", []):
+            lines.append(f"  [{action.get('code')}] {action.get('name')} | 结论:{action.get('conclusion', action.get('action_label', '观察'))}")
+            lines.append(f"    原因: {action.get('reason', '')}")
+            lines.append(f"    计划: {action.get('plan', '')}")
+            lines.append(f"    风险线: {action.get('risk_line', '')}")
+        technical_evidence = result.get("technical_evidence", [])
+        if technical_evidence:
+            lines.append("技术证据:")
+            for item in technical_evidence:
+                lines.append(f"  [{item.get('code')}] {item.get('name')}: {item.get('tech_summary', '')}")
+    elif mode == 'morning':
         lines.append(f"=== 早报分析 ===")
         lines.append(f"隔夜综述: {result.get('global_overnight_summary', 'N/A')}")
         lines.append(f"大宗商品: {result.get('commodity_summary', 'N/A')}")
@@ -112,7 +143,7 @@ def _print_text_summary(result: Dict[str, Any], mode: str):
 
 def entry_point():
     parser = argparse.ArgumentParser(description="Project Sentinel V2")
-    parser.add_argument('--mode', type=str, default='midday', choices=['midday', 'close', 'morning'], help='Execution mode')
+    parser.add_argument('--mode', type=str, default='midday', choices=['midday', 'close', 'morning', 'swing'], help='Execution mode')
     parser.add_argument('--dry-run', action='store_true', help='Run without calling expensive APIs or sending notifications')
     parser.add_argument('--replay', action='store_true', help='Replay analysis using last saved data')
     parser.add_argument('--webui', action='store_true', help='Start WebUI server')

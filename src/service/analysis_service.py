@@ -14,9 +14,11 @@ from src.reporter.feishu_client import FeishuClient
 from src.reporter.telegram_client import TelegramClient
 from src.storage.database import SentinelDB
 from src.processor.signal_tracker import evaluate_yesterday, calculate_rolling_stats, calculate_pair_rolling_stats, build_scorecard, _compute_risk_stats, _compute_buy_stats
+from src.processor.swing_tracker import build_swing_scorecard
 from src.utils.trading_calendar import should_run_market_report
 from src.service.report_quality import evaluate_input_quality, evaluate_output_quality
 from src.service.structured_report import build_structured_report
+from src.service.swing_strategy import build_swing_report, infer_cluster
 
 class AnalysisService:
     def __init__(self):
@@ -24,6 +26,21 @@ class AnalysisService:
         self.db = SentinelDB()
         self.data_path = Path("data/latest_context.json")
         self.data_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def _load_cached_context(self, mode: str) -> Optional[Dict[str, Any]]:
+        if self.data_path.exists():
+            with open(self.data_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+
+        candidate_modes = [mode]
+        if mode == "swing":
+            candidate_modes.extend(["close", "midday"])
+
+        for candidate_mode in candidate_modes:
+            latest_record = self.db.get_latest_record(mode=candidate_mode)
+            if latest_record:
+                return latest_record
+        return None
 
     async def collect_and_process_data(self, portfolio: List[Dict]) -> Dict[str, Any]:
         """Collects raw data and processes it into AI-ready context."""
@@ -83,6 +100,13 @@ class AnalysisService:
         """Injects real-time data back into analysis result for display."""
         if mode == 'morning':
             return self._post_process_morning(analysis_result, ai_input)
+        if mode == 'swing':
+            analysis_result.setdefault("summary", analysis_result.get("market_conclusion", ""))
+            analysis_result.setdefault("quality_status", "normal")
+            analysis_result.setdefault("quality_issues", [])
+            analysis_result.setdefault("data_timestamp", ai_input.get("context_date"))
+            analysis_result.setdefault("source_labels", ["rule_engine", "history"])
+            return analysis_result
 
         indices = ai_input.get('indices', {})
         processed_stocks = ai_input.get('stocks', [])
@@ -238,19 +262,17 @@ class AnalysisService:
         ai_input = None
 
         # --- Step 1: Data Preparation ---
-        if replay:
-            if self.data_path.exists():
-                logger.info("Replay Mode: Loading data from local JSON file...")
-                with open(self.data_path, 'r', encoding='utf-8') as f:
-                    ai_input = json.load(f)
-            else:
-                latest_record = self.db.get_latest_record(mode=mode)
-                if latest_record:
-                    logger.info("Replay Mode: Loading data from SQLite DB...")
-                    ai_input = latest_record
+        if replay or (mode == "swing" and dry_run):
+            cached_context = self._load_cached_context(mode)
+            if cached_context:
+                if replay:
+                    logger.info("Replay Mode: Loading cached data...")
                 else:
-                     logger.error("No historical data found for replay.")
-                     return {"error": "No replay data"}
+                    logger.info("Swing dry-run: Loading cached context instead of live market data...")
+                ai_input = cached_context
+            elif replay:
+                logger.error("No historical data found for replay.")
+                return {"error": "No replay data"}
         else:
             if not portfolio:
                 logger.warning("Portfolio is empty.")
@@ -295,7 +317,19 @@ class AnalysisService:
         analysis_result = {}
         
         try:
-            if dry_run:
+            if mode == "swing":
+                analysis_date = ai_input.get("context_date") or datetime.now().strftime('%Y-%m-%d')
+                historical_records = self._get_swing_history_records(days=90)
+                analysis_result = build_swing_report(ai_input, historical_records, analysis_date)
+                swing_scorecard = self._compute_swing_scorecard(historical_records)
+                if swing_scorecard:
+                    analysis_result["swing_scorecard"] = swing_scorecard
+                analysis_result.setdefault("summary", analysis_result.get("market_conclusion", ""))
+                analysis_result.setdefault("quality_status", "normal")
+                analysis_result.setdefault("quality_issues", [])
+                analysis_result.setdefault("data_timestamp", analysis_date)
+                analysis_result.setdefault("source_labels", ["rule_engine", "history"])
+            elif dry_run:
                 logger.info("Dry Run Mode: Mocking AI response.")
                 for s in ai_input.get('stocks', []):
                     logger.info(f"[DRY-RUN TAGS] {s['name']} Tech: {s.get('tech_summary')}")
@@ -374,6 +408,8 @@ class AnalysisService:
                             reporter.send_close_report(analysis_result)
                         elif mode == 'morning':
                             reporter.send_morning_report(analysis_result)
+                        elif mode == 'swing':
+                            reporter.send_swing_report(analysis_result)
                     else:
                         reporter = FeishuClient()
                         if mode == 'midday':
@@ -382,6 +418,8 @@ class AnalysisService:
                             reporter.send_close_card(analysis_result)
                         elif mode == 'morning':
                             reporter.send_morning_card(analysis_result)
+                        elif mode == 'swing':
+                            reporter.send_swing_card(analysis_result)
                     logger.info(f"Published to {target}")
                 except Exception as e:
                     logger.error(f"Failed to publish to {target}: {e}")
@@ -461,8 +499,13 @@ class AnalysisService:
         logger.info(f"=== Q&A Mode: '{question}' ===")
 
         # Detect accuracy query
+        if mode == "swing":
+            if self._detect_accuracy_query(question):
+                return self._run_swing_accuracy_report()
+            return self._run_swing_question(question)
+
         if self._detect_accuracy_query(question):
-            return self._run_accuracy_report()
+            return self._run_accuracy_report(mode=mode)
 
         # Detect trend question
         if self._detect_trend(question):
@@ -565,8 +608,11 @@ class AnalysisService:
         keywords = ['准确率', '命中率', '准不准', '靠谱', '可靠', '信得过', '历史表现', '胜率', '准吗', '准么', '靠谱吗', '可信']
         return any(kw in question for kw in keywords)
 
-    def _run_accuracy_report(self) -> str:
+    def _run_accuracy_report(self, mode: str = "midday") -> str:
         """Generate a formatted accuracy report."""
+        if mode == "swing":
+            return self._run_swing_accuracy_report()
+
         records = self.db.get_records_range(mode='midday', days=31)
 
         stats_7d = calculate_rolling_stats(records[:8], days=7)
@@ -599,6 +645,149 @@ class AnalysisService:
         lines.append("")
         lines.extend(_format_stats("近30日", stats_30d))
 
+        return "\n".join(lines)
+
+    def _get_swing_history_records(self, days: int = 90) -> List[Dict]:
+        records = self.db.get_records_range(mode='close', days=days)
+        if records:
+            return records
+        return self.db.get_records_range(mode='midday', days=days)
+
+    def _build_swing_benchmark_map(self, records: List[Dict]) -> Dict[str, str]:
+        benchmark_map = {}
+        for record in records:
+            for stock in (record.get("raw_data") or {}).get("stocks", []) or []:
+                code = stock.get("code")
+                if not code or code in benchmark_map:
+                    continue
+
+                cluster = infer_cluster(stock)
+                benchmark_code = "510300"
+                if cluster in {"ai", "semiconductor"}:
+                    benchmark_code = "159338"
+                elif cluster == "small_cap":
+                    benchmark_code = "510500"
+                elif cluster == "broad_beta":
+                    benchmark_code = "159338" if code == "510300" else "510300"
+
+                if benchmark_code == code:
+                    benchmark_code = "159338" if code != "159338" else "510300"
+
+                benchmark_map[code] = benchmark_code
+        return benchmark_map
+
+    def _compute_swing_scorecard(self, historical_records: List[Dict]) -> Optional[Dict]:
+        if not historical_records:
+            return None
+
+        sorted_records = sorted(historical_records, key=lambda item: item.get("date", ""))
+        synthetic_records = []
+
+        for index, record in enumerate(sorted_records):
+            raw_data = record.get("raw_data") or {}
+            if not raw_data.get("stocks"):
+                continue
+
+            context_window = sorted_records[max(0, index - 20): index + 1]
+            swing_report = build_swing_report(
+                raw_data,
+                context_window,
+                analysis_date=record.get("date") or datetime.now().strftime('%Y-%m-%d'),
+            )
+            actions = [
+                {
+                    "code": action.get("code"),
+                    "name": action.get("name"),
+                    "action_label": action.get("action_label"),
+                    "confidence": action.get("confidence"),
+                }
+                for action in swing_report.get("actions", [])
+                if action.get("code") and action.get("action_label")
+            ]
+            if not actions:
+                continue
+
+            synthetic_records.append(
+                {
+                    "date": record.get("date"),
+                    "raw_data": raw_data,
+                    "ai_result": {"actions": actions},
+                }
+            )
+
+        if not synthetic_records:
+            return None
+
+        return build_swing_scorecard(
+            synthetic_records,
+            benchmark_map=self._build_swing_benchmark_map(sorted_records),
+            windows=(10, 20, 40),
+        )
+
+    def _run_swing_accuracy_report(self) -> str:
+        historical_records = self._get_swing_history_records(days=90)
+        scorecard = self._compute_swing_scorecard(historical_records)
+        if not scorecard:
+            return "中期策略统计数据不足，暂无报告。"
+
+        lines = ["📈 中期策略跟踪报告", ""]
+        for window in scorecard.get("windows", []):
+            stats = scorecard.get("stats", {}).get("overall", {}).get(window, {})
+            if stats.get("count", 0) <= 0:
+                continue
+            line = (
+                f"{window}日样本{stats['count']}，平均收益{stats['avg_absolute_return'] * 100:.1f}%"
+                f"，平均回撤{stats['avg_max_drawdown'] * 100:.1f}%"
+            )
+            if stats.get("avg_relative_return") is not None:
+                line += f"，平均超额{stats['avg_relative_return'] * 100:.1f}%"
+            lines.append(line)
+
+        for label, label_stats in scorecard.get("stats", {}).get("by_action", {}).items():
+            window_stats = next(
+                (
+                    (window, label_stats.get(window))
+                    for window in scorecard.get("windows", [])
+                    if label_stats.get(window, {}).get("count", 0) > 0
+                ),
+                None,
+            )
+            if not window_stats:
+                continue
+            window, stats = window_stats
+            action_line = f"{label}: {window}日样本{stats['count']}，平均收益{stats['avg_absolute_return'] * 100:.1f}%"
+            if stats.get("avg_relative_return") is not None:
+                action_line += f"，平均超额{stats['avg_relative_return'] * 100:.1f}%"
+            lines.append(action_line)
+
+        return "\n".join(lines)
+
+    def _run_swing_question(self, question: str) -> str:
+        historical_records = self._get_swing_history_records(days=90)
+        raw_data = self._load_cached_context("swing")
+        if not raw_data:
+            return "没有找到可用的中期缓存数据。请先运行一次 `python -m src.main --mode swing --dry-run`。"
+
+        analysis_date = raw_data.get("context_date") or datetime.now().strftime('%Y-%m-%d')
+        report = build_swing_report(raw_data, historical_records, analysis_date)
+        scorecard = self._compute_swing_scorecard(historical_records)
+
+        lines = [f"市场结论: {report.get('market_conclusion', '暂无结论')}"]
+        if scorecard:
+            lines.append(f"中期跟踪: {scorecard.get('summary_text', '')}")
+        lines.append("组合动作:")
+        for label in ("增配", "持有", "减配", "回避", "观察"):
+            items = report.get("portfolio_actions", {}).get(label, [])
+            if not items:
+                continue
+            names = "、".join(item.get("name", "") for item in items if item.get("name"))
+            lines.append(f"- {label}: {names}")
+        if report.get("actions"):
+            lead = report["actions"][0]
+            lines.append(
+                f"当前优先项: {lead.get('name', '')} -> {lead.get('conclusion', lead.get('action_label', '观察'))}。"
+                f" {lead.get('plan', '')}"
+            )
         return "\n".join(lines)
 
     async def _run_trend_analysis(self, question: str) -> str:

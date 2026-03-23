@@ -8,7 +8,7 @@
 </p>
 
 > 一个面向 A 股投资者和开发者的开源 AI 分析系统：
-> 自动采集行情与新闻，生成午盘/收盘/盘前策略，支持飞书推送、问答追问、趋势分析和 WebUI。
+> 自动采集行情与新闻，生成中期持仓策略、午盘/收盘/盘前诊断，支持飞书推送、问答追问、趋势分析和 WebUI。
 
 ## Navigation / 导航
 
@@ -31,38 +31,49 @@ WebUI Preview:
 
 `Project Sentinel` 的核心目标是把这件事自动化：
 - 采集层：多数据源容灾（Tencent -> Efinance -> AkShare）
-- 计算层：技术指标 + 规则信号 + 命中追踪
-- 分析层：Gemini 生成结构化结论
+- 计算层：技术指标 + 规则信号 + 中期跟踪评估
+- 分析层：`swing` 规则引擎负责中期结论，Gemini 保留给午盘/收盘/盘前叙述
 - 触达层：终端 / JSON / 飞书 / Telegram / WebUI
 
 一句话：**不是自动交易，而是自动生成“可执行的下一步动作”。**
 
+当前主模式已经切到 `swing`：
+- 目标周期：`2-8` 周
+- 输出格式：`市场结论 / 组合动作 / 持仓清单 / 技术证据`
+- 评估口径：`10/20/40` 个交易日的 `平均收益 / 平均超额 / 平均回撤`
+- 不再把短线命中率作为主KPI，`midday` / `close` 只保留为战术诊断
+
 ## 30 秒看效果
 
 ```bash
-python -m src.main --mode midday
+python -m src.main --mode swing
 ```
 
 示例输出（节选）：
 
 ```text
-=== 午盘分析 ===
-情绪: 分歧 (缩量整固)
-量能: 缩量阴跌 (买盘匮乏)
-指数: 上证指数 +0.142% / 深证成指 +0.074% / 创业板指 -0.258%
-  [510500] 中证500ETF    | 信号:WATCH       | 操作:观望
-  [563300] 中证2000ETF   | 信号:SAFE        | 操作:锁仓
-  [601899] 紫金矿业      | 信号:OPPORTUNITY | 操作:加仓20%-30%
-  [000603] 盛达资源      | 信号:ACCUMULATE  | 操作:加仓10%-20%
+=== 中期策略 ===
+市场结论:
+  当前偏防守，先守住已有成果，弱势方向以收缩仓位为主。
+组合动作:
+  持有: 沪深300ETF
+  减配: 中证2000ETF
+持仓清单:
+  [510300] 沪深300ETF | 结论:持有
+    原因: 还站在20日线 4.01 上方，主趋势还在，承接还在配合。
+    计划: 先把现有仓位拿住，等下一次确认转强再决定要不要加。
+    风险线: 收盘跌回20日线 4.01 下方，就先缩仓。
 ```
 
 ## Features
 
-- 三时段自动分析：`morning` / `midday` / `close`
+- 四种模式：`swing` / `morning` / `midday` / `close`
+- 中期主模式：`swing` 直接给出 `增配 / 持有 / 减配 / 回避 / 观察`
 - 多源容灾采集：单一数据源异常时自动切换
 - 指标引擎：MA、MACD、RSI、BOLL、KDJ、ATR、OBV 等
 - 对称信号体系：卖出侧（DANGER/WARNING/WATCH）+ 买入侧（OPPORTUNITY/ACCUMULATE）
-- 信号追踪：对昨日信号做命中回溯与统计（含风险信号和买入信号分组命中率）
+- 中期评估：按 `10/20/40` 个交易日统计 `平均收益 / 平均超额 / 平均回撤`
+- 日内诊断：`midday` / `close` 保留短线信号追踪，但不再作为主策略 KPI
 - 智能追问：基于缓存上下文做二次问答（`--ask`）
 - 趋势分析：自动识别”最近一周/本月走势”等问题
 - 推送与展示：飞书卡片 + Telegram + 本地 WebUI
@@ -107,6 +118,9 @@ TELEGRAM_CHAT_ID=your_telegram_chat_id_here
 ### 5. 运行
 
 ```bash
+# 中期主模式（默认推荐）
+python -m src.main --mode swing
+
 # 午盘分析（默认最常用）
 python -m src.main --mode midday
 
@@ -123,12 +137,15 @@ python -m src.main --mode midday --publish
 python -m src.main --mode midday --publish --publish-target telegram
 
 # JSON 输出（便于二次开发）
-python -m src.main --mode midday --output json
+python -m src.main --mode swing --output json
 ```
 
 ## Q&A / 趋势追问
 
 ```bash
+# 中期问题（自动走 10/20/40 交易日统计）
+python -m src.main --ask "最近一个月中期方向如何" --mode swing
+
 # 基于最近一次缓存追问
 python -m src.main --ask "黄金ETF今天怎么样"
 
@@ -156,7 +173,7 @@ python -m src.main --webui
 
 | 参数 | 说明 |
 |---|---|
-| `--mode {midday,close,morning}` | 分析模式 |
+| `--mode {swing,midday,close,morning}` | 分析模式 |
 | `--publish` | 推送到发布渠道（默认不推） |
 | `--publish-target {feishu,telegram}` | 推送目标（默认 feishu） |
 | `--dry-run` | 试运行，不调昂贵 API |
@@ -207,6 +224,7 @@ src/
 - [ ] 增加回测与信号评估报告导出
 - [x] 增加 Telegram 推送渠道
 - [x] 买入侧信号体系（OPPORTUNITY / ACCUMULATE）
+- [x] 增加 `swing` 中期策略模式与 `10/20/40` 评估
 - [ ] 提供 Docker 一键部署
 - [ ] 提供更完整的 API 文档与前端展示
 
