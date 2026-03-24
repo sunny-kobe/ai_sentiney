@@ -21,3 +21,9 @@ def test_daily_workflow_routes_manual_and_scheduled_swing_runs():
     assert "github.event.inputs.mode" in content
     assert "github.event.schedule" in content
     assert "--publish-target" in content
+
+
+def test_daily_workflow_uses_supported_python_runtime():
+    content = WORKFLOW_PATH.read_text(encoding="utf-8")
+
+    assert 'python-version: "3.11"' in content
