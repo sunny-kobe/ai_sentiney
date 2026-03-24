@@ -2,6 +2,7 @@
 import pytest
 import pandas as pd
 from datetime import date
+from pathlib import Path
 from src.processor.data_processor import DataProcessor
 
 @pytest.fixture
@@ -230,3 +231,16 @@ def test_t1_tradeable(processor):
     results = processor.generate_signals(processed_stocks, holdings=holdings)
     assert results[0]['signal'] == "DANGER"  # Normal DANGER, not LOCKED
     assert results[0].get('tradeable') == True
+
+
+def test_timezone_implementation_matches_declared_dependencies():
+    """Regression: timezone code must not rely on undeclared third-party packages."""
+    source = Path("src/processor/data_processor.py").read_text(encoding="utf-8")
+    requirements = Path("requirements.txt").read_text(encoding="utf-8").lower()
+
+    uses_pytz = "import pytz" in source or "pytz.timezone" in source
+
+    if uses_pytz:
+        assert "pytz" in requirements
+    else:
+        assert "ZoneInfo" in source

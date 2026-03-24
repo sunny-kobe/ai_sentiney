@@ -1,7 +1,7 @@
 import pandas as pd
 from typing import Dict, Any, List
 from datetime import datetime, date
-import pytz
+from zoneinfo import ZoneInfo
 from src.utils.logger import logger
 from src.utils.config_loader import ConfigLoader
 
@@ -375,7 +375,7 @@ def get_intraday_progress() -> float:
         float: 交易进度。0.0 = 尚未开盘, 1.0 = 已收盘。
                如果在午休或非交易时间，返回当时的累计进度。
     """
-    tz = pytz.timezone('Asia/Shanghai')
+    tz = ZoneInfo('Asia/Shanghai')
     now = datetime.now(tz)
     
     # 将时间转换为当天的分钟数 (从00:00开始)
@@ -460,7 +460,7 @@ class DataProcessor:
             # 🔧 修复: 确保历史数据不包含今日，避免MA20重复计算
             # 问题: 腾讯K线API可能返回当日未完成的K线，导致今日价格被计算两次
             # 解决: 按日期过滤，只保留今日之前的数据
-            tz = pytz.timezone('Asia/Shanghai')
+            tz = ZoneInfo('Asia/Shanghai')
             today = datetime.now(tz).date()
 
             # 确保有日期列用于过滤
@@ -652,7 +652,7 @@ class DataProcessor:
         NOTE: North funds logic has been REMOVED as it's no longer real-time.
         """
         results = []
-        tz = pytz.timezone('Asia/Shanghai')
+        tz = ZoneInfo('Asia/Shanghai')
         today = datetime.now(tz).date()
 
         # 🔧 修复: 从配置读取阈值，而非硬编码
