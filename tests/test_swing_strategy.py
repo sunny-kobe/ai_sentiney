@@ -24,6 +24,7 @@ def _make_stock(
     obv_trend="INFLOW",
     kdj_signal="NEUTRAL",
     atr_volatility="NORMAL",
+    shares=0,
 ):
     return {
         "code": code,
@@ -39,6 +40,7 @@ def _make_stock(
         "obv": {"trend": obv_trend},
         "kdj": {"signal": kdj_signal},
         "atr": {"volatility": atr_volatility},
+        "shares": shares,
     }
 
 
@@ -512,3 +514,65 @@ def test_build_swing_report_caps_watch_and_reduce_positions_to_small_weights():
     assert reduce["target_weight"] == "0%-3%"
     assert "每周五收盘后" in report["position_plan"]["weekly_rebalance"]
     assert "日级只减不加" in report["position_plan"]["daily_rule"]
+
+
+def test_build_swing_report_adds_current_position_snapshot_and_rebalance_moves():
+    history = _make_multi_history(
+        {
+            "510300": [100 + (idx * 0.4) for idx in range(41)],
+            "563300": [100 - (idx * 0.3) for idx in range(41)],
+        }
+    )
+    ai_input = {
+        "market_breadth": "2500家上涨，2400家下跌",
+        "indices": {"上证指数": {"change_pct": 0.1}, "创业板指": {"change_pct": 0.0}},
+        "macro_news": {"telegraph": ["消息偏中性"]},
+        "portfolio_state": {"cash_balance": 6000, "lot_size": 100},
+        "stocks": [
+            _make_stock(
+                "510300",
+                "沪深300ETF",
+                signal="SAFE",
+                confidence="高",
+                bias_pct=0.02,
+                pct_change=0.4,
+                current_price=10.0,
+                ma20=9.5,
+                tech_summary="维持强势",
+                macd_trend="BULLISH",
+                obv_trend="INFLOW",
+                shares=1000,
+            ),
+            _make_stock(
+                "563300",
+                "中证2000ETF",
+                signal="DANGER",
+                confidence="高",
+                bias_pct=-0.05,
+                pct_change=-3.0,
+                current_price=5.0,
+                ma20=5.6,
+                tech_summary="跌破20日线",
+                macd_trend="DEATH_CROSS",
+                obv_trend="OUTFLOW",
+                shares=1200,
+            ),
+        ],
+    }
+
+    report = build_swing_report(ai_input, history, analysis_date="2026-03-24")
+
+    plan = report["position_plan"]
+    assert plan["current_total_exposure"] == "72.7%"
+    assert plan["current_cash_pct"] == "27.3%"
+    assert plan["account_total_assets"] == "22000.00"
+    assert plan["cash_balance"] == "6000.00"
+
+    broad = next(item for item in report["actions"] if item["code"] == "510300")
+    small = next(item for item in report["actions"] if item["code"] == "563300")
+    assert broad["current_shares"] == 1000
+    assert broad["current_weight"] == "45.5%"
+    assert broad["rebalance_action"] == "卖出900份，保留约100份"
+    assert small["current_shares"] == 1200
+    assert small["current_weight"] == "27.3%"
+    assert small["rebalance_action"] == "卖出1200份"

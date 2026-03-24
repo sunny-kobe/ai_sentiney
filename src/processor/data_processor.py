@@ -435,6 +435,9 @@ class DataProcessor:
                 "ma20": 0.0,
                 "bias_pct": 0.0,
                 "status": "UNKNOWN",
+                "shares": stock_d.get('shares', 0),
+                "strategy": stock_d.get('strategy', 'trend'),
+                "cost": stock_d.get('cost', 0),
                 "news": stock_d.get('news', [])
             }
 
@@ -637,6 +640,7 @@ class DataProcessor:
                 "atr": atr_result,
                 "strategy": stock_d.get('strategy', 'trend'),
                 "cost": stock_d.get('cost', 0),
+                "shares": stock_d.get('shares', 0),
                 "news": stock_d.get('news', [])
             }
 

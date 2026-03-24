@@ -66,6 +66,7 @@ class AnalysisService:
             cfg = portfolio_map.get(stock_raw.get('code', ''), {})
             stock_raw['strategy'] = cfg.get('strategy', 'trend')
             stock_raw['cost'] = cfg.get('cost', 0)
+            stock_raw['shares'] = cfg.get('shares', 0)
 
         # 2. Process Data (Indicators)
         processor = DataProcessor()
@@ -83,7 +84,8 @@ class AnalysisService:
             "north_funds": north_funds,
             "indices": indices,
             "macro_news": macro_news,
-            "stocks": processed_stocks
+            "stocks": processed_stocks,
+            "portfolio_state": self.config.get('portfolio_state', {}),
         }
 
     async def collect_and_process_morning_data(self, portfolio: List[Dict]) -> Dict[str, Any]:
@@ -323,6 +325,7 @@ class AnalysisService:
         try:
             if mode == "swing":
                 analysis_date = ai_input.get("context_date") or datetime.now().strftime('%Y-%m-%d')
+                ai_input.setdefault("portfolio_state", self.config.get("portfolio_state", {}))
                 historical_records = self._get_swing_history_records(days=90)
                 analysis_result = build_swing_report(ai_input, historical_records, analysis_date)
                 swing_scorecard = self._compute_swing_scorecard(historical_records)

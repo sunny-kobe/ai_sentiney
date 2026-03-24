@@ -24,75 +24,57 @@ api_keys:
   telegram_bot_token: "${TELEGRAM_BOT_TOKEN}"
   telegram_chat_id: "${TELEGRAM_CHAT_ID}"
 
+portfolio_state:
+  cash_balance: 33091.73
+  lot_size: 100
+
 portfolio:
   - code: "510500"
     name: "中证500ETF"
     cost: 6.293
+    shares: 1500
     strategy: "trend"
 
   - code: "512480"
     name: "半导体ETF"
     cost: 0.780
-    strategy: "trend"
-
-  - code: "588760"
-    name: "科创人工智能ETF"
-    cost: 0.553
+    shares: 4200
     strategy: "trend"
 
   - code: "563300"
     name: "中证2000ETF"
     cost: 0.417
+    shares: 5200
     strategy: "trend"
 
   - code: "159819"
     name: "人工智能ETF"
     cost: 0.906
+    shares: 6500
     strategy: "trend"
 
   - code: "159934"
     name: "黄金ETF"
     cost: 7.928
+    shares: 1807
     strategy: "value"
 
   - code: "510300"
     name: "沪深300ETF"
     cost: 4.033
+    shares: 600
     strategy: "value"
 
   - code: "159338"
     name: "中证A500ETF"
     cost: 0.972
+    shares: 9700
     strategy: "trend"
 
-  - code: "560780"
-    name: "半导体设备ETF"
-    cost: 1.141
-    strategy: "trend"
-
-  - code: "510980"
-    name: "上证指数ETF"
-    cost: 1.337
-    strategy: "value"
-
-  - code: "601899"
-    name: "紫金矿业"
-    cost: 0
-    strategy: "value"
-
-  - code: "000603"
-    name: "盛达资源（白银）"
-    cost: 0
-    strategy: "trend"
-
-  - code: "600089"
-    name: "特变电工"
-    cost: 0
-    strategy: "trend"
-
-  - code: "000062"
-    name: "深圳华强"
-    cost: 0
+  - code: "588760"
+    name: "科创人工智能ETF"
+    cost: 0.553
+    shares: 10500
     strategy: "trend"
 
 risk_management:

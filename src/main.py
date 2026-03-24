@@ -48,6 +48,14 @@ def _print_text_summary(result: Dict[str, Any], mode: str):
         position_plan = result.get("position_plan") or {}
         if position_plan:
             lines.append("仓位计划:")
+            if position_plan.get("account_total_assets"):
+                lines.append(f"  总资产: {position_plan.get('account_total_assets', 'N/A')}")
+            if position_plan.get("cash_balance"):
+                lines.append(f"  当前现金: {position_plan.get('cash_balance', 'N/A')}")
+            if position_plan.get("current_total_exposure"):
+                lines.append(f"  当前总仓位: {position_plan.get('current_total_exposure', 'N/A')}")
+            if position_plan.get("current_cash_pct"):
+                lines.append(f"  当前现金占比: {position_plan.get('current_cash_pct', 'N/A')}")
             lines.append(f"  总仓位: {position_plan.get('total_exposure', 'N/A')}")
             lines.append(f"  核心仓: {position_plan.get('core_target', 'N/A')}")
             lines.append(f"  卫星仓: {position_plan.get('satellite_target', 'N/A')}")
@@ -67,8 +75,14 @@ def _print_text_summary(result: Dict[str, Any], mode: str):
         for action in result.get("actions", []):
             lines.append(
                 f"  [{action.get('code')}] {action.get('name')} | 结论:{action.get('conclusion', action.get('action_label', '观察'))}"
-                f" | 层级:{action.get('position_bucket', 'N/A')} | 目标仓位:{action.get('target_weight', 'N/A')}"
+                f" | 当前仓位:{action.get('current_weight', '0%')} | 层级:{action.get('position_bucket', 'N/A')}"
+                f" | 目标仓位:{action.get('target_weight', 'N/A')}"
             )
+            if action.get("current_shares"):
+                lines.append(
+                    f"    当前持仓: {action.get('current_shares')}份 | 当前市值: {action.get('current_value', '0.00')}"
+                )
+            lines.append(f"    调仓: {action.get('rebalance_action', '先观察')}")
             lines.append(f"    原因: {action.get('reason', '')}")
             lines.append(f"    计划: {action.get('plan', '')}")
             lines.append(f"    风险线: {action.get('risk_line', '')}")

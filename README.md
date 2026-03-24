@@ -115,6 +115,25 @@ TELEGRAM_CHAT_ID=your_telegram_chat_id_here
 
 编辑 `config.yaml` 中的 `portfolio` 列表。
 
+如果希望 `swing` 报告按你的真实账户给出“当前仓位 / 目标仓位 / 调仓份额”，需要同时维护：
+
+```yaml
+portfolio_state:
+  cash_balance: 33091.73
+  lot_size: 100
+
+portfolio:
+  - code: "510300"
+    name: "沪深300ETF"
+    cost: 4.033
+    shares: 600
+    strategy: "value"
+```
+
+- `cash_balance`: 当前账户现金
+- `shares`: 当前持仓份额/股数
+- `lot_size`: 默认按 A 股/ETF 的 `100` 份整数手估算调仓动作
+
 ### 5. 运行
 
 ```bash

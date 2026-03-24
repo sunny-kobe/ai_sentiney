@@ -112,6 +112,10 @@ class TelegramClient:
             f"来源: {', '.join(data.get('source_labels', []))}" if data.get('source_labels') else "来源: N/A",
             f"市场结论: {data.get('market_conclusion', '暂无结论')}",
             "仓位计划:",
+            f"总资产: {position_plan.get('account_total_assets', 'N/A')}",
+            f"当前现金: {position_plan.get('cash_balance', 'N/A')}",
+            f"当前总仓位: {position_plan.get('current_total_exposure', 'N/A')}",
+            f"当前现金占比: {position_plan.get('current_cash_pct', 'N/A')}",
             f"总仓位: {position_plan.get('total_exposure', 'N/A')}",
             f"核心仓: {position_plan.get('core_target', 'N/A')}",
             f"卫星仓: {position_plan.get('satellite_target', 'N/A')}",
@@ -129,8 +133,12 @@ class TelegramClient:
         for action in data.get("actions", [])[:8]:
             lines.append(
                 f"- {action.get('name', '')} | {action.get('conclusion', action.get('action_label', '观察'))}"
-                f" | {action.get('position_bucket', 'N/A')} | {action.get('target_weight', 'N/A')}"
+                f" | 当前:{action.get('current_weight', '0%')} | {action.get('position_bucket', 'N/A')}"
+                f" | 目标:{action.get('target_weight', 'N/A')}"
             )
+            if action.get("current_shares"):
+                lines.append(f"  当前持仓: {action.get('current_shares')}份 | 市值: {action.get('current_value', '0.00')}")
+            lines.append(f"  调仓: {action.get('rebalance_action', '先观察')}")
             lines.append(f"  计划: {action.get('plan', '')}")
             lines.append(f"  风险线: {action.get('risk_line', '')}")
         return "\n".join(lines)

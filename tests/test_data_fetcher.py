@@ -27,6 +27,8 @@ async def test_get_market_breadth_success(collector):
     collector.sources[0].fetch_market_breadth.return_value = None
     collector.sources[1].get_source_name.return_value = "Efinance"
     collector.sources[1].fetch_market_breadth.return_value = "涨: 1 / 跌: 1 (平: 1)"
+    collector.sources[2].get_source_name.return_value = "AkShare"
+    collector.sources[2].fetch_market_breadth.return_value = None
 
     breadth = await collector.get_market_breadth()
     assert breadth == "涨: 1 / 跌: 1 (平: 1)"

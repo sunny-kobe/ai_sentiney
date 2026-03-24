@@ -15,6 +15,10 @@ def _make_swing_result():
             "core_target": "25%-35%",
             "satellite_target": "0%-5%",
             "cash_target": "50%-65%",
+            "current_total_exposure": "68.7%",
+            "current_cash_pct": "31.3%",
+            "account_total_assets": "105744.34",
+            "cash_balance": "33091.73",
             "weekly_rebalance": "每周五收盘后生成计划，下一交易日分批执行。",
             "daily_rule": "日级只减不加，先减卫星仓，再减观察位。",
             "buckets": {
@@ -38,6 +42,10 @@ def _make_swing_result():
                 "action_label": "持有",
                 "position_bucket": "核心仓",
                 "target_weight": "25%-35%",
+                "current_weight": "10.7%",
+                "current_shares": 600,
+                "current_value": "2668.80",
+                "rebalance_action": "先按当前仓位拿住",
                 "reason": "还站在20日线 4.01 上方，主趋势还在，承接还在配合。",
                 "plan": "先把现有仓位拿住，等下一次确认转强再决定要不要加。",
                 "risk_line": "收盘跌回20日线 4.01 下方，就先缩仓。",
@@ -50,6 +58,10 @@ def _make_swing_result():
                 "action_label": "减配",
                 "position_bucket": "卫星仓",
                 "target_weight": "0%-3%",
+                "current_weight": "6.8%",
+                "current_shares": 5200,
+                "current_value": "7165.60",
+                "rebalance_action": "卖出2900份，保留约2300份",
                 "reason": "已经落到20日线 0.50 下方，已经开始转弱，承接偏弱。",
                 "plan": "先收缩一部分仓位，把组合波动降下来。",
                 "risk_line": "不能重新站上20日线 0.50 之前，先别加仓。",
@@ -77,8 +89,10 @@ def test_cli_swing_summary_uses_plain_language_sections():
     assert "组合动作" in rendered
     assert "持仓清单" in rendered
     assert "技术证据" in rendered
+    assert "当前总仓位: 68.7%" in rendered
     assert "总仓位: 35%-50%" in rendered
-    assert "[510300] 沪深300ETF | 结论:持有 | 层级:核心仓 | 目标仓位:25%-35%" in rendered
+    assert "[510300] 沪深300ETF | 结论:持有 | 当前仓位:10.7% | 层级:核心仓 | 目标仓位:25%-35%" in rendered
+    assert "调仓: 卖出2900份，保留约2300份" in rendered
     assert "MACD" not in rendered.split("持仓清单:")[1].split("技术证据:")[0]
 
 
@@ -89,8 +103,10 @@ def test_telegram_swing_text_shows_action_buckets_and_risk_lines():
     assert "市场结论" in text
     assert "仓位计划" in text
     assert "现金: 50%-65%" in text
+    assert "当前总仓位: 68.7%" in text
     assert "组合动作" in text
     assert "减配: 中证2000ETF" in text
+    assert "调仓: 卖出2900份，保留约2300份" in text
     assert "风险线" in text
 
 
@@ -107,6 +123,8 @@ def test_feishu_swing_card_shows_plain_language_sections():
     assert "市场结论" in joined
     assert "仓位计划" in joined
     assert "总仓位" in joined
+    assert "当前总仓位" in joined
     assert "组合动作" in joined
     assert "持仓清单" in joined
+    assert "调仓" in joined
     assert "风险线" in joined

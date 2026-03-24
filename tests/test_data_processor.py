@@ -22,12 +22,14 @@ def test_calculate_indicators_normal(processor, sample_history):
         "code": "000001",
         "name": "Test Stock",
         "current_price": 100.0,
+        "shares": 1200,
         "history": sample_history
     }
 
     result = processor.calculate_indicators(stock_input)
     assert result['ma20'] == 100.0
     assert result['bias_pct'] == 0.0
+    assert result['shares'] == 1200
 
 def test_calculate_indicators_insufficient_data(processor):
     """Test handling of insufficient history."""

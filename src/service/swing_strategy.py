@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import re
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set
 
@@ -70,6 +71,26 @@ POSITION_TEMPLATES = {
 }
 ACTION_WEIGHT_PRIORITY = {"增配": 5, "持有": 4, "观察": 2, "减配": 1, "回避": 0}
 SMALL_POSITION_RANGES = {"观察": (0, 5), "减配": (0, 3), "回避": (0, 0)}
+
+
+def _format_pct_value(value: float) -> str:
+    rounded = round(float(value), 1)
+    if rounded.is_integer():
+        return f"{int(rounded)}%"
+    return f"{rounded:.1f}%"
+
+
+def _parse_pct_range(weight: str) -> Sequence[int]:
+    text = str(weight or "0%").replace("%", "")
+    if "-" in text:
+        min_part, max_part = text.split("-", 1)
+        return int(min_part), int(max_part)
+    value = int(text or 0)
+    return value, value
+
+
+def _format_money(value: float) -> str:
+    return f"{float(value):.2f}"
 
 
 def infer_cluster(stock: Mapping[str, Any]) -> str:
@@ -259,6 +280,84 @@ def build_position_plan(decisions: Sequence[Mapping[str, Any]], regime: str) -> 
             "weekly_rebalance": "每周五收盘后生成计划，下一交易日分批执行。",
             "daily_rule": "日级只减不加，先减卫星仓，再减观察位。",
             "buckets": buckets,
+        },
+    }
+
+
+def build_current_position_snapshot(
+    decisions: Sequence[Mapping[str, Any]],
+    portfolio_state: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, Any]:
+    state = dict(portfolio_state or {})
+    cash_balance = float(state.get("cash_balance", 0) or 0)
+    lot_size = int(state.get("lot_size", 100) or 100)
+
+    current_value_total = 0.0
+    enriched_actions: List[Dict[str, Any]] = []
+    for item in decisions:
+        updated = dict(item)
+        shares = int(updated.get("shares", 0) or 0)
+        current_price = float(updated.get("current_price", 0) or 0)
+        current_value = round(shares * current_price, 2)
+        updated["current_shares"] = shares
+        updated["current_value"] = _format_money(current_value)
+        current_value_total += current_value
+        enriched_actions.append(updated)
+
+    account_total_assets = round(current_value_total + cash_balance, 2)
+    if account_total_assets <= 0:
+        account_total_assets = round(current_value_total, 2)
+
+    for updated in enriched_actions:
+        shares = int(updated.get("current_shares", 0) or 0)
+        current_price = float(updated.get("current_price", 0) or 0)
+        current_value = float(updated.get("current_value", 0) or 0)
+        current_weight_pct = (current_value / account_total_assets * 100) if account_total_assets > 0 else 0.0
+        updated["current_weight"] = _format_pct_value(current_weight_pct)
+
+        target_min_pct, target_max_pct = _parse_pct_range(updated.get("target_weight", "0%"))
+        target_min_value = account_total_assets * target_min_pct / 100
+        target_max_value = account_total_assets * target_max_pct / 100
+
+        if current_price <= 0 or shares <= 0:
+            if target_max_pct > 0:
+                updated["rebalance_action"] = "暂无持仓，等重新转强后再分批建仓"
+            else:
+                updated["rebalance_action"] = "暂无持仓"
+            continue
+
+        if target_max_value <= 0:
+            updated["rebalance_action"] = f"卖出{shares}份"
+            continue
+
+        keep_max_shares = math.floor(target_max_value / current_price / lot_size) * lot_size
+        keep_min_shares = math.ceil(target_min_value / current_price / lot_size) * lot_size if target_min_value > 0 else 0
+        keep_max_shares = max(min(keep_max_shares, shares), 0)
+        keep_min_shares = max(keep_min_shares, 0)
+
+        if shares > keep_max_shares:
+            sell_shares = shares - keep_max_shares
+            if keep_max_shares > 0:
+                updated["rebalance_action"] = f"卖出{sell_shares}份，保留约{keep_max_shares}份"
+            else:
+                updated["rebalance_action"] = f"卖出{sell_shares}份"
+        elif shares < keep_min_shares:
+            buy_shares = keep_min_shares - shares
+            updated["rebalance_action"] = f"如转强可加{buy_shares}份，补到约{keep_min_shares}份"
+        else:
+            updated["rebalance_action"] = "先按当前仓位拿住"
+
+    current_exposure_pct = (current_value_total / account_total_assets * 100) if account_total_assets > 0 else 0.0
+    current_cash_pct = (cash_balance / account_total_assets * 100) if account_total_assets > 0 else 0.0
+
+    return {
+        "actions": enriched_actions,
+        "position_snapshot": {
+            "current_total_exposure": _format_pct_value(current_exposure_pct),
+            "current_cash_pct": _format_pct_value(current_cash_pct),
+            "account_total_assets": _format_money(account_total_assets),
+            "cash_balance": _format_money(cash_balance),
+            "lot_size": lot_size,
         },
     }
 
@@ -641,6 +740,7 @@ def score_holding(stock: Mapping[str, Any], benchmark_context: Mapping[str, Any]
         "technical_evidence": stock.get("tech_summary", ""),
         "current_price": current_price,
         "ma20": ma20,
+        "shares": int(stock.get("shares", 0) or 0),
         "benchmark_code": benchmark_snapshot.get("benchmark_code"),
         "relative_return_20": relative_return_20,
         "relative_return_40": relative_return_40,
@@ -747,7 +847,13 @@ def build_swing_report(
     decisions = apply_cluster_risk_overlay(decisions, regime_info["stressed_clusters"])
     decisions = apply_emergency_retreat_overlay(decisions, ai_input, regime_info, benchmark_context)
     position_output = build_position_plan(decisions, regime_info["regime"])
-    decisions = position_output["actions"]
+    snapshot_output = build_current_position_snapshot(
+        position_output["actions"],
+        ai_input.get("portfolio_state"),
+    )
+    decisions = snapshot_output["actions"]
+    position_plan = dict(position_output["position_plan"])
+    position_plan.update(snapshot_output["position_snapshot"])
 
     ordered_actions = sorted(
         decisions,
@@ -774,7 +880,7 @@ def build_swing_report(
         "market_regime": regime_info["regime"],
         "market_conclusion": REGIME_CONCLUSIONS[regime_info["regime"]],
         "market_drivers": regime_info["reasons"],
-        "position_plan": position_output["position_plan"],
+        "position_plan": position_plan,
         "portfolio_actions": portfolio_actions,
         "actions": ordered_actions,
         "technical_evidence": technical_evidence,

@@ -635,6 +635,10 @@ class FeishuClient:
             action_lines.append(f"- **{label}**: {names}")
         position_plan = data.get("position_plan") or {}
         position_lines = [
+            f"- **总资产**: {position_plan.get('account_total_assets', 'N/A')}",
+            f"- **当前现金**: {position_plan.get('cash_balance', 'N/A')}",
+            f"- **当前总仓位**: {position_plan.get('current_total_exposure', 'N/A')}",
+            f"- **当前现金占比**: {position_plan.get('current_cash_pct', 'N/A')}",
             f"- **总仓位**: {position_plan.get('total_exposure', 'N/A')}",
             f"- **核心仓**: {position_plan.get('core_target', 'N/A')}",
             f"- **卫星仓**: {position_plan.get('satellite_target', 'N/A')}",
@@ -689,8 +693,11 @@ class FeishuClient:
             content = (
                 f"**{action.get('name', '')}** ({action.get('code', '')})\n"
                 f"> 结论: {action.get('conclusion', action.get('action_label', '观察'))}\n"
+                f"> 当前仓位: {action.get('current_weight', '0%')}\n"
+                f"> 当前持仓: {action.get('current_shares', 0)}份 / 市值 {action.get('current_value', '0.00')}\n"
                 f"> 层级: {action.get('position_bucket', 'N/A')}\n"
                 f"> 目标仓位: {action.get('target_weight', 'N/A')}\n"
+                f"> 调仓: {action.get('rebalance_action', '先观察')}\n"
                 f"> 原因: {action.get('reason', '')}\n"
                 f"> 计划: {action.get('plan', '')}\n"
                 f"> 风险线: {action.get('risk_line', '')}"
