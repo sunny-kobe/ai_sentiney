@@ -46,6 +46,45 @@ def test_telegram_midday_text_includes_quality_metadata():
     assert "来源: rule_engine, stock_news" in text
 
 
+def test_cli_summary_preclose_uses_execution_label():
+    result = {
+        "quality_status": "normal",
+        "data_timestamp": "2026-03-23 14:48",
+        "source_labels": ["rule_engine", "indices"],
+        "market_sentiment": "分歧",
+        "volume_analysis": "缩量",
+        "indices_info": "上证指数 +0.2%",
+        "macro_summary": "收盘前以执行为主",
+        "actions": [{"code": "600519", "name": "贵州茅台", "signal": "SAFE", "operation": "持有观察"}],
+    }
+
+    output = io.StringIO()
+    with redirect_stdout(output):
+        _print_text_summary(result, "preclose")
+
+    rendered = output.getvalue()
+    assert "=== 收盘前执行 ===" in rendered
+    assert "收盘前" in rendered
+
+
+def test_telegram_preclose_text_includes_execution_metadata():
+    client = TelegramClient()
+    text = client._build_preclose_text(
+        {
+            "quality_status": "normal",
+            "data_timestamp": "2026-03-23 14:48",
+            "source_labels": ["rule_engine", "indices"],
+            "market_sentiment": "分歧",
+            "macro_summary": "收盘前以执行为主",
+            "actions": [],
+        }
+    )
+
+    assert "收盘前执行" in text
+    assert "时间: 2026-03-23 14:48" in text
+    assert "来源: rule_engine, indices" in text
+
+
 def test_feishu_card_displays_degraded_banner_and_metadata():
     client = FeishuClient()
     card = client._construct_card(

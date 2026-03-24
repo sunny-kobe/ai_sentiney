@@ -17,6 +17,22 @@ def test_input_quality_blocked_when_midday_stocks_missing():
     assert "missing_stocks" in result["issues"]
 
 
+def test_input_quality_blocked_when_preclose_stocks_missing():
+    result = evaluate_input_quality(
+        {
+            "context_date": "2026-03-23",
+            "market_breadth": "涨: 10 / 跌: 5",
+            "indices": {"上证指数": {"change_pct": 0.5}},
+            "stocks": [],
+        },
+        mode="preclose",
+        now="2026-03-23",
+    )
+
+    assert result["status"] == "blocked"
+    assert "missing_stocks" in result["issues"]
+
+
 def test_input_quality_degraded_when_context_is_stale_and_evidence_is_thin():
     result = evaluate_input_quality(
         {

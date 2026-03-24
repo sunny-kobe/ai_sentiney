@@ -57,3 +57,30 @@ def test_build_structured_report_close_uses_close_operation_mapping():
     assert report["stocks"][0]["operation"] == "加仓10%-20%"
     assert report["stocks"][0]["data_timestamp"] == "2026-03-23"
     assert report["mode"] == "close"
+
+
+def test_build_structured_report_preclose_uses_intraday_operation_mapping():
+    ai_input = {
+        "context_date": "2026-03-23",
+        "market_breadth": "涨: 2600 / 跌: 2200",
+        "indices": {"上证指数": {"change_pct": -0.3}},
+        "macro_news": {"telegraph": ["尾盘银行股护盘"]},
+        "stocks": [
+            {
+                "code": "601899",
+                "name": "紫金矿业",
+                "signal": "WARNING",
+                "confidence": "中",
+                "tech_summary": "[日线_OBV_资金流出_0]",
+                "current_price": 18.5,
+                "pct_change": -1.2,
+                "news": [],
+            }
+        ],
+    }
+
+    report = build_structured_report(ai_input, mode="preclose", quality_status="normal")
+
+    assert report["stocks"][0]["operation"] == "减仓10%-20%"
+    assert report["stocks"][0]["data_timestamp"] == "2026-03-23"
+    assert report["mode"] == "preclose"

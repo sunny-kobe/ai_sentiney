@@ -40,6 +40,27 @@ class FeishuClient:
         except Exception as e:
             logger.error(f"Failed to send Feishu message: {e}")
 
+    def send_preclose_card(self, analysis_result: Dict[str, Any]):
+        if not self.webhook_url:
+            logger.warning("Skipping Feishu push (No URL)")
+            return
+
+        try:
+            card_content = self._construct_preclose_card(analysis_result)
+            payload = {
+                "msg_type": "interactive",
+                "card": card_content
+            }
+            response = requests.post(self.webhook_url, json=payload)
+            response.raise_for_status()
+            resp_json = response.json()
+            if resp_json.get("code") != 0:
+                logger.error(f"Feishu Error: {resp_json}")
+            else:
+                logger.info("Feishu preclose notification sent successfully.")
+        except Exception as e:
+            logger.error(f"Failed to send Feishu preclose message: {e}")
+
     def _construct_card(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Constructs the Feishu Interactive Card JSON (Optimized V2).
@@ -294,6 +315,30 @@ class FeishuClient:
             },
             "elements": elements
         }
+        return card
+
+    def _construct_preclose_card(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        card = self._construct_card(data)
+        card["header"]["title"]["content"] = "⏳ 哨兵收盘前执行"
+
+        for element in card.get("elements", []):
+            text = element.get("text", {})
+            content = text.get("content")
+            if not isinstance(content, str):
+                continue
+            if "**🌍 宏观/消息面**" in content:
+                text["content"] = content.replace("**🌍 宏观/消息面**", "**⏳ 收盘前执行摘要**")
+                break
+
+        for element in reversed(card.get("elements", [])):
+            if element.get("tag") == "note":
+                for note in element.get("elements", []):
+                    if note.get("tag") == "plain_text":
+                        note["content"] = note.get("content", "").replace("盘中（下午）", "收盘前执行").replace("收盘后", "收盘前执行")
+                        if "收盘前执行" not in note["content"]:
+                            note["content"] = "Sentinel AI V2.0 • 收盘前执行"
+                break
+
         return card
 
     def send_close_card(self, data: Dict[str, Any]):

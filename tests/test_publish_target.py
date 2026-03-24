@@ -15,8 +15,9 @@ class _DummyGemini:
         return {"actions": []}
 
 
-def test_publish_target_telegram_routes_to_telegram(monkeypatch):
+def test_publish_target_telegram_routes_to_telegram(monkeypatch, tmp_path):
     service = AnalysisService()
+    service.data_path = tmp_path / "latest_context.json"
 
     async def _fake_collect(_portfolio):
         return {
@@ -47,8 +48,9 @@ def test_publish_target_telegram_routes_to_telegram(monkeypatch):
     feishu.send_card.assert_not_called()
 
 
-def test_publish_target_default_routes_to_feishu(monkeypatch):
+def test_publish_target_default_routes_to_feishu(monkeypatch, tmp_path):
     service = AnalysisService()
+    service.data_path = tmp_path / "latest_context.json"
 
     async def _fake_collect(_portfolio):
         return {
@@ -79,8 +81,9 @@ def test_publish_target_default_routes_to_feishu(monkeypatch):
     telegram.send_midday_report.assert_not_called()
 
 
-def test_publish_target_telegram_routes_close_to_telegram(monkeypatch):
+def test_publish_target_telegram_routes_close_to_telegram(monkeypatch, tmp_path):
     service = AnalysisService()
+    service.data_path = tmp_path / "latest_context.json"
 
     async def _fake_collect(_portfolio):
         return {
@@ -109,8 +112,9 @@ def test_publish_target_telegram_routes_close_to_telegram(monkeypatch):
     feishu.send_close_card.assert_not_called()
 
 
-def test_publish_target_telegram_routes_morning_to_telegram(monkeypatch):
+def test_publish_target_telegram_routes_morning_to_telegram(monkeypatch, tmp_path):
     service = AnalysisService()
+    service.data_path = tmp_path / "latest_context.json"
 
     async def _fake_collect_morning(_portfolio):
         return {
@@ -136,3 +140,35 @@ def test_publish_target_telegram_routes_morning_to_telegram(monkeypatch):
 
     telegram.send_morning_report.assert_called_once()
     feishu.send_morning_card.assert_not_called()
+
+
+def test_publish_target_telegram_routes_preclose_to_telegram(monkeypatch, tmp_path):
+    service = AnalysisService()
+    service.data_path = tmp_path / "latest_context.json"
+
+    async def _fake_collect(_portfolio):
+        return {
+            "context_date": "2026-03-23",
+            "market_breadth": "涨: 10 / 跌: 5",
+            "north_funds": 0,
+            "indices": {"上证指数": {"change_pct": 0.5}},
+            "macro_news": {"telegraph": ["流动性平稳"]},
+            "stocks": [{"code": "600519", "name": "贵州茅台", "signal": "SAFE", "news": ["公司回购进展"]}],
+        }
+
+    monkeypatch.setattr(service, "collect_and_process_data", _fake_collect)
+    monkeypatch.setattr(service, "post_process_result", lambda result, _ai_input, mode='preclose': result)
+    monkeypatch.setattr(service.db, "get_last_close_analysis", lambda: None)
+    monkeypatch.setattr(service.db, "save_record", lambda **_kwargs: None)
+    monkeypatch.setattr(service, "_compute_signal_scorecard", lambda *args, **kwargs: None)
+    monkeypatch.setattr("src.service.analysis_service.GeminiClient", lambda: _DummyGemini())
+
+    feishu = Mock()
+    telegram = Mock()
+    monkeypatch.setattr("src.service.analysis_service.FeishuClient", lambda: feishu)
+    monkeypatch.setattr("src.service.analysis_service.TelegramClient", lambda: telegram)
+
+    asyncio.run(service.run_analysis(mode="preclose", publish=True, publish_target="telegram"))
+
+    telegram.send_preclose_report.assert_called_once()
+    feishu.send_preclose_card.assert_not_called()

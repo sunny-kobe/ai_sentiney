@@ -92,7 +92,7 @@ def should_run_market_report(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="A-share trading day guard")
-    parser.add_argument("--mode", required=True, choices=["morning", "midday", "close", "swing"])
+    parser.add_argument("--mode", required=True, choices=["morning", "midday", "preclose", "close", "swing"])
     parser.add_argument("--publish", action="store_true")
     parser.add_argument("--date", dest="target_date", default=None, help="YYYY-MM-DD")
     args = parser.parse_args()

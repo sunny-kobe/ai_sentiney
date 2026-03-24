@@ -18,6 +18,10 @@ class TelegramClient:
         message = self._build_midday_text(data)
         self._send_message(message)
 
+    def send_preclose_report(self, data: Dict[str, Any]):
+        message = self._build_preclose_text(data)
+        self._send_message(message)
+
     def send_close_report(self, data: Dict[str, Any]):
         message = self._build_close_text(data)
         self._send_message(message)
@@ -52,13 +56,19 @@ class TelegramClient:
             logger.error(f"Failed to send Telegram message: {e}")
 
     def _build_midday_text(self, data: Dict[str, Any]) -> str:
+        return self._build_intraday_text(data, title="🛡️ Sentinel 午盘分析", summary_label="点评")
+
+    def _build_preclose_text(self, data: Dict[str, Any]) -> str:
+        return self._build_intraday_text(data, title="🛡️ Sentinel 收盘前执行", summary_label="执行摘要")
+
+    def _build_intraday_text(self, data: Dict[str, Any], *, title: str, summary_label: str) -> str:
         lines = [
-            "🛡️ Sentinel 午盘分析",
+            title,
             f"质量: {data.get('quality_status', 'normal')}",
             f"时间: {data.get('data_timestamp', 'N/A')}",
             f"来源: {', '.join(data.get('source_labels', []))}" if data.get('source_labels') else "来源: N/A",
             f"情绪: {data.get('market_sentiment', 'N/A')}",
-            f"点评: {data.get('macro_summary', 'N/A')}",
+            f"{summary_label}: {data.get('macro_summary', 'N/A')}",
         ]
         for action in data.get("actions", [])[:8]:
             signal = action.get('signal', action.get('action', '')).upper()

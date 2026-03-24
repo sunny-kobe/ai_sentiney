@@ -102,6 +102,28 @@ def _print_text_summary(result: Dict[str, Any], mode: str):
             lines.append(f"风险事件: {', '.join(risk)}")
         for a in result.get('actions', []):
             lines.append(f"  [{a.get('code')}] {a.get('name')} | 预期:{a.get('opening_expectation')} | 策略:{a.get('strategy')}")
+    elif mode == 'preclose':
+        lines.append(f"=== 收盘前执行 ===")
+        if quality_status:
+            lines.append(f"质量: {quality_status}")
+        if data_timestamp:
+            lines.append(f"时间: {data_timestamp}")
+        if source_labels:
+            lines.append(f"来源: {', '.join(source_labels)}")
+        lines.append(f"情绪: {result.get('market_sentiment', 'N/A')}")
+        lines.append(f"量能: {result.get('volume_analysis', 'N/A')}")
+        lines.append(f"指数: {result.get('indices_info', 'N/A')}")
+        lines.append(f"执行摘要: {result.get('macro_summary', 'N/A')}")
+        for a in result.get('actions', []):
+            pct = a.get('pct_change_str', '')
+            confidence = a.get('confidence', '')
+            conf_tag = f" [{confidence}]" if confidence else ""
+            lines.append(f"  [{a.get('code')}] {a.get('name')} {pct} | 信号:{a.get('signal','N/A')}{conf_tag} | 执行:{a.get('operation','N/A')}")
+            tech = a.get('tech_summary', '')
+            if tech:
+                lines.append(f"    指标: {tech}")
+            if a.get('reason'):
+                lines.append(f"    理由: {a.get('reason')}")
     elif mode == 'close':
         lines.append(f"=== 收盘复盘 ===")
         if quality_status:
@@ -169,7 +191,7 @@ def _print_text_summary(result: Dict[str, Any], mode: str):
 
 def entry_point():
     parser = argparse.ArgumentParser(description="Project Sentinel V2")
-    parser.add_argument('--mode', type=str, default='midday', choices=['midday', 'close', 'morning', 'swing'], help='Execution mode')
+    parser.add_argument('--mode', type=str, default='midday', choices=['midday', 'preclose', 'close', 'morning', 'swing'], help='Execution mode')
     parser.add_argument('--dry-run', action='store_true', help='Run without calling expensive APIs or sending notifications')
     parser.add_argument('--replay', action='store_true', help='Replay analysis using last saved data')
     parser.add_argument('--webui', action='store_true', help='Start WebUI server')

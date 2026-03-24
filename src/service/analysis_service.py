@@ -317,7 +317,7 @@ class AnalysisService:
                 ai_input['signal_scorecard'] = scorecard
 
         quality_input = {"status": "normal", "issues": []}
-        if mode in ('midday', 'close'):
+        if mode in ('midday', 'preclose', 'close'):
             quality_input = evaluate_input_quality(ai_input, mode=mode)
             ai_input["quality_input"] = quality_input
             ai_input["structured_report"] = build_structured_report(
@@ -360,11 +360,11 @@ class AnalysisService:
                     "data_timestamp": ai_input.get("structured_report", {}).get("data_timestamp"),
                     "source_labels": ai_input.get("structured_report", {}).get("source_labels", []),
                 }
-            elif mode in ("midday", "close") and quality_input["status"] == "degraded":
+            elif mode in ("midday", "preclose", "close") and quality_input["status"] == "degraded":
                 analysis_result = self._build_degraded_report(mode, ai_input["structured_report"], quality_input["issues"])
             else:
                 analyst = GeminiClient()
-                if mode == 'midday':
+                if mode in ('midday', 'preclose'):
                     last_close = self.db.get_last_close_analysis()
                     ai_input['yesterday_context'] = last_close
                     analysis_result = analyst.analyze(ai_input)
@@ -384,7 +384,7 @@ class AnalysisService:
 
             # Unified Post-Processing
             analysis_result = self.post_process_result(analysis_result, ai_input, mode=mode)
-            if mode in ("midday", "close") and not dry_run:
+            if mode in ("midday", "preclose", "close") and not dry_run:
                 output_quality = evaluate_output_quality(
                     analysis_result,
                     ai_input.get("structured_report", {}),
@@ -400,7 +400,7 @@ class AnalysisService:
                 if "quality_status" not in analysis_result:
                     analysis_result["quality_status"] = "normal" if output_quality["status"] == "normal" else "degraded"
                 analysis_result["quality_issues"] = output_quality["issues"] if output_quality["issues"] else quality_input["issues"]
-            elif mode in ("midday", "close"):
+            elif mode in ("midday", "preclose", "close"):
                 analysis_result.setdefault("quality_status", quality_input["status"])
                 analysis_result.setdefault("quality_issues", quality_input["issues"])
             
@@ -421,6 +421,8 @@ class AnalysisService:
                         reporter = TelegramClient()
                         if mode == 'midday':
                             reporter.send_midday_report(analysis_result)
+                        elif mode == 'preclose':
+                            reporter.send_preclose_report(analysis_result)
                         elif mode == 'close':
                             reporter.send_close_report(analysis_result)
                         elif mode == 'morning':
@@ -431,6 +433,8 @@ class AnalysisService:
                         reporter = FeishuClient()
                         if mode == 'midday':
                             reporter.send_card(analysis_result)
+                        elif mode == 'preclose':
+                            reporter.send_preclose_card(analysis_result)
                         elif mode == 'close':
                             reporter.send_close_card(analysis_result)
                         elif mode == 'morning':
