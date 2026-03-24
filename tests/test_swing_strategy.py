@@ -321,6 +321,43 @@ def test_build_swing_report_uses_relative_strength_to_promote_and_demote_actions
     assert "弱于对照基准" in lag["reason"]
 
 
+def test_build_swing_report_uses_validation_feedback_to_block_weak_offensive_setup():
+    ai_input = {
+        "market_breadth": "2600家上涨，2100家下跌",
+        "indices": {"上证指数": {"change_pct": 0.3}, "创业板指": {"change_pct": 0.5}},
+        "macro_news": {"telegraph": ["情绪平稳，暂无系统性风险"]},
+        "stocks": [
+            _make_stock(
+                "159611",
+                "电力ETF",
+                signal="ACCUMULATE",
+                confidence="中",
+                bias_pct=0.01,
+                pct_change=0.6,
+                current_price=1.01,
+                ma20=1.0,
+                tech_summary="回踩后重新站稳20日线",
+                macd_trend="BULLISH",
+                obv_trend="INFLOW",
+            )
+        ],
+        "held_codes": {"159611"},
+        "strategy_preferences": {"risk_profile": "aggressive"},
+        "performance_context": {"offensive": {"pullback_resume": {"allowed": False, "reason": "样本不足"}}},
+        "validation_report": {"summary_text": "样本不足，当前进攻 setup 不做加仓放大。"},
+    }
+
+    report = build_swing_report(
+        ai_input,
+        _make_history("159611", [1.0, 1.01, 1.02, 1.03]),
+        analysis_date="2026-03-24",
+    )
+
+    action = report["actions"][0]
+    assert action["action_label"] == "持有"
+    assert report["validation_summary"] == "样本不足，当前进攻 setup 不做加仓放大。"
+
+
 def test_build_swing_report_retreat_overlay_uses_breakdown_and_bad_news_confirmation():
     history = _make_multi_history(
         {

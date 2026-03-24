@@ -1,7 +1,10 @@
 import asyncio
-import sys
 import argparse
 import json
+import logging
+import os
+import sys
+import warnings
 from typing import Dict, Any, List
 
 from src.utils.logger import logger
@@ -9,7 +12,17 @@ from src.service.analysis_service import AnalysisService
 from src.web.server import WebServer
 from src.utils.config_loader import ConfigLoader
 from src.web.api import get_router
-import os
+
+existing_pythonwarnings = os.environ.get("PYTHONWARNINGS", "")
+ignore_rule = "ignore:resource_tracker:UserWarning"
+if ignore_rule not in existing_pythonwarnings:
+    os.environ["PYTHONWARNINGS"] = f"{existing_pythonwarnings},{ignore_rule}".strip(",")
+
+warnings.filterwarnings(
+    "ignore",
+    message=r"resource_tracker: There appear to be .* leaked semaphore objects to clean up at shutdown",
+    category=UserWarning,
+)
 
 def setup_proxy():
     """Inject proxy settings into environment if configured."""
@@ -35,62 +48,56 @@ def _print_text_summary(result: Dict[str, Any], mode: str):
     source_labels = result.get("source_labels", [])
 
     if mode == 'swing':
-        lines.append("=== 中期策略 ===")
+        lines.append("=== 中长期投资助手 ===")
         if quality_status:
             lines.append(f"质量: {quality_status}")
         if data_timestamp:
             lines.append(f"时间: {data_timestamp}")
         if source_labels:
             lines.append(f"来源: {', '.join(source_labels)}")
-        scorecard = result.get("swing_scorecard")
-        if scorecard:
-            lines.append(f"中期跟踪: {scorecard.get('summary_text', '')}")
+        if result.get("validation_summary"):
+            lines.append("验证摘要:")
+            lines.append(f"  {result.get('validation_summary')}")
         position_plan = result.get("position_plan") or {}
-        if position_plan:
-            lines.append("仓位计划:")
-            if position_plan.get("account_total_assets"):
-                lines.append(f"  总资产: {position_plan.get('account_total_assets', 'N/A')}")
-            if position_plan.get("cash_balance"):
-                lines.append(f"  当前现金: {position_plan.get('cash_balance', 'N/A')}")
-            if position_plan.get("current_total_exposure"):
-                lines.append(f"  当前总仓位: {position_plan.get('current_total_exposure', 'N/A')}")
-            if position_plan.get("current_cash_pct"):
-                lines.append(f"  当前现金占比: {position_plan.get('current_cash_pct', 'N/A')}")
-            lines.append(f"  总仓位: {position_plan.get('total_exposure', 'N/A')}")
-            lines.append(f"  核心仓: {position_plan.get('core_target', 'N/A')}")
-            lines.append(f"  卫星仓: {position_plan.get('satellite_target', 'N/A')}")
-            lines.append(f"  现金: {position_plan.get('cash_target', 'N/A')}")
-            lines.append(f"  周调仓: {position_plan.get('weekly_rebalance', '')}")
-            lines.append(f"  日规则: {position_plan.get('daily_rule', '')}")
-        lines.append("市场结论:")
+        lines.append("今日结论:")
         lines.append(f"  {result.get('market_conclusion', '暂无结论')}")
-        lines.append("组合动作:")
-        for label in ("增配", "持有", "减配", "回避", "观察"):
-            items = result.get("portfolio_actions", {}).get(label, [])
-            if not items:
-                continue
-            names = "、".join(item.get("name", "") for item in items if item.get("name"))
-            lines.append(f"  {label}: {names}")
-        lines.append("持仓清单:")
+        lines.append("账户动作:")
+        if position_plan.get("current_total_exposure"):
+            lines.append(f"  当前总仓位: {position_plan.get('current_total_exposure', 'N/A')}")
+        lines.append(f"  总仓位: {position_plan.get('total_exposure', 'N/A')}")
+        lines.append(f"  现金目标: {position_plan.get('cash_target', 'N/A')}")
+        execution_order = position_plan.get("execution_order") or []
+        lines.append(f"  优先动作: {'；'.join(execution_order) if execution_order else '暂无'}")
+        lines.append("持仓处理:")
         for action in result.get("actions", []):
             lines.append(
                 f"  [{action.get('code')}] {action.get('name')} | 结论:{action.get('conclusion', action.get('action_label', '观察'))}"
-                f" | 当前仓位:{action.get('current_weight', '0%')} | 层级:{action.get('position_bucket', 'N/A')}"
-                f" | 目标仓位:{action.get('target_weight', 'N/A')}"
+                f" | 当前:{action.get('current_weight', '0%')} | 目标:{action.get('target_weight', 'N/A')}"
             )
-            if action.get("current_shares"):
-                lines.append(
-                    f"    当前持仓: {action.get('current_shares')}份 | 当前市值: {action.get('current_value', '0.00')}"
-                )
-            lines.append(f"    调仓: {action.get('rebalance_action', '先观察')}")
             lines.append(f"    原因: {action.get('reason', '')}")
             lines.append(f"    计划: {action.get('plan', '')}")
             lines.append(f"    风险线: {action.get('risk_line', '')}")
-        technical_evidence = result.get("technical_evidence", [])
-        if technical_evidence:
-            lines.append("技术证据:")
-            for item in technical_evidence:
-                lines.append(f"  [{item.get('code')}] {item.get('name')}: {item.get('tech_summary', '')}")
+        lines.append("观察池机会:")
+        watchlist_candidates = result.get("watchlist_candidates", []) or []
+        if watchlist_candidates:
+            for candidate in watchlist_candidates:
+                lines.append(
+                    f"  [{candidate.get('code')}] {candidate.get('name')} | 动作:{candidate.get('action_label', '继续观察')}"
+                )
+                lines.append(f"    原因: {candidate.get('reason', '')}")
+                lines.append(f"    计划: {candidate.get('plan', '')}")
+                lines.append(f"    失效条件: {candidate.get('risk_line', '')}")
+        else:
+            lines.append("  当前没有值得试仓的新方向。")
+        lines.append("风险清单:")
+        risk_items = [f"  - {issue}" for issue in (result.get("data_issues") or [])]
+        for action in result.get("actions", []):
+            if action.get("action_label") in {"减配", "回避"} and action.get("risk_line"):
+                risk_items.append(f"  - {action.get('name')}: {action.get('risk_line')}")
+        for candidate in watchlist_candidates:
+            if candidate.get("risk_line"):
+                risk_items.append(f"  - {candidate.get('name')}: {candidate.get('risk_line')}")
+        lines.extend(risk_items[:3] or ["  - 暂无额外风险提示。"])
     elif mode == 'morning':
         lines.append(f"=== 早报分析 ===")
         lines.append(f"隔夜综述: {result.get('global_overnight_summary', 'N/A')}")
@@ -239,5 +246,26 @@ def entry_point():
         else:
             _print_text_summary(result, args.mode)
 
+
+def _force_process_exit(exit_code: int = 0):
+    """Terminate the CLI without waiting on leaked third-party worker resources."""
+    try:
+        sys.stdout.flush()
+        sys.stderr.flush()
+    finally:
+        logging.shutdown()
+        os._exit(int(exit_code))
+
 if __name__ == "__main__":
-    entry_point()
+    code = 0
+    try:
+        maybe_code = entry_point()
+        if isinstance(maybe_code, int):
+            code = maybe_code
+    except KeyboardInterrupt:
+        code = 130
+    except Exception:
+        logger.exception("Fatal error while running Project Sentinel CLI.")
+        code = 1
+    finally:
+        _force_process_exit(code)

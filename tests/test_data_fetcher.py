@@ -17,7 +17,11 @@ def mock_akshare(mocker):
 
 @pytest.fixture
 def collector():
-    return DataCollector()
+    instance = DataCollector()
+    try:
+        yield instance
+    finally:
+        instance.close()
 
 @pytest.mark.asyncio
 async def test_get_market_breadth_success(collector):
@@ -99,3 +103,10 @@ async def test_collect_all_integration(collector, mock_akshare, monkeypatch):
     assert len(result['stocks']) == 1
     assert result['stocks'][0]['code'] == '600519'
     assert result['stocks'][0]['current_price'] == 1800.0
+
+
+def test_data_collector_uses_daemon_executor_threads(collector):
+    future = collector.executor.submit(lambda: 1)
+    assert future.result(timeout=1) == 1
+    assert collector.executor._threads
+    assert all(thread.daemon for thread in collector.executor._threads)

@@ -675,26 +675,21 @@ class FeishuClient:
         }
 
     def _construct_swing_card(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        action_lines = []
-        for label in ("增配", "持有", "减配", "回避", "观察"):
-            items = data.get("portfolio_actions", {}).get(label, [])
-            if not items:
-                continue
-            names = "、".join(item.get("name", "") for item in items if item.get("name"))
-            action_lines.append(f"- **{label}**: {names}")
         position_plan = data.get("position_plan") or {}
         position_lines = [
-            f"- **总资产**: {position_plan.get('account_total_assets', 'N/A')}",
-            f"- **当前现金**: {position_plan.get('cash_balance', 'N/A')}",
             f"- **当前总仓位**: {position_plan.get('current_total_exposure', 'N/A')}",
-            f"- **当前现金占比**: {position_plan.get('current_cash_pct', 'N/A')}",
-            f"- **总仓位**: {position_plan.get('total_exposure', 'N/A')}",
-            f"- **核心仓**: {position_plan.get('core_target', 'N/A')}",
-            f"- **卫星仓**: {position_plan.get('satellite_target', 'N/A')}",
-            f"- **现金**: {position_plan.get('cash_target', 'N/A')}",
-            f"- **周调仓**: {position_plan.get('weekly_rebalance', '')}",
-            f"- **日规则**: {position_plan.get('daily_rule', '')}",
+            f"- **建议总仓位**: {position_plan.get('total_exposure', 'N/A')}",
+            f"- **现金目标**: {position_plan.get('cash_target', 'N/A')}",
+            f"- **优先动作**: {'；'.join(position_plan.get('execution_order', []) or []) or '暂无'}",
         ]
+        watchlist_candidates = data.get("watchlist_candidates", []) or []
+        risk_lines = [f"- {issue}" for issue in (data.get("data_issues") or [])]
+        for action in data.get("actions", []):
+            if action.get("action_label") in {"减配", "回避"} and action.get("risk_line"):
+                risk_lines.append(f"- **{action.get('name', '')}**: {action.get('risk_line', '')}")
+        for candidate in watchlist_candidates:
+            if candidate.get("risk_line"):
+                risk_lines.append(f"- **{candidate.get('name', '')}**: {candidate.get('risk_line', '')}")
 
         elements = [
             {
@@ -709,7 +704,7 @@ class FeishuClient:
                 "tag": "div",
                 "text": {
                     "tag": "lark_md",
-                    "content": f"**市场结论**\n{data.get('market_conclusion', '暂无结论')}"
+                    "content": f"**今日结论**\n{data.get('market_conclusion', '暂无结论')}"
                 }
             },
             {"tag": "hr"},
@@ -717,7 +712,7 @@ class FeishuClient:
                 "tag": "div",
                 "text": {
                     "tag": "lark_md",
-                    "content": "**仓位计划**\n" + "\n".join(position_lines)
+                    "content": f"**验证摘要**\n{data.get('validation_summary', '暂无验证摘要')}"
                 }
             },
             {"tag": "hr"},
@@ -725,7 +720,7 @@ class FeishuClient:
                 "tag": "div",
                 "text": {
                     "tag": "lark_md",
-                    "content": "**组合动作**\n" + ("\n".join(action_lines) if action_lines else "- 暂无动作")
+                    "content": "**账户动作**\n" + "\n".join(position_lines)
                 }
             },
             {"tag": "hr"},
@@ -733,7 +728,7 @@ class FeishuClient:
                 "tag": "div",
                 "text": {
                     "tag": "lark_md",
-                    "content": f"**持仓清单 ({len(data.get('actions', []))}只)**"
+                    "content": f"**持仓处理 ({len(data.get('actions', []))}只)**"
                 }
             },
         ]
@@ -743,10 +738,7 @@ class FeishuClient:
                 f"**{action.get('name', '')}** ({action.get('code', '')})\n"
                 f"> 结论: {action.get('conclusion', action.get('action_label', '观察'))}\n"
                 f"> 当前仓位: {action.get('current_weight', '0%')}\n"
-                f"> 当前持仓: {action.get('current_shares', 0)}份 / 市值 {action.get('current_value', '0.00')}\n"
-                f"> 层级: {action.get('position_bucket', 'N/A')}\n"
                 f"> 目标仓位: {action.get('target_weight', 'N/A')}\n"
-                f"> 调仓: {action.get('rebalance_action', '先观察')}\n"
                 f"> 原因: {action.get('reason', '')}\n"
                 f"> 计划: {action.get('plan', '')}\n"
                 f"> 风险线: {action.get('risk_line', '')}"
@@ -758,6 +750,60 @@ class FeishuClient:
                     "content": content
                 }
             })
+
+        elements.extend(
+            [
+                {"tag": "hr"},
+                {
+                    "tag": "div",
+                    "text": {
+                        "tag": "lark_md",
+                        "content": "**观察池机会**",
+                    },
+                },
+            ]
+        )
+        if watchlist_candidates:
+            for candidate in watchlist_candidates[:3]:
+                content = (
+                    f"**{candidate.get('name', '')}** ({candidate.get('code', '')})\n"
+                    f"> 动作: {candidate.get('action_label', '继续观察')}\n"
+                    f"> 原因: {candidate.get('reason', '')}\n"
+                    f"> 计划: {candidate.get('plan', '')}\n"
+                    f"> 失效条件: {candidate.get('risk_line', '')}"
+                )
+                elements.append(
+                    {
+                        "tag": "div",
+                        "text": {
+                            "tag": "lark_md",
+                            "content": content,
+                        },
+                    }
+                )
+        else:
+            elements.append(
+                {
+                    "tag": "div",
+                    "text": {
+                        "tag": "lark_md",
+                        "content": "- 当前没有值得试仓的新方向",
+                    },
+                }
+            )
+
+        elements.extend(
+            [
+                {"tag": "hr"},
+                {
+                    "tag": "div",
+                    "text": {
+                        "tag": "lark_md",
+                        "content": "**风险清单**\n" + ("\n".join(risk_lines[:3]) if risk_lines else "- 暂无额外风险提示"),
+                    },
+                },
+            ]
+        )
 
         return {
             "config": {"wide_screen_mode": True},

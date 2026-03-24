@@ -14,8 +14,13 @@ def test_readme_and_config_promote_swing_mode_as_primary_positioning():
     assert "平均回撤" in readme
     assert "平均超额" in readme
     assert "短线命中率作为主KPI" in readme
+    assert "watchlist" in readme
+    assert "验证摘要" in readme
+    assert "观察池" in readme
 
     assert "default_mode: \"swing\"" in config
     assert "windows: [10, 20, 40]" in config
     assert "action_labels:" in config
     assert "增配" in config
+    assert "watchlist:" in config
+    assert "candidate_limit:" in config

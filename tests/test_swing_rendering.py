@@ -10,6 +10,7 @@ def _make_swing_result():
     return {
         "market_regime": "防守",
         "market_conclusion": "当前偏防守，先守住已有成果，弱势方向以收缩仓位为主。",
+        "validation_summary": "20日样本12，平均收益3.1%；回测收益9.4%，最大回撤-5.2%。",
         "position_plan": {
             "total_exposure": "35%-50%",
             "core_target": "25%-35%",
@@ -21,6 +22,7 @@ def _make_swing_result():
             "cash_balance": "33091.73",
             "weekly_rebalance": "每周五收盘后生成计划，下一交易日分批执行。",
             "daily_rule": "下一交易日按优先级分批执行，先减弱势仓，再处理持有仓，最后考虑新增仓。",
+            "execution_order": ["中证2000ETF:卖出2900份，保留约2300份", "军工ETF:先试仓5%-10%"],
             "buckets": {
                 "核心仓": [{"code": "510300", "name": "沪深300ETF", "target_weight": "25%-35%"}],
                 "卫星仓": [{"code": "563300", "name": "中证2000ETF", "target_weight": "0%-3%"}],
@@ -67,6 +69,30 @@ def _make_swing_result():
                 "technical_evidence": "MACD死叉，跌破20日线",
             },
         ],
+        "watchlist_actions": {
+            "转正式仓": [],
+            "进入试仓区": [
+                {
+                    "code": "512660",
+                    "name": "军工ETF",
+                    "action_label": "进入试仓区",
+                    "reason": "重新站上20日线，量能同步放大。",
+                    "plan": "先试仓5%-10%，确认延续后再考虑转正式仓。",
+                    "risk_line": "跌回20日线下方则撤回观察。",
+                }
+            ],
+            "继续观察": [],
+        },
+        "watchlist_candidates": [
+            {
+                "code": "512660",
+                "name": "军工ETF",
+                "action_label": "进入试仓区",
+                "reason": "重新站上20日线，量能同步放大。",
+                "plan": "先试仓5%-10%，确认延续后再考虑转正式仓。",
+                "risk_line": "跌回20日线下方则撤回观察。",
+            }
+        ],
         "technical_evidence": [
             {"code": "510300", "name": "沪深300ETF", "tech_summary": "MACD多头，站上20日线"},
             {"code": "563300", "name": "中证2000ETF", "tech_summary": "MACD死叉，跌破20日线"},
@@ -83,30 +109,33 @@ def test_cli_swing_summary_uses_plain_language_sections():
         _print_text_summary(_make_swing_result(), "swing")
 
     rendered = output.getvalue()
-    assert "市场结论" in rendered
-    assert "仓位计划" in rendered
-    assert "组合动作" in rendered
-    assert "持仓清单" in rendered
-    assert "技术证据" in rendered
+    assert "今日结论" in rendered
+    assert "账户动作" in rendered
+    assert "持仓处理" in rendered
+    assert "观察池机会" in rendered
+    assert "风险清单" in rendered
+    assert "验证摘要" in rendered
     assert "当前总仓位: 68.7%" in rendered
     assert "总仓位: 35%-50%" in rendered
-    assert "[510300] 沪深300ETF | 结论:持有 | 当前仓位:10.7% | 层级:核心仓 | 目标仓位:25%-35%" in rendered
-    assert "调仓: 卖出2900份，保留约2300份" in rendered
-    assert "MACD" not in rendered.split("持仓清单:")[1].split("技术证据:")[0]
+    assert "优先动作: 中证2000ETF:卖出2900份，保留约2300份；军工ETF:先试仓5%-10%" in rendered
+    assert "[510300] 沪深300ETF | 结论:持有 | 当前:10.7% | 目标:25%-35%" in rendered
+    assert "[512660] 军工ETF | 动作:进入试仓区" in rendered
+    assert "MACD" not in rendered
+    assert "中期跟踪" not in rendered
 
 
 def test_telegram_swing_text_shows_action_buckets_and_risk_lines():
     client = TelegramClient()
     text = client._build_swing_text(_make_swing_result())
 
-    assert "市场结论" in text
-    assert "仓位计划" in text
-    assert "现金: 50%-65%" in text
+    assert "今日结论" in text
+    assert "账户动作" in text
+    assert "现金目标: 50%-65%" in text
     assert "当前总仓位: 68.7%" in text
-    assert "组合动作" in text
-    assert "减配: 中证2000ETF" in text
-    assert "调仓: 卖出2900份，保留约2300份" in text
-    assert "风险线" in text
+    assert "观察池机会" in text
+    assert "军工ETF" in text
+    assert "验证摘要" in text
+    assert "风险清单" in text
 
 
 def test_feishu_swing_card_shows_plain_language_sections():
@@ -119,11 +148,33 @@ def test_feishu_swing_card_shows_plain_language_sections():
         if element.get("tag") == "div"
     ]
     joined = "\n".join(contents)
-    assert "市场结论" in joined
-    assert "仓位计划" in joined
+    assert "今日结论" in joined
+    assert "账户动作" in joined
     assert "总仓位" in joined
     assert "当前总仓位" in joined
-    assert "组合动作" in joined
-    assert "持仓清单" in joined
-    assert "调仓" in joined
-    assert "风险线" in joined
+    assert "持仓处理" in joined
+    assert "观察池机会" in joined
+    assert "验证摘要" in joined
+    assert "风险清单" in joined
+
+
+def test_swing_rendering_surfaces_data_issues():
+    result = _make_swing_result()
+    result["data_issues"] = ["缓存行情未覆盖当前账户的全部标的：512660，请优先使用 --mode swing --dry-run 拉取实时数据。"]
+
+    output = io.StringIO()
+    with redirect_stdout(output):
+        _print_text_summary(result, "swing")
+    rendered = output.getvalue()
+
+    telegram_text = TelegramClient()._build_swing_text(result)
+    feishu_card = FeishuClient()._construct_swing_card(result)
+    feishu_joined = "\n".join(
+        element.get("text", {}).get("content", "")
+        for element in feishu_card["elements"]
+        if element.get("tag") == "div"
+    )
+
+    assert "缓存行情未覆盖当前账户的全部标的" in rendered
+    assert "缓存行情未覆盖当前账户的全部标的" in telegram_text
+    assert "缓存行情未覆盖当前账户的全部标的" in feishu_joined

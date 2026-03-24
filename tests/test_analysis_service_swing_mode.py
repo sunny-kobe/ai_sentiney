@@ -41,9 +41,24 @@ def test_run_analysis_swing_mode_uses_deterministic_report_without_gemini(monkey
     monkeypatch.setattr(service, "collect_and_process_data", fake_collect)
     monkeypatch.setattr(service, "_get_swing_history_records", lambda days=90: history)
     monkeypatch.setattr(
+        service,
+        "_compute_swing_validation_report",
+        lambda historical_records: {
+            "scorecard": {"summary_text": "20日样本6，平均收益3.0%"},
+            "backtest": {"summary_text": "回测收益8.0%，最大回撤-4.0%"},
+            "performance_context": {"offensive": {"pullback_resume": {"allowed": True, "reason": "样本通过"}}},
+            "summary_text": "20日样本6，平均收益3.0%；回测收益8.0%，最大回撤-4.0%",
+        },
+    )
+    monkeypatch.setattr(
         "src.service.analysis_service.build_swing_report",
         lambda ai_input, historical_records, analysis_date: captured.update(
-            {"historical_records": historical_records, "analysis_date": analysis_date}
+            {
+                "historical_records": historical_records,
+                "analysis_date": analysis_date,
+                "performance_context": ai_input.get("performance_context"),
+                "validation_report": ai_input.get("validation_report"),
+            }
         )
         or {
             "mode": "swing",
@@ -55,7 +70,6 @@ def test_run_analysis_swing_mode_uses_deterministic_report_without_gemini(monkey
             "technical_evidence": [],
         },
     )
-    monkeypatch.setattr(service, "_compute_swing_scorecard", lambda historical_records: {"summary_text": "10日样本3，平均收益2.0%"})
     monkeypatch.setattr(
         "src.service.analysis_service.GeminiClient",
         lambda: (_ for _ in ()).throw(AssertionError("Gemini should not be called in swing mode")),
@@ -65,11 +79,14 @@ def test_run_analysis_swing_mode_uses_deterministic_report_without_gemini(monkey
     result = asyncio.run(service.run_analysis(mode="swing"))
 
     assert result["market_regime"] == "进攻"
-    assert result["swing_scorecard"]["summary_text"] == "10日样本3，平均收益2.0%"
+    assert result["swing_scorecard"]["summary_text"] == "20日样本6，平均收益3.0%"
+    assert result["validation_report"]["summary_text"] == "20日样本6，平均收益3.0%；回测收益8.0%，最大回撤-4.0%"
     assert result["position_plan"]["total_exposure"] == "90%-100%"
     assert result["quality_status"] == "normal"
     assert captured["historical_records"] == history
     assert captured["analysis_date"] == "2026-03-23"
+    assert captured["performance_context"]["offensive"]["pullback_resume"]["allowed"] is True
+    assert captured["validation_report"]["backtest"]["summary_text"].startswith("回测收益")
 
 
 def test_run_analysis_swing_mode_loads_close_history_for_scorecard(monkeypatch, tmp_path):
@@ -88,6 +105,16 @@ def test_run_analysis_swing_mode_loads_close_history_for_scorecard(monkeypatch, 
     monkeypatch.setattr(service, "collect_and_process_data", fake_collect)
     monkeypatch.setattr(service, "_get_swing_history_records", fake_history)
     monkeypatch.setattr(
+        service,
+        "_compute_swing_validation_report",
+        lambda historical_records: {
+            "scorecard": {"summary_text": "20日样本5，平均收益1.5%"},
+            "backtest": {"summary_text": "回测收益3.2%，最大回撤-2.1%"},
+            "performance_context": {"offensive": {"pullback_resume": {"allowed": True, "reason": "样本通过"}}},
+            "summary_text": "20日样本5，平均收益1.5%；回测收益3.2%，最大回撤-2.1%",
+        },
+    )
+    monkeypatch.setattr(
         "src.service.analysis_service.build_swing_report",
         lambda ai_input, historical_records, analysis_date: {
             "mode": "swing",
@@ -98,7 +125,6 @@ def test_run_analysis_swing_mode_loads_close_history_for_scorecard(monkeypatch, 
             "technical_evidence": [],
         },
     )
-    monkeypatch.setattr(service, "_compute_swing_scorecard", lambda historical_records: {"summary_text": "20日样本5，平均收益1.5%"})
     monkeypatch.setattr(service.db, "save_record", lambda **_kwargs: None)
 
     result = asyncio.run(service.run_analysis(mode="swing"))
@@ -122,6 +148,16 @@ def test_run_analysis_swing_mode_injects_strategy_preferences(monkeypatch, tmp_p
     monkeypatch.setattr(service, "collect_and_process_data", fake_collect)
     monkeypatch.setattr(service, "_get_swing_history_records", lambda days=90: [])
     monkeypatch.setattr(
+        service,
+        "_compute_swing_validation_report",
+        lambda historical_records: {
+            "scorecard": None,
+            "backtest": {"summary_text": "样本不足，暂无正式回测"},
+            "performance_context": {"offensive": {"pullback_resume": {"allowed": False, "reason": "样本不足"}}},
+            "summary_text": "样本不足，暂无正式回测",
+        },
+    )
+    monkeypatch.setattr(
         "src.service.analysis_service.build_swing_report",
         lambda ai_input, historical_records, analysis_date: captured.update(
             {
@@ -141,7 +177,6 @@ def test_run_analysis_swing_mode_injects_strategy_preferences(monkeypatch, tmp_p
             "technical_evidence": [],
         },
     )
-    monkeypatch.setattr(service, "_compute_swing_scorecard", lambda historical_records: None)
     monkeypatch.setattr(service.db, "save_record", lambda **_kwargs: None)
 
     asyncio.run(service.run_analysis(mode="swing"))
@@ -208,7 +243,7 @@ def test_ask_question_in_swing_mode_includes_position_sizing(monkeypatch):
     monkeypatch.setattr(
         service,
         "_load_cached_context",
-        lambda mode: {
+        lambda mode, universe_codes=None: {
             "context_date": "2026-03-23",
             "stocks": [{"code": "510300", "name": "沪深300ETF"}],
         },
@@ -252,3 +287,262 @@ def test_load_cached_context_for_swing_falls_back_when_latest_context_has_no_sto
 
     assert cached["context_date"] == "2026-03-22"
     assert cached["stocks"][0]["code"] == "510300"
+
+
+def test_run_analysis_swing_dry_run_fetches_live_data_for_current_universe(monkeypatch, tmp_path):
+    service = AnalysisService()
+    service.data_path = tmp_path / "latest_context.json"
+    service.data_path.write_text(
+        json.dumps({"context_date": "2026-03-23", "stocks": [{"code": "600519", "name": "贵州茅台"}]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    service.config["portfolio"] = [
+        {"code": "510300", "name": "沪深300ETF", "shares": 600, "strategy": "value"},
+    ]
+    service.config["watchlist"] = [
+        {"code": "512660", "name": "军工ETF", "strategy": "trend", "priority": "high"},
+    ]
+    captured = {}
+
+    async def fake_collect(universe):
+        captured["collected_codes"] = [item["code"] for item in universe]
+        return {
+            "context_date": "2026-03-24",
+            "market_breadth": "3200家上涨，1700家下跌",
+            "indices": {"上证指数": {"change_pct": 0.8}},
+            "macro_news": {"telegraph": ["情绪修复"]},
+            "stocks": [
+                {
+                    "code": "510300",
+                    "name": "沪深300ETF",
+                    "signal": "SAFE",
+                    "confidence": "中",
+                    "bias_pct": 0.02,
+                    "pct_change": 0.8,
+                    "current_price": 4.1,
+                    "ma20": 4.0,
+                    "tech_summary": "站上20日线",
+                    "macd": {"trend": "BULLISH"},
+                    "obv": {"trend": "INFLOW"},
+                    "shares": 600,
+                },
+                {
+                    "code": "512660",
+                    "name": "军工ETF",
+                    "signal": "OPPORTUNITY",
+                    "confidence": "高",
+                    "bias_pct": 0.05,
+                    "pct_change": 1.7,
+                    "current_price": 0.92,
+                    "ma20": 0.88,
+                    "tech_summary": "重新站上20日线",
+                    "macd": {"trend": "GOLDEN_CROSS"},
+                    "obv": {"trend": "INFLOW"},
+                    "shares": 0,
+                },
+            ],
+        }
+
+    monkeypatch.setattr("src.service.analysis_service.should_run_market_report", lambda **kwargs: {"should_run": True})
+    monkeypatch.setattr(service, "collect_and_process_data", fake_collect)
+    monkeypatch.setattr(service, "_get_swing_history_records", lambda days=90: [])
+    monkeypatch.setattr(service, "_compute_swing_validation_report", lambda historical_records: None)
+    monkeypatch.setattr(
+        "src.service.analysis_service.build_swing_report",
+        lambda ai_input, historical_records, analysis_date: captured.update(
+            {"input_codes": [stock["code"] for stock in ai_input.get("stocks", [])]}
+        )
+        or {
+            "mode": "swing",
+            "market_regime": "均衡",
+            "market_conclusion": "当前偏均衡。",
+            "portfolio_actions": {"增配": [], "持有": [], "减配": [], "回避": [], "观察": []},
+            "actions": [],
+            "watchlist_candidates": [],
+        },
+    )
+    monkeypatch.setattr(service.db, "save_record", lambda **_kwargs: None)
+
+    asyncio.run(service.run_analysis(mode="swing", dry_run=True))
+
+    assert captured["collected_codes"] == ["510300", "512660"]
+    assert captured["input_codes"] == ["510300", "512660"]
+
+
+def test_run_analysis_swing_replay_prefers_cached_context_that_matches_current_universe(monkeypatch, tmp_path):
+    service = AnalysisService()
+    replay_file = tmp_path / "latest_context.json"
+    replay_file.write_text(
+        json.dumps(
+            {
+                "context_date": "2026-03-24",
+                "market_breadth": "1800家上涨，3100家下跌",
+                "indices": {"上证指数": {"change_pct": -0.8}},
+                "macro_news": {"telegraph": ["旧缓存"]},
+                "stocks": [{"code": "600519", "name": "贵州茅台"}],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    service.data_path = replay_file
+    service.config["portfolio"] = [
+        {"code": "510300", "name": "沪深300ETF", "shares": 600, "strategy": "value"},
+    ]
+    service.config["watchlist"] = [
+        {"code": "512660", "name": "军工ETF", "strategy": "trend", "priority": "high"},
+    ]
+    captured = {}
+
+    def fake_latest_record(mode):
+        if mode != "close":
+            return None
+        return {
+            "context_date": "2026-03-23",
+            "market_breadth": "3200家上涨，1700家下跌",
+            "indices": {"上证指数": {"change_pct": 0.8}},
+            "macro_news": {"telegraph": ["更匹配当前账户的缓存"]},
+            "stocks": [
+                {
+                    "code": "510300",
+                    "name": "沪深300ETF",
+                    "signal": "SAFE",
+                    "confidence": "中",
+                    "bias_pct": 0.02,
+                    "pct_change": 0.8,
+                    "current_price": 4.1,
+                    "ma20": 4.0,
+                    "tech_summary": "站上20日线",
+                    "macd": {"trend": "BULLISH"},
+                    "obv": {"trend": "INFLOW"},
+                },
+                {
+                    "code": "512660",
+                    "name": "军工ETF",
+                    "signal": "OPPORTUNITY",
+                    "confidence": "高",
+                    "bias_pct": 0.05,
+                    "pct_change": 1.7,
+                    "current_price": 0.92,
+                    "ma20": 0.88,
+                    "tech_summary": "重新站上20日线",
+                    "macd": {"trend": "GOLDEN_CROSS"},
+                    "obv": {"trend": "INFLOW"},
+                },
+            ],
+        }
+
+    monkeypatch.setattr("src.service.analysis_service.should_run_market_report", lambda **kwargs: {"should_run": True})
+    monkeypatch.setattr(service.db, "get_latest_record", fake_latest_record)
+    monkeypatch.setattr(service, "_get_swing_history_records", lambda days=90: [])
+    monkeypatch.setattr(service, "_compute_swing_validation_report", lambda historical_records: None)
+    monkeypatch.setattr(
+        "src.service.analysis_service.build_swing_report",
+        lambda ai_input, historical_records, analysis_date: captured.update(
+            {
+                "input_codes": [stock["code"] for stock in ai_input.get("stocks", [])],
+                "shares_by_code": {stock["code"]: stock.get("shares", 0) for stock in ai_input.get("stocks", [])},
+            }
+        )
+        or {
+            "mode": "swing",
+            "market_regime": "均衡",
+            "market_conclusion": "当前偏均衡。",
+            "portfolio_actions": {"增配": [], "持有": [], "减配": [], "回避": [], "观察": []},
+            "actions": [],
+            "watchlist_candidates": [],
+        },
+    )
+    monkeypatch.setattr(service.db, "save_record", lambda **_kwargs: None)
+
+    asyncio.run(service.run_analysis(mode="swing", replay=True, dry_run=True))
+
+    assert captured["input_codes"] == ["510300", "512660"]
+    assert captured["shares_by_code"]["510300"] == 600
+
+
+def test_compute_swing_validation_report_summarizes_in_plain_language(monkeypatch):
+    service = AnalysisService()
+
+    monkeypatch.setattr(
+        service,
+        "_build_synthetic_swing_records",
+        lambda historical_records: [
+            {"date": "2026-03-20", "raw_data": {"stocks": [{"code": "510300"}]}, "ai_result": {"actions": [{"code": "510300"}]}},
+            {"date": "2026-03-21", "raw_data": {"stocks": [{"code": "510300"}]}, "ai_result": {"actions": [{"code": "510300"}]}},
+            {"date": "2026-03-22", "raw_data": {"stocks": [{"code": "510300"}]}, "ai_result": {"actions": [{"code": "510300"}]}},
+            {"date": "2026-03-23", "raw_data": {"stocks": [{"code": "510300"}]}, "ai_result": {"actions": [{"code": "510300"}]}},
+        ],
+    )
+    monkeypatch.setattr(
+        "src.service.analysis_service.build_swing_scorecard",
+        lambda synthetic_records, benchmark_map, windows: {
+            "windows": [20],
+            "stats": {
+                "overall": {
+                    20: {
+                        "count": 12,
+                        "avg_absolute_return": 0.031,
+                        "avg_relative_return": 0.012,
+                        "avg_max_drawdown": -0.052,
+                    }
+                }
+            },
+        },
+    )
+    monkeypatch.setattr(
+        "src.service.analysis_service.run_deterministic_backtest",
+        lambda synthetic_records, initial_cash, lot_size: {
+            "total_return": 0.094,
+            "max_drawdown": -0.052,
+            "trades": [{"side": "buy"}, {"side": "sell"}, {"side": "buy"}],
+        },
+    )
+    monkeypatch.setattr(
+        "src.service.analysis_service.run_walkforward_validation",
+        lambda synthetic_records, train_window, test_window, initial_cash: {
+            "segment_count": 5,
+            "segments": [],
+            "avg_total_return": 0.012,
+        },
+    )
+
+    report = service._compute_swing_validation_report(
+        [{"date": "2026-03-23", "raw_data": {"stocks": [{"code": "510300"}]}, "ai_result": {"actions": []}}]
+    )
+
+    assert "可以继续进攻" in report["summary_text"]
+    assert "20日样本12" in report["summary_text"]
+    assert "回测收益9.4%" in report["summary_text"]
+
+
+def test_collect_and_process_data_closes_data_collector(monkeypatch):
+    service = AnalysisService()
+    lifecycle = {"closed": False}
+
+    class FakeCollector:
+        async def collect_all(self, portfolio):
+            return {
+                "market_breadth": "3200家上涨，1700家下跌",
+                "north_funds": 0.0,
+                "indices": {},
+                "macro_news": {},
+                "stocks": [],
+            }
+
+        def close(self):
+            lifecycle["closed"] = True
+
+    class FakeProcessor:
+        def calculate_indicators(self, stock_raw):
+            return stock_raw
+
+        def generate_signals(self, processed_stocks):
+            return processed_stocks
+
+    monkeypatch.setattr("src.service.analysis_service.DataCollector", FakeCollector)
+    monkeypatch.setattr("src.service.analysis_service.DataProcessor", FakeProcessor)
+
+    asyncio.run(service.collect_and_process_data([]))
+
+    assert lifecycle["closed"] is True

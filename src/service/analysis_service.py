@@ -19,8 +19,11 @@ from src.utils.trading_calendar import should_run_market_report
 from src.service.report_quality import evaluate_input_quality, evaluate_output_quality
 from src.service.structured_report import build_structured_report
 from src.service.portfolio_advisor import build_investor_snapshot
+from src.service.performance_gate import build_default_performance_context, gate_offensive_setup
 from src.service.swing_strategy import build_swing_report, resolve_benchmark_code
 from src.service.strategy_engine import build_strategy_snapshot, build_intraday_rule_report, build_close_rule_report
+from src.backtest.engine import run_deterministic_backtest
+from src.backtest.walkforward import run_walkforward_validation
 
 class AnalysisService:
     def __init__(self):
@@ -38,14 +41,31 @@ class AnalysisService:
             swing_config=swing_config,
         ).get("strategy_preferences", {})
 
-    def _load_cached_context(self, mode: str) -> Optional[Dict[str, Any]]:
+    def _context_stock_codes(self, context: Optional[Dict[str, Any]]) -> set[str]:
+        if not context:
+            return set()
+        return {
+            str(stock.get("code", "") or "")
+            for stock in (context.get("stocks") or [])
+            if stock.get("code")
+        }
+
+    def _context_match_score(self, context: Optional[Dict[str, Any]], universe_codes: Optional[set[str]]) -> tuple[int, int]:
+        codes = self._context_stock_codes(context)
+        if not universe_codes:
+            return len(codes), len(codes)
+        return len(codes & universe_codes), len(codes)
+
+    def _load_cached_context(self, mode: str, universe_codes: Optional[set[str]] = None) -> Optional[Dict[str, Any]]:
+        candidates: List[Dict[str, Any]] = []
+
         if self.data_path.exists():
             with open(self.data_path, 'r', encoding='utf-8') as f:
                 cached = json.load(f)
             if mode != "swing":
                 return cached
-            if (cached.get("stocks") or []):
-                return cached
+            if cached.get("stocks") or not universe_codes:
+                candidates.append(cached)
 
         candidate_modes = [mode]
         if mode == "swing":
@@ -54,65 +74,119 @@ class AnalysisService:
         for candidate_mode in candidate_modes:
             latest_record = self.db.get_latest_record(mode=candidate_mode)
             if latest_record:
-                return latest_record
-        return None
+                candidates.append(latest_record)
+
+        if not candidates:
+            return None
+
+        return max(candidates, key=lambda item: self._context_match_score(item, universe_codes))
+
+    def _align_swing_context_to_snapshot(
+        self,
+        context: Dict[str, Any],
+        investor_snapshot: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        aligned = dict(context or {})
+        stock_map = {
+            str(stock.get("code", "") or ""): dict(stock)
+            for stock in (context.get("stocks") or [])
+            if stock.get("code")
+        }
+        ordered_universe = investor_snapshot.get("universe") or []
+        aligned_stocks: List[Dict[str, Any]] = []
+        missing_codes: List[str] = []
+
+        for asset in ordered_universe:
+            code = str(asset.get("code", "") or "")
+            if not code:
+                continue
+            stock = stock_map.get(code)
+            if not stock:
+                missing_codes.append(code)
+                continue
+            merged = dict(stock)
+            merged["code"] = code
+            merged["name"] = asset.get("name", merged.get("name", code))
+            merged["strategy"] = asset.get("strategy", merged.get("strategy", "trend"))
+            merged["priority"] = asset.get("priority", merged.get("priority", "normal"))
+            merged["held"] = asset.get("held", False)
+            merged["shares"] = int(asset.get("shares", merged.get("shares", 0)) or 0)
+            if asset.get("cost") is not None:
+                merged["cost"] = asset.get("cost")
+            aligned_stocks.append(merged)
+
+        aligned["stocks"] = aligned_stocks
+        aligned["data_issues"] = []
+        if missing_codes:
+            aligned["data_issues"].append(
+                "缓存行情未覆盖当前账户的全部标的："
+                + "、".join(missing_codes[:5])
+                + ("，请优先使用 --mode swing --dry-run 拉取实时数据。" if len(missing_codes) else "")
+            )
+        return aligned
 
     async def collect_and_process_data(self, portfolio: List[Dict]) -> Dict[str, Any]:
         """Collects raw data and processes it into AI-ready context."""
         # 1. Collect Data (Async)
         collector = DataCollector()
-        raw_data = await collector.collect_all(portfolio)
+        try:
+            raw_data = await collector.collect_all(portfolio)
 
-        market_breadth = raw_data['market_breadth']
-        north_funds = raw_data['north_funds']
-        stock_data_list = raw_data['stocks']
-        indices = raw_data.get('indices', {})
-        macro_news = raw_data.get('macro_news', {})
+            market_breadth = raw_data['market_breadth']
+            north_funds = raw_data['north_funds']
+            stock_data_list = raw_data['stocks']
+            indices = raw_data.get('indices', {})
+            macro_news = raw_data.get('macro_news', {})
 
-        logger.info(f"Data Collected. Market Breadth: {market_breadth}, North Funds: {north_funds}")
+            logger.info(f"Data Collected. Market Breadth: {market_breadth}, North Funds: {north_funds}")
 
-        # 1.5. Enrich stock data with portfolio config (strategy, cost)
-        portfolio_map = {p['code']: p for p in portfolio}
-        for stock_raw in stock_data_list:
-            cfg = portfolio_map.get(stock_raw.get('code', ''), {})
-            stock_raw['strategy'] = cfg.get('strategy', 'trend')
-            stock_raw['cost'] = cfg.get('cost', 0)
-            stock_raw['shares'] = cfg.get('shares', 0)
+            # 1.5. Enrich stock data with portfolio config (strategy, cost)
+            portfolio_map = {p['code']: p for p in portfolio}
+            for stock_raw in stock_data_list:
+                cfg = portfolio_map.get(stock_raw.get('code', ''), {})
+                stock_raw['strategy'] = cfg.get('strategy', 'trend')
+                stock_raw['cost'] = cfg.get('cost', 0)
+                stock_raw['shares'] = cfg.get('shares', 0)
 
-        # 2. Process Data (Indicators)
-        processor = DataProcessor()
-        processed_stocks = []
-        for stock_raw in stock_data_list:
-            stock_indicators = processor.calculate_indicators(stock_raw)
-            processed_stocks.append(stock_indicators)
+            # 2. Process Data (Indicators)
+            processor = DataProcessor()
+            processed_stocks = []
+            for stock_raw in stock_data_list:
+                stock_indicators = processor.calculate_indicators(stock_raw)
+                processed_stocks.append(stock_indicators)
 
-        # Pre-calculate signals (north_funds removed in v2.0)
-        processed_stocks = processor.generate_signals(processed_stocks)
+            # Pre-calculate signals (north_funds removed in v2.0)
+            processed_stocks = processor.generate_signals(processed_stocks)
 
-        return {
-            "context_date": datetime.now().strftime('%Y-%m-%d'),
-            "market_breadth": market_breadth,
-            "north_funds": north_funds,
-            "indices": indices,
-            "macro_news": macro_news,
-            "stocks": processed_stocks,
-            "portfolio_state": self.config.get('portfolio_state', {}),
-            "strategy_preferences": self._get_swing_strategy_preferences(),
-        }
+            return {
+                "context_date": datetime.now().strftime('%Y-%m-%d'),
+                "market_breadth": market_breadth,
+                "north_funds": north_funds,
+                "indices": indices,
+                "macro_news": macro_news,
+                "stocks": processed_stocks,
+                "portfolio_state": self.config.get('portfolio_state', {}),
+                "strategy_preferences": self._get_swing_strategy_preferences(),
+            }
+        finally:
+            collector.close()
 
     async def collect_and_process_morning_data(self, portfolio: List[Dict]) -> Dict[str, Any]:
         """Collects and processes morning pre-market data."""
         collector = DataCollector()
-        raw_data = await collector.collect_morning_data(portfolio)
+        try:
+            raw_data = await collector.collect_morning_data(portfolio)
 
-        processor = DataProcessor()
-        processed_data = processor.process_morning_data(raw_data, portfolio)
-        processed_data["context_date"] = datetime.now().strftime('%Y-%m-%d')
+            processor = DataProcessor()
+            processed_data = processor.process_morning_data(raw_data, portfolio)
+            processed_data["context_date"] = datetime.now().strftime('%Y-%m-%d')
 
-        logger.info(f"Morning data collected. Global indices: {len(processed_data.get('global_indices', []))}, "
-                     f"Commodities: {len(processed_data.get('commodities', []))}, "
-                     f"Stocks: {len(processed_data.get('stocks', []))}")
-        return processed_data
+            logger.info(f"Morning data collected. Global indices: {len(processed_data.get('global_indices', []))}, "
+                         f"Commodities: {len(processed_data.get('commodities', []))}, "
+                         f"Stocks: {len(processed_data.get('stocks', []))}")
+            return processed_data
+        finally:
+            collector.close()
 
     def post_process_result(self, analysis_result: Dict, ai_input: Dict, mode: str = 'midday') -> Dict:
         """Injects real-time data back into analysis result for display."""
@@ -288,14 +362,20 @@ class AnalysisService:
         ai_input = None
 
         # --- Step 1: Data Preparation ---
-        if replay or (mode == "swing" and dry_run):
-            cached_context = self._load_cached_context(mode)
+        if replay:
+            universe_codes = {
+                str(item.get("code", "") or "")
+                for item in investor_snapshot.get("universe", [])
+                if item.get("code")
+            } if mode == "swing" else None
+            cached_context = self._load_cached_context(mode, universe_codes=universe_codes)
             if cached_context:
-                if replay:
-                    logger.info("Replay Mode: Loading cached data...")
-                else:
-                    logger.info("Swing dry-run: Loading cached context instead of live market data...")
-                ai_input = cached_context
+                logger.info("Replay Mode: Loading cached data...")
+                ai_input = (
+                    self._align_swing_context_to_snapshot(cached_context, investor_snapshot)
+                    if mode == "swing"
+                    else cached_context
+                )
             elif replay:
                 logger.error("No historical data found for replay.")
                 return {"error": "No replay data"}
@@ -352,15 +432,21 @@ class AnalysisService:
                 ai_input.setdefault("held_codes", investor_snapshot.get("held_codes", set()))
                 ai_input.setdefault("watchlist_codes", investor_snapshot.get("watchlist_codes", set()))
                 historical_records = self._get_swing_history_records(days=90)
+                validation_report = self._compute_swing_validation_report(historical_records)
+                if validation_report:
+                    ai_input.setdefault("performance_context", validation_report.get("performance_context", {}))
+                    ai_input.setdefault("validation_report", validation_report)
                 analysis_result = build_swing_report(ai_input, historical_records, analysis_date)
-                swing_scorecard = self._compute_swing_scorecard(historical_records)
-                if swing_scorecard:
-                    analysis_result["swing_scorecard"] = swing_scorecard
+                if validation_report:
+                    if validation_report.get("scorecard"):
+                        analysis_result["swing_scorecard"] = validation_report.get("scorecard")
+                    analysis_result["validation_report"] = validation_report
                 analysis_result.setdefault("summary", analysis_result.get("market_conclusion", ""))
                 analysis_result.setdefault("quality_status", "normal")
                 analysis_result.setdefault("quality_issues", [])
                 analysis_result.setdefault("data_timestamp", analysis_date)
                 analysis_result.setdefault("source_labels", ["rule_engine", "history"])
+                analysis_result.setdefault("data_issues", ai_input.get("data_issues", []))
             elif mode in ("midday", "preclose", "close") and quality_input["status"] == "degraded":
                 analysis_result = self._build_degraded_report(mode, ai_input["structured_report"], quality_input["issues"])
             elif mode in ("midday", "preclose", "close"):
@@ -723,8 +809,14 @@ class AnalysisService:
         return benchmark_map
 
     def _compute_swing_scorecard(self, historical_records: List[Dict]) -> Optional[Dict]:
-        if not historical_records:
+        validation_report = self._compute_swing_validation_report(historical_records)
+        if not validation_report:
             return None
+        return validation_report.get("scorecard")
+
+    def _build_synthetic_swing_records(self, historical_records: List[Dict]) -> List[Dict]:
+        if not historical_records:
+            return []
 
         sorted_records = sorted(historical_records, key=lambda item: item.get("date", ""))
         synthetic_records = []
@@ -748,6 +840,7 @@ class AnalysisService:
                     "name": action.get("name"),
                     "action_label": action.get("action_label"),
                     "confidence": action.get("confidence"),
+                    "target_weight": action.get("target_weight") if action.get("action_label") in {"增配", "减配", "回避"} else None,
                 }
                 for action in swing_report.get("actions", [])
                 if action.get("code") and action.get("action_label")
@@ -763,21 +856,157 @@ class AnalysisService:
                 }
             )
 
+        return synthetic_records
+
+    def _build_validation_performance_context(
+        self,
+        scorecard: Optional[Dict[str, Any]],
+        backtest_report: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        context = build_default_performance_context()
+        by_action = ((scorecard or {}).get("stats") or {}).get("by_action", {})
+        action_stats = by_action.get("增配", {})
+        primary_window = next(
+            (window for window in (20, 10, 40) if action_stats.get(window, {}).get("count", 0) > 0),
+            None,
+        )
+
+        gate = {"allowed": False, "reason": "样本不足"}
+        if primary_window is not None:
+            gate = gate_offensive_setup(action_stats[primary_window])
+
+        if backtest_report and int(backtest_report.get("trade_count", 0) or 0) >= 3:
+            if float(backtest_report.get("total_return", 0) or 0) <= 0:
+                gate = {"allowed": False, "reason": "正式回测收益不达标"}
+            elif float(backtest_report.get("max_drawdown", 0) or 0) <= -0.12:
+                gate = {"allowed": False, "reason": "正式回测回撤偏大"}
+            elif gate.get("allowed"):
+                gate = {"allowed": True, "reason": f"{gate.get('reason', '样本通过')}，正式回测未见明显恶化"}
+
+        context["offensive"]["pullback_resume"] = gate
+        return context
+
+    def _build_validation_summary_text(
+        self,
+        scorecard: Optional[Dict[str, Any]],
+        backtest_report: Optional[Dict[str, Any]],
+        walkforward_report: Optional[Dict[str, Any]],
+    ) -> str:
+        overall_stats = ((scorecard or {}).get("stats") or {}).get("overall", {})
+        primary_window = next(
+            (window for window in (20, 10, 40) if overall_stats.get(window, {}).get("count", 0) > 0),
+            None,
+        )
+        stats = overall_stats.get(primary_window, {}) if primary_window is not None else {}
+        count = int(stats.get("count", 0) or 0)
+        avg_return = float(stats.get("avg_absolute_return", 0.0) or 0.0)
+        avg_relative = stats.get("avg_relative_return")
+        avg_drawdown = float(stats.get("avg_max_drawdown", 0.0) or 0.0)
+        trade_count = int((backtest_report or {}).get("trade_count", 0) or 0)
+        backtest_return = float((backtest_report or {}).get("total_return", 0.0) or 0.0)
+        backtest_drawdown = float((backtest_report or {}).get("max_drawdown", 0.0) or 0.0)
+
+        if count < 8:
+            verdict = "历史样本还不够，当前先把这套信号当辅助参考，不单独放大仓位。"
+        elif avg_return <= 0 or (isinstance(avg_relative, (int, float)) and avg_relative < 0):
+            verdict = "最近这套中期动作没有体现出明显优势，先别因为它主动放大仓位。"
+        elif avg_drawdown <= -0.10 or (trade_count >= 3 and backtest_drawdown <= -0.12):
+            verdict = "这套中期动作有机会，但历史回撤偏大，进攻也要预留撤退空间。"
+        else:
+            verdict = "最近这套中期动作整体有效，可以继续进攻，但仍按分批方式执行。"
+
+        evidence_parts: List[str] = []
+        if primary_window is not None:
+            details = [
+                f"{primary_window}日样本{count}",
+                f"平均收益{avg_return * 100:.1f}%",
+            ]
+            if isinstance(avg_relative, (int, float)):
+                if avg_relative >= 0:
+                    details.append(f"平均跑赢基准{avg_relative * 100:.1f}%")
+                else:
+                    details.append(f"平均落后基准{abs(avg_relative) * 100:.1f}%")
+            details.append(f"平均回撤{avg_drawdown * 100:.1f}%")
+            evidence_parts.append("，".join(details))
+
+        if trade_count >= 3:
+            evidence_parts.append(
+                f"回测收益{backtest_return * 100:.1f}%，最大回撤{backtest_drawdown * 100:.1f}%，交易{trade_count}笔"
+            )
+        else:
+            evidence_parts.append("正式回测样本还不够，先别把这一段结果当成定论")
+
+        if (walkforward_report or {}).get("segment_count", 0) > 0:
+            evidence_parts.append(
+                f"滚动验证{walkforward_report['segment_count']}段，平均收益{walkforward_report['avg_total_return'] * 100:.1f}%"
+            )
+
+        if not evidence_parts:
+            return verdict
+        return f"{verdict} 参考：{'；'.join(evidence_parts)}。"
+
+    def _compute_swing_validation_report(self, historical_records: List[Dict]) -> Optional[Dict]:
+        if not historical_records:
+            return None
+
+        sorted_records = sorted(historical_records, key=lambda item: item.get("date", ""))
+        synthetic_records = self._build_synthetic_swing_records(sorted_records)
         if not synthetic_records:
             return None
 
-        return build_swing_scorecard(
+        scorecard = build_swing_scorecard(
             synthetic_records,
             benchmark_map=self._build_swing_benchmark_map(sorted_records),
             windows=(10, 20, 40),
         )
 
+        lot_size = int((self.config.get("portfolio_state") or {}).get("lot_size", 100) or 100)
+        backtest_result = run_deterministic_backtest(
+            synthetic_records,
+            initial_cash=100_000.0,
+            lot_size=lot_size,
+        )
+        backtest_report = {
+            "total_return": backtest_result.get("total_return", 0.0),
+            "max_drawdown": backtest_result.get("max_drawdown", 0.0),
+            "trade_count": len(backtest_result.get("trades", []) or []),
+            "summary_text": "",
+        }
+        if backtest_report["trade_count"] >= 3:
+            backtest_report["summary_text"] = (
+                f"回测收益{backtest_result.get('total_return', 0.0) * 100:.1f}%，"
+                f"最大回撤{backtest_result.get('max_drawdown', 0.0) * 100:.1f}%，"
+                f"交易{len(backtest_result.get('trades', []) or [])}笔"
+            )
+        else:
+            backtest_report["summary_text"] = "正式回测样本不足，暂不放大解释"
+        walkforward_report = (
+            run_walkforward_validation(
+                synthetic_records,
+                train_window=2,
+                test_window=2,
+                initial_cash=100_000.0,
+            )
+            if len(synthetic_records) >= 4
+            else {"segment_count": 0, "segments": [], "avg_total_return": 0.0}
+        )
+        performance_context = self._build_validation_performance_context(scorecard, backtest_report)
+
+        return {
+            "scorecard": scorecard,
+            "backtest": backtest_report,
+            "walkforward": walkforward_report,
+            "performance_context": performance_context,
+            "summary_text": self._build_validation_summary_text(scorecard, backtest_report, walkforward_report),
+        }
+
     def _run_swing_accuracy_report(self) -> str:
         historical_records = self._get_swing_history_records(days=90)
-        scorecard = self._compute_swing_scorecard(historical_records)
-        if not scorecard:
+        validation_report = self._compute_swing_validation_report(historical_records)
+        if not validation_report:
             return "中期策略统计数据不足，暂无报告。"
 
+        scorecard = validation_report.get("scorecard") or {}
         lines = ["📈 中期策略跟踪报告", ""]
         for window in scorecard.get("windows", []):
             stats = scorecard.get("stats", {}).get("overall", {}).get(window, {})
@@ -808,19 +1037,49 @@ class AnalysisService:
                 action_line += f"，平均超额{stats['avg_relative_return'] * 100:.1f}%"
             lines.append(action_line)
 
+        if validation_report.get("backtest", {}).get("summary_text"):
+            lines.append(validation_report["backtest"]["summary_text"])
+        if validation_report.get("walkforward", {}).get("segment_count", 0) > 0:
+            lines.append(
+                f"滚动验证{validation_report['walkforward']['segment_count']}段，"
+                f"平均收益{validation_report['walkforward']['avg_total_return'] * 100:.1f}%"
+            )
+
         return "\n".join(lines)
 
     def _run_swing_question(self, question: str) -> str:
         historical_records = self._get_swing_history_records(days=90)
-        raw_data = self._load_cached_context("swing")
+        universe_codes = {
+            str(item.get("code", "") or "")
+            for item in build_investor_snapshot(
+                portfolio=self.config.get("portfolio", []),
+                watchlist=self.config.get("watchlist", []),
+                portfolio_state=self.config.get("portfolio_state", {}),
+                swing_config=((self.config.get("strategy") or {}).get("swing") or {}),
+            ).get("universe", [])
+            if item.get("code")
+        }
+        raw_data = self._load_cached_context("swing", universe_codes=universe_codes)
         if not raw_data:
             return "没有找到可用的中期缓存数据。请先运行一次 `python -m src.main --mode swing --dry-run`。"
 
         analysis_date = raw_data.get("context_date") or datetime.now().strftime('%Y-%m-%d')
-        report_input = dict(raw_data)
+        report_input = self._align_swing_context_to_snapshot(
+            raw_data,
+            build_investor_snapshot(
+                portfolio=self.config.get("portfolio", []),
+                watchlist=self.config.get("watchlist", []),
+                portfolio_state=self.config.get("portfolio_state", {}),
+                swing_config=((self.config.get("strategy") or {}).get("swing") or {}),
+            ),
+        )
         report_input.setdefault("strategy_preferences", self._get_swing_strategy_preferences())
+        validation_report = self._compute_swing_validation_report(historical_records)
+        if validation_report:
+            report_input.setdefault("performance_context", validation_report.get("performance_context", {}))
+            report_input.setdefault("validation_report", validation_report)
         report = build_swing_report(report_input, historical_records, analysis_date)
-        scorecard = self._compute_swing_scorecard(historical_records)
+        scorecard = validation_report.get("scorecard") if validation_report else None
 
         lines = [f"市场结论: {report.get('market_conclusion', '暂无结论')}"]
         position_plan = report.get("position_plan") or {}
@@ -833,6 +1092,10 @@ class AnalysisService:
             )
         if scorecard:
             lines.append(f"中期跟踪: {scorecard.get('summary_text', '')}")
+        if validation_report and validation_report.get("summary_text"):
+            lines.append(f"验证摘要: {validation_report['summary_text']}")
+        for issue in report_input.get("data_issues", []):
+            lines.append(f"数据提示: {issue}")
         lines.append("组合动作:")
         for label in ("增配", "持有", "减配", "回避", "观察"):
             items = report.get("portfolio_actions", {}).get(label, [])

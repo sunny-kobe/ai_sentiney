@@ -1254,6 +1254,7 @@ def build_swing_report(
         "actions": ordered_actions,
         "watchlist_actions": watchlist_output["action_buckets"],
         "watchlist_candidates": watchlist_output["active_candidates"],
+        "validation_summary": ((ai_input.get("validation_report") or {}).get("summary_text") or ""),
         "technical_evidence": technical_evidence,
         "strategy_snapshot": strategy_snapshot,
     }

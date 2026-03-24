@@ -1,8 +1,11 @@
 import asyncio
 import functools
 import re
+import threading
 import time
+import weakref
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures.thread import _threads_queues, _worker
 from dataclasses import dataclass, field, asdict
 import json
 from datetime import datetime, timedelta
@@ -36,10 +39,34 @@ class CircuitBreakerState:
     RECOVERY_TIMEOUT: float = 30.0  # 熔断后30秒进入半开状态
 
 
+class DaemonThreadPoolExecutor(ThreadPoolExecutor):
+    """Thread pool whose workers do not block process exit when third-party calls hang."""
+
+    def _adjust_thread_count(self):
+        if self._idle_semaphore.acquire(timeout=0):
+            return
+
+        def weakref_cb(_, q=self._work_queue):
+            q.put(None)
+
+        num_threads = len(self._threads)
+        if num_threads < self._max_workers:
+            thread_name = '%s_%d' % (self._thread_name_prefix or self, num_threads)
+            thread = threading.Thread(
+                name=thread_name,
+                target=_worker,
+                args=(weakref.ref(self, weakref_cb), self._work_queue, self._initializer, self._initargs),
+            )
+            thread.daemon = True
+            thread.start()
+            self._threads.add(thread)
+            _threads_queues[thread] = self._work_queue
+
+
 class DataCollector:
     def __init__(self):
         # GitHub Actions runners / Standard Cloud Instances (2-4 vCPUs)
-        self.executor = ThreadPoolExecutor(max_workers=16)
+        self.executor = DaemonThreadPoolExecutor(max_workers=16)
         self.config = ConfigLoader().config
         self.state_file = "data/circuit_breaker_state.json"
 
@@ -57,6 +84,10 @@ class DataCollector:
             for source in self.sources
         }
         self._load_circuit_breaker_state()
+
+    def close(self):
+        """Release thread-pool resources so CLI runs can exit cleanly."""
+        self.executor.shutdown(wait=False, cancel_futures=True)
 
     def _load_circuit_breaker_state(self):
         """Load circuit breaker states from disk."""

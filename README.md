@@ -39,9 +39,10 @@ WebUI Preview:
 
 当前主模式已经切到 `swing`：
 - 目标周期：`2-8` 周
-- 输出格式：`市场结论 / 组合动作 / 持仓清单 / 技术证据`
+- 输出格式：`今日结论 / 账户动作 / 持仓处理 / 观察池机会 / 风险清单`
 - 评估口径：`10/20/40` 个交易日的 `平均收益 / 平均超额 / 平均回撤`
 - 不再把短线命中率作为主KPI，`midday` / `close` 只保留为战术诊断
+- 新增 `验证摘要`：把事件研究、正式回测、滚动验证压缩成一段你能直接读懂的结论
 
 ## 30 秒看效果
 
@@ -69,10 +70,12 @@ python -m src.main --mode swing
 
 - 四种模式：`swing` / `morning` / `midday` / `close`
 - 中期主模式：`swing` 直接给出 `增配 / 持有 / 减配 / 回避 / 观察`
+- 持仓优先：围绕真实 `portfolio` 和少量 `watchlist` 生成中长期动作
 - 多源容灾采集：单一数据源异常时自动切换
 - 指标引擎：MA、MACD、RSI、BOLL、KDJ、ATR、OBV 等
 - 对称信号体系：卖出侧（DANGER/WARNING/WATCH）+ 买入侧（OPPORTUNITY/ACCUMULATE）
 - 中期评估：按 `10/20/40` 个交易日统计 `平均收益 / 平均超额 / 平均回撤`
+- 正式验证：新增组合级回测与滚动验证摘要，用来约束中期进攻信号
 - 日内诊断：`midday` / `close` 保留短线信号追踪，但不再作为主策略 KPI
 - 智能追问：基于缓存上下文做二次问答（`--ask`）
 - 趋势分析：自动识别”最近一周/本月走势”等问题
@@ -115,7 +118,7 @@ TELEGRAM_CHAT_ID=your_telegram_chat_id_here
 
 编辑 `config.yaml` 中的 `portfolio` 列表。
 
-如果希望 `swing` 报告按你的真实账户给出“当前仓位 / 目标仓位 / 调仓份额”，需要同时维护：
+如果希望 `swing` 报告按你的真实账户给出“当前仓位 / 目标仓位 / 调仓份额”，需要同时维护真实持仓和少量观察池：
 
 ```yaml
 portfolio_state:
@@ -128,11 +131,24 @@ portfolio:
     cost: 4.033
     shares: 600
     strategy: "value"
+
+watchlist:
+  - code: "512660"
+    name: "军工ETF"
+    strategy: "trend"
+    priority: "high"
 ```
 
 - `cash_balance`: 当前账户现金
 - `shares`: 当前持仓份额/股数
 - `lot_size`: 默认按 A 股/ETF 的 `100` 份整数手估算调仓动作
+- `watchlist`: 少量观察池，不参与当前持仓收益统计，但允许进入“试仓区”推荐
+- `priority`: 观察池优先级，决定机会排序时的参考权重
+
+`swing` 现在会优先给出：
+- 持仓该继续拿、加、减还是退出
+- 观察池里最多 `0-3` 个值得试仓的中期机会
+- 一段 `验证摘要`，说明这类动作最近的历史质量
 
 ### 5. 运行
 
@@ -142,6 +158,9 @@ python -m src.main --mode swing
 
 # 中期主模式并推送到飞书
 python -m src.main --mode swing --publish
+
+# 查看中期验证摘要
+python -m src.main --ask "最近验证情况怎么样" --mode swing
 
 # 午盘分析（默认最常用）
 python -m src.main --mode midday
@@ -198,8 +217,8 @@ python -m src.main --webui
 | `--mode {swing,midday,close,morning}` | 分析模式 |
 | `--publish` | 推送到发布渠道（默认不推） |
 | `--publish-target {feishu,telegram}` | 推送目标（默认 feishu） |
-| `--dry-run` | 试运行，不调昂贵 API |
-| `--replay` | 使用历史缓存重放分析 |
+| `--dry-run` | 试运行，不推送；`swing` 下会直接拉实时行情做预览 |
+| `--replay` | 使用历史缓存重放分析，适合验证渲染/结构，不替代实时预览 |
 | `--output {text,json}` | 输出格式 |
 | `--ask "问题"` | 进入追问模式 |
 | `--date YYYY-MM-DD` | 指定日期上下文 |
@@ -214,6 +233,7 @@ src/
   analyst/     # Gemini 分析与结构化输出
   reporter/    # 推送渠道（飞书 / Telegram）
   service/     # 主流程编排
+  backtest/    # 中长期正式回测与滚动验证
   web/         # 轻量 WebUI
 ```
 

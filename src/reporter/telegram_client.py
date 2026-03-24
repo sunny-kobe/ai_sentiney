@@ -118,38 +118,45 @@ class TelegramClient:
     def _build_swing_text(self, data: Dict[str, Any]) -> str:
         position_plan = data.get("position_plan") or {}
         lines = [
-            "🛡️ Sentinel 中期策略",
+            "🧭 Sentinel 中长期助手",
             f"时间: {data.get('data_timestamp', 'N/A')}",
             f"来源: {', '.join(data.get('source_labels', []))}" if data.get('source_labels') else "来源: N/A",
-            f"市场结论: {data.get('market_conclusion', '暂无结论')}",
-            "仓位计划:",
-            f"总资产: {position_plan.get('account_total_assets', 'N/A')}",
-            f"当前现金: {position_plan.get('cash_balance', 'N/A')}",
+            "今日结论:",
+            data.get('market_conclusion', '暂无结论'),
+            "验证摘要:",
+            data.get("validation_summary", "暂无验证摘要"),
+            "账户动作:",
             f"当前总仓位: {position_plan.get('current_total_exposure', 'N/A')}",
-            f"当前现金占比: {position_plan.get('current_cash_pct', 'N/A')}",
-            f"总仓位: {position_plan.get('total_exposure', 'N/A')}",
-            f"核心仓: {position_plan.get('core_target', 'N/A')}",
-            f"卫星仓: {position_plan.get('satellite_target', 'N/A')}",
-            f"现金: {position_plan.get('cash_target', 'N/A')}",
-            "组合动作:",
+            f"建议总仓位: {position_plan.get('total_exposure', 'N/A')}",
+            f"现金目标: {position_plan.get('cash_target', 'N/A')}",
+            f"优先动作: {'；'.join(position_plan.get('execution_order', []) or []) or '暂无'}",
+            "持仓处理:",
         ]
-        for label in ("增配", "持有", "减配", "回避", "观察"):
-            items = data.get("portfolio_actions", {}).get(label, [])
-            if not items:
-                continue
-            names = "、".join(item.get("name", "") for item in items if item.get("name"))
-            lines.append(f"{label}: {names}")
-
-        lines.append("持仓清单:")
         for action in data.get("actions", [])[:8]:
             lines.append(
                 f"- {action.get('name', '')} | {action.get('conclusion', action.get('action_label', '观察'))}"
-                f" | 当前:{action.get('current_weight', '0%')} | {action.get('position_bucket', 'N/A')}"
+                f" | 当前:{action.get('current_weight', '0%')}"
                 f" | 目标:{action.get('target_weight', 'N/A')}"
             )
-            if action.get("current_shares"):
-                lines.append(f"  当前持仓: {action.get('current_shares')}份 | 市值: {action.get('current_value', '0.00')}")
-            lines.append(f"  调仓: {action.get('rebalance_action', '先观察')}")
+            lines.append(f"  原因: {action.get('reason', '')}")
             lines.append(f"  计划: {action.get('plan', '')}")
             lines.append(f"  风险线: {action.get('risk_line', '')}")
+        lines.append("观察池机会:")
+        watchlist_candidates = data.get("watchlist_candidates", []) or []
+        if watchlist_candidates:
+            for candidate in watchlist_candidates:
+                lines.append(f"- {candidate.get('name', '')}({candidate.get('code', '')}) {candidate.get('action_label', '继续观察')}")
+                lines.append(f"  原因: {candidate.get('reason', '')}")
+                lines.append(f"  计划: {candidate.get('plan', '')}")
+        else:
+            lines.append("- 当前没有值得试仓的新方向")
+        lines.append("风险清单:")
+        risk_lines = [f"- {issue}" for issue in (data.get("data_issues") or [])]
+        for action in data.get("actions", []):
+            if action.get("action_label") in {"减配", "回避"} and action.get("risk_line"):
+                risk_lines.append(f"- {action.get('name', '')}: {action.get('risk_line', '')}")
+        for candidate in watchlist_candidates:
+            if candidate.get("risk_line"):
+                risk_lines.append(f"- {candidate.get('name', '')}: {candidate.get('risk_line', '')}")
+        lines.extend(risk_lines[:3] or ["- 暂无额外风险提示"])
         return "\n".join(lines)
