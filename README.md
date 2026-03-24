@@ -121,6 +121,9 @@ TELEGRAM_CHAT_ID=your_telegram_chat_id_here
 # 中期主模式（默认推荐）
 python -m src.main --mode swing
 
+# 中期主模式并推送到飞书
+python -m src.main --mode swing --publish
+
 # 午盘分析（默认最常用）
 python -m src.main --mode midday
 
@@ -217,6 +220,10 @@ src/
 
 仓库内置 GitHub Actions 定时任务（交易日时段）用于自动运行与数据落库，详见：
 - `.github/workflows/daily_sentinel.yml`
+
+当前支持：
+- 定时推送：`morning` / `midday` / `close` / `swing`
+- 手动触发：可在 Actions 页面选择 `mode` 与 `publish_target`
 
 ## Roadmap
 

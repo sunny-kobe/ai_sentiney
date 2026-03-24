@@ -7,10 +7,32 @@ on:
     # Morning 08:10 CST = 00:10 UTC
     # Midday 11:50 CST = 03:50 UTC
     # Close 15:20 CST = 07:20 UTC
+    # Swing 15:35 CST = 07:35 UTC
     - cron: "10 0 * * 1-5" # Morning Brief (兜底)
     - cron: "50 3 * * 1-5" # Midday Check (兜底)
     - cron: "20 7 * * 1-5" # Close Review (兜底)
-  workflow_dispatch: # Allow manual button click test
+    - cron: "35 7 * * 1-5" # Swing Strategy (主模式)
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Execution mode"
+        required: true
+        default: "swing"
+        type: choice
+        options:
+          - swing
+          - morning
+          - midday
+          - close
+          - auto
+      publish_target:
+        description: "Publish target"
+        required: true
+        default: "feishu"
+        type: choice
+        options:
+          - feishu
+          - telegram
 
 jobs:
   run-sentinel:
@@ -38,28 +60,50 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          WORKFLOW_MODE: ${{ github.event.inputs.mode || 'auto' }}
+          PUBLISH_TARGET: ${{ github.event.inputs.publish_target || 'feishu' }}
+          SCHEDULE_EXPR: ${{ github.event.schedule || '' }}
         run: |
-          # Determine mode based on time or input?
-          # A simple way is to check the current hour (UTC)
-          # 03:00 - 05:00 UTC -> Midday
-          # 06:00 - 09:00 UTC -> Close
-
-          current_hour=$(date -u +%-H)
-          echo "Current UTC Hour: $current_hour"
-
-          if [ "$current_hour" -lt 2 ]; then
-            TARGET_MODE="morning"
-            echo "Running Morning Brief..."
-          elif [ "$current_hour" -lt 6 ]; then
-            TARGET_MODE="midday"
-            echo "Running Midday Check..."
+          if [ -n "$WORKFLOW_MODE" ] && [ "$WORKFLOW_MODE" != "auto" ]; then
+            TARGET_MODE="$WORKFLOW_MODE"
+            echo "Manual dispatch mode selected: $TARGET_MODE"
           else
-            TARGET_MODE="close"
-            echo "Running Close Review..."
+            case "$SCHEDULE_EXPR" in
+              "10 0 * * 1-5")
+                TARGET_MODE="morning"
+                ;;
+              "50 3 * * 1-5")
+                TARGET_MODE="midday"
+                ;;
+              "20 7 * * 1-5")
+                TARGET_MODE="close"
+                ;;
+              "35 7 * * 1-5")
+                TARGET_MODE="swing"
+                ;;
+              *)
+                current_hour=$(date -u +%-H)
+                echo "Current UTC Hour: $current_hour"
+                if [ "$current_hour" -lt 2 ]; then
+                  TARGET_MODE="morning"
+                elif [ "$current_hour" -lt 6 ]; then
+                  TARGET_MODE="midday"
+                elif [ "$current_hour" -lt 8 ]; then
+                  TARGET_MODE="close"
+                else
+                  TARGET_MODE="swing"
+                fi
+                ;;
+            esac
           fi
 
+          echo "Resolved mode: $TARGET_MODE"
+          echo "Publish target: $PUBLISH_TARGET"
+
           if python -m src.utils.trading_calendar --mode "$TARGET_MODE" --publish; then
-            python -m src.main --mode "$TARGET_MODE" --publish
+            python -m src.main --mode "$TARGET_MODE" --publish --publish-target "$PUBLISH_TARGET"
           else
             status=$?
             if [ "$status" -eq 78 ]; then

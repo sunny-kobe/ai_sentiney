@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 
 from src.service.analysis_service import AnalysisService
 
@@ -62,10 +63,11 @@ def test_run_analysis_degrades_to_structured_report_without_ai(monkeypatch):
 def test_run_analysis_normal_mode_passes_structured_report_to_gemini(monkeypatch):
     service = AnalysisService()
     captured = {}
+    today = datetime.now().strftime("%Y-%m-%d")
 
     async def fake_collect(_portfolio):
         return {
-            "context_date": "2026-03-23",
+            "context_date": today,
             "market_breadth": "涨: 10 / 跌: 5",
             "indices": {"上证指数": {"change_pct": 0.5}},
             "macro_news": {"telegraph": ["流动性平稳"]},
