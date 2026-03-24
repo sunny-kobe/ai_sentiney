@@ -12,6 +12,7 @@ ai:
 strategy:
   default_mode: "swing"
   swing:
+    risk_profile: "aggressive"
     windows: [10, 20, 40]
     action_labels: ["增配", "持有", "减配", "回避", "观察"]
     primary_metrics: ["平均收益", "平均超额", "平均回撤"]

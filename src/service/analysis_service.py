@@ -27,6 +27,14 @@ class AnalysisService:
         self.data_path = Path("data/latest_context.json")
         self.data_path.parent.mkdir(parents=True, exist_ok=True)
 
+    def _get_swing_strategy_preferences(self) -> Dict[str, Any]:
+        swing_config = ((self.config.get("strategy") or {}).get("swing") or {})
+        preferences: Dict[str, Any] = {}
+        risk_profile = swing_config.get("risk_profile")
+        if risk_profile:
+            preferences["risk_profile"] = risk_profile
+        return preferences
+
     def _load_cached_context(self, mode: str) -> Optional[Dict[str, Any]]:
         if self.data_path.exists():
             with open(self.data_path, 'r', encoding='utf-8') as f:
@@ -86,6 +94,7 @@ class AnalysisService:
             "macro_news": macro_news,
             "stocks": processed_stocks,
             "portfolio_state": self.config.get('portfolio_state', {}),
+            "strategy_preferences": self._get_swing_strategy_preferences(),
         }
 
     async def collect_and_process_morning_data(self, portfolio: List[Dict]) -> Dict[str, Any]:
@@ -326,6 +335,7 @@ class AnalysisService:
             if mode == "swing":
                 analysis_date = ai_input.get("context_date") or datetime.now().strftime('%Y-%m-%d')
                 ai_input.setdefault("portfolio_state", self.config.get("portfolio_state", {}))
+                ai_input.setdefault("strategy_preferences", self._get_swing_strategy_preferences())
                 historical_records = self._get_swing_history_records(days=90)
                 analysis_result = build_swing_report(ai_input, historical_records, analysis_date)
                 swing_scorecard = self._compute_swing_scorecard(historical_records)
@@ -690,10 +700,12 @@ class AnalysisService:
             raw_data = record.get("raw_data") or {}
             if not raw_data.get("stocks"):
                 continue
+            report_input = dict(raw_data)
+            report_input.setdefault("strategy_preferences", self._get_swing_strategy_preferences())
 
             context_window = sorted_records[max(0, index - 20): index + 1]
             swing_report = build_swing_report(
-                raw_data,
+                report_input,
                 context_window,
                 analysis_date=record.get("date") or datetime.now().strftime('%Y-%m-%d'),
             )
@@ -772,7 +784,9 @@ class AnalysisService:
             return "没有找到可用的中期缓存数据。请先运行一次 `python -m src.main --mode swing --dry-run`。"
 
         analysis_date = raw_data.get("context_date") or datetime.now().strftime('%Y-%m-%d')
-        report = build_swing_report(raw_data, historical_records, analysis_date)
+        report_input = dict(raw_data)
+        report_input.setdefault("strategy_preferences", self._get_swing_strategy_preferences())
+        report = build_swing_report(report_input, historical_records, analysis_date)
         scorecard = self._compute_swing_scorecard(historical_records)
 
         lines = [f"市场结论: {report.get('market_conclusion', '暂无结论')}"]

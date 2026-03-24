@@ -64,13 +64,22 @@ REGIME_CONCLUSIONS = {
     "撤退": "当前进入撤退阶段，先把高波动方向降下来，等市场重新企稳再回来。",
 }
 POSITION_TEMPLATES = {
-    "进攻": {"total_exposure": (90, 100), "core": (50, 60), "satellite": (30, 40), "cash": (0, 10)},
-    "均衡": {"total_exposure": (65, 80), "core": (40, 50), "satellite": (15, 25), "cash": (20, 35)},
-    "防守": {"total_exposure": (35, 55), "core": (20, 35), "satellite": (0, 10), "cash": (45, 65)},
-    "撤退": {"total_exposure": (0, 20), "core": (0, 15), "satellite": (0, 0), "cash": (80, 100)},
+    "balanced": {
+        "进攻": {"total_exposure": (90, 100), "core": (50, 60), "satellite": (30, 40), "cash": (0, 10)},
+        "均衡": {"total_exposure": (65, 80), "core": (40, 50), "satellite": (15, 25), "cash": (20, 35)},
+        "防守": {"total_exposure": (35, 55), "core": (20, 35), "satellite": (0, 10), "cash": (45, 65)},
+        "撤退": {"total_exposure": (0, 20), "core": (0, 15), "satellite": (0, 0), "cash": (80, 100)},
+    },
+    "aggressive": {
+        "进攻": {"total_exposure": (95, 100), "core": (45, 55), "satellite": (40, 50), "cash": (0, 5)},
+        "均衡": {"total_exposure": (75, 90), "core": (35, 45), "satellite": (30, 45), "cash": (10, 25)},
+        "防守": {"total_exposure": (45, 65), "core": (25, 35), "satellite": (15, 30), "cash": (35, 55)},
+        "撤退": {"total_exposure": (0, 20), "core": (0, 10), "satellite": (0, 10), "cash": (80, 100)},
+    },
 }
 ACTION_WEIGHT_PRIORITY = {"增配": 5, "持有": 4, "观察": 2, "减配": 1, "回避": 0}
 SMALL_POSITION_RANGES = {"观察": (0, 5), "减配": (0, 3), "回避": (0, 0)}
+DEFAULT_RISK_PROFILE = "balanced"
 
 
 def _format_pct_value(value: float) -> str:
@@ -91,6 +100,18 @@ def _parse_pct_range(weight: str) -> Sequence[int]:
 
 def _format_money(value: float) -> str:
     return f"{float(value):.2f}"
+
+
+def _normalize_risk_profile(value: Any) -> str:
+    profile = str(value or DEFAULT_RISK_PROFILE).strip().lower()
+    if profile in POSITION_TEMPLATES:
+        return profile
+    return DEFAULT_RISK_PROFILE
+
+
+def _resolve_risk_profile(strategy_preferences: Optional[Mapping[str, Any]]) -> str:
+    preferences = dict(strategy_preferences or {})
+    return _normalize_risk_profile(preferences.get("risk_profile"))
 
 
 def infer_cluster(stock: Mapping[str, Any]) -> str:
@@ -210,8 +231,16 @@ def _summarize_bucket_ranges(items: Sequence[Mapping[str, Any]]) -> Dict[str, in
     return {"min": total_min, "max": total_max}
 
 
-def build_position_plan(decisions: Sequence[Mapping[str, Any]], regime: str) -> Dict[str, Any]:
-    template = POSITION_TEMPLATES.get(regime, POSITION_TEMPLATES["均衡"])
+def build_position_plan(
+    decisions: Sequence[Mapping[str, Any]],
+    regime: str,
+    risk_profile: str = DEFAULT_RISK_PROFILE,
+) -> Dict[str, Any]:
+    profile_templates = POSITION_TEMPLATES.get(
+        _normalize_risk_profile(risk_profile),
+        POSITION_TEMPLATES[DEFAULT_RISK_PROFILE],
+    )
+    template = profile_templates.get(regime, profile_templates["均衡"])
     enriched = [dict(item) for item in decisions]
 
     core_candidates: List[Dict[str, Any]] = []
@@ -269,6 +298,7 @@ def build_position_plan(decisions: Sequence[Mapping[str, Any]], regime: str) -> 
     return {
         "actions": enriched,
         "position_plan": {
+            "risk_profile": _normalize_risk_profile(risk_profile),
             "total_exposure": _format_pct_range(total_summary["min"], total_summary["max"]),
             "core_target": _format_pct_range(core_summary["min"], core_summary["max"]),
             "satellite_target": _format_pct_range(satellite_summary["min"], satellite_summary["max"]),
@@ -627,7 +657,19 @@ def classify_market_regime(ai_input: Mapping[str, Any], historical_records: Sequ
     }
 
 
-def _label_from_score(score: int) -> str:
+def _label_from_score(score: int, risk_profile: str = DEFAULT_RISK_PROFILE) -> str:
+    profile = _normalize_risk_profile(risk_profile)
+    if profile == "aggressive":
+        if score >= 4:
+            return "增配"
+        if score >= -1:
+            return "持有"
+        if score >= -4:
+            return "观察"
+        if score <= -8:
+            return "回避"
+        return "减配"
+
     if score >= 5:
         return "增配"
     if score >= 2:
@@ -641,11 +683,99 @@ def _label_from_score(score: int) -> str:
     return "观察"
 
 
+def _apply_profile_score_adjustments(
+    score: int,
+    *,
+    risk_profile: str,
+    regime: str,
+    signal: str,
+    cluster: str,
+    stressed_clusters: Set[str],
+    current_price: float,
+    ma20: float,
+    pct_change: float,
+    relative_return_20: Optional[float],
+    relative_return_40: Optional[float],
+    drawdown_20: Optional[float],
+) -> int:
+    profile = _normalize_risk_profile(risk_profile)
+    if profile != "aggressive" or regime == "撤退":
+        return score
+
+    adjusted = score
+    weak_relative = _is_weak_relative(relative_return_20, relative_return_40)
+    strong_relative = _is_strong_relative(relative_return_20, relative_return_40)
+    rebound_attempt = ma20 > 0 and current_price < ma20 and pct_change >= 0
+
+    if signal == "DANGER":
+        adjusted += 1
+    if cluster == "broad_beta":
+        adjusted += 2
+        if not weak_relative:
+            adjusted += 1
+    if strong_relative:
+        adjusted += 1
+    if rebound_attempt:
+        adjusted += 1
+    if cluster in stressed_clusters and cluster in RISK_CLUSTERS and not weak_relative:
+        adjusted += 1
+    if isinstance(drawdown_20, (int, float)) and drawdown_20 <= -0.12 and not weak_relative:
+        adjusted += 1
+
+    return adjusted
+
+
+def _cluster_strength_key(item: Mapping[str, Any]) -> tuple:
+    relative_20 = item.get("relative_return_20")
+    relative_40 = item.get("relative_return_40")
+    return (
+        int(item.get("score", 0) or 0),
+        float(relative_20) if isinstance(relative_20, (int, float)) else float("-inf"),
+        float(relative_40) if isinstance(relative_40, (int, float)) else float("-inf"),
+    )
+
+
+def _select_cluster_leaders(decisions: Sequence[Mapping[str, Any]]) -> Dict[str, str]:
+    leaders: Dict[str, str] = {}
+    for item in decisions:
+        cluster = str(item.get("cluster", "") or "")
+        code = str(item.get("code", "") or "")
+        if not cluster or not code:
+            continue
+        current_code = leaders.get(cluster)
+        if current_code is None:
+            leaders[cluster] = code
+            continue
+        current_item = next((candidate for candidate in decisions if str(candidate.get("code", "")) == current_code), None)
+        if current_item is None or _cluster_strength_key(item) > _cluster_strength_key(current_item):
+            leaders[cluster] = code
+    return leaders
+
+
+def _should_preserve_aggressive_exposure(
+    item: Mapping[str, Any],
+    cluster_leaders: Mapping[str, str],
+) -> bool:
+    cluster = str(item.get("cluster", "") or "")
+    code = str(item.get("code", "") or "")
+    relative_return_20 = item.get("relative_return_20")
+    relative_return_40 = item.get("relative_return_40")
+
+    if _is_weak_relative(relative_return_20, relative_return_40):
+        return False
+    if cluster == "broad_beta":
+        return True
+    if _is_strong_relative(relative_return_20, relative_return_40):
+        return True
+    return cluster_leaders.get(cluster) == code
+
+
 def score_holding(stock: Mapping[str, Any], benchmark_context: Mapping[str, Any]) -> Dict[str, Any]:
     signal = str(stock.get("signal", "SAFE")).upper()
     code = str(stock.get("code", "") or "")
     cluster = infer_cluster(stock)
     regime = str(benchmark_context.get("regime", "均衡"))
+    risk_profile = _normalize_risk_profile(benchmark_context.get("risk_profile"))
     stressed_clusters = set(benchmark_context.get("stressed_clusters", set()) or set())
     benchmark_snapshot = (benchmark_context.get("benchmark_snapshot") or {}).get(code, {})
 
@@ -701,7 +831,22 @@ def score_holding(stock: Mapping[str, Any], benchmark_context: Mapping[str, Any]
     if cluster in stressed_clusters:
         score -= 1
 
-    action_label = _label_from_score(score)
+    score = _apply_profile_score_adjustments(
+        score,
+        risk_profile=risk_profile,
+        regime=regime,
+        signal=signal,
+        cluster=cluster,
+        stressed_clusters=stressed_clusters,
+        current_price=current_price,
+        ma20=ma20,
+        pct_change=pct_change,
+        relative_return_20=relative_return_20,
+        relative_return_40=relative_return_40,
+        drawdown_20=drawdown_20,
+    )
+
+    action_label = _label_from_score(score, risk_profile=risk_profile)
 
     if ma20 > 0 and current_price >= ma20:
         position_phrase = f"还站在20日线 {ma20:.2f} 上方"
@@ -751,14 +896,21 @@ def score_holding(stock: Mapping[str, Any], benchmark_context: Mapping[str, Any]
 def apply_cluster_risk_overlay(
     decisions: Sequence[Mapping[str, Any]],
     stressed_clusters: Set[str],
+    risk_profile: str = DEFAULT_RISK_PROFILE,
+    regime: str = "均衡",
 ) -> List[Dict[str, Any]]:
     if len(stressed_clusters & RISK_CLUSTERS) < 2:
         return [dict(item) for item in decisions]
 
+    profile = _normalize_risk_profile(risk_profile)
+    cluster_leaders = _select_cluster_leaders(decisions) if profile == "aggressive" and regime != "撤退" else {}
     adjusted: List[Dict[str, Any]] = []
     for item in decisions:
         updated = dict(item)
         if updated.get("cluster") in stressed_clusters and updated.get("cluster") in RISK_CLUSTERS:
+            if profile == "aggressive" and _should_preserve_aggressive_exposure(updated, cluster_leaders):
+                adjusted.append(updated)
+                continue
             updated["action_label"] = _downgrade_action(str(updated.get("action_label", "观察")))
             updated["conclusion"] = updated["action_label"]
             updated["operation"] = updated["action_label"]
@@ -773,6 +925,7 @@ def apply_emergency_retreat_overlay(
     ai_input: Mapping[str, Any],
     regime_info: Mapping[str, Any],
     benchmark_context: Mapping[str, Any],
+    risk_profile: str = DEFAULT_RISK_PROFILE,
 ) -> List[Dict[str, Any]]:
     stocks_by_code = {
         str(stock.get("code", "") or ""): stock
@@ -783,6 +936,8 @@ def apply_emergency_retreat_overlay(
     stressed_clusters = set(regime_info.get("stressed_clusters", set()) or set())
     market_retreat = str(regime_info.get("regime", "均衡")) == "撤退"
     benchmark_snapshot = benchmark_context.get("benchmark_snapshot", {}) or {}
+    profile = _normalize_risk_profile(risk_profile)
+    cluster_leaders = _select_cluster_leaders(decisions) if profile == "aggressive" and not market_retreat else {}
 
     adjusted: List[Dict[str, Any]] = []
     for item in decisions:
@@ -800,6 +955,11 @@ def apply_emergency_retreat_overlay(
         structure_break = ma20 > 0 and current_price < ma20 and (pct_change <= -2 or bias_pct <= -0.03)
         severe_drop = pct_change <= -3.5 or bias_pct <= -0.06 or float(snapshot.get("drawdown_20") or 0) <= -0.12
         cluster_break = cluster in stressed_clusters and cluster in RISK_CLUSTERS
+        protected_aggressive_leader = (
+            profile == "aggressive"
+            and not market_retreat
+            and _should_preserve_aggressive_exposure(updated, cluster_leaders)
+        )
 
         downgrade_steps = 0
         extra_reasons: List[str] = []
@@ -811,8 +971,16 @@ def apply_emergency_retreat_overlay(
             downgrade_steps = max(downgrade_steps, 1)
             extra_reasons.append("走势破位并且弱于对照基准。")
         if severe_drop and cluster_break:
-            downgrade_steps = max(downgrade_steps, 2)
-            extra_reasons.append("同类高波动方向一起失守，先把仓位降到低风险。")
+            if market_retreat:
+                downgrade_steps = max(downgrade_steps, 2)
+                extra_reasons.append("同类高波动方向一起失守，先把仓位降到低风险。")
+            elif profile == "aggressive":
+                if weak_relative or not protected_aggressive_leader:
+                    downgrade_steps = max(downgrade_steps, 1)
+                    extra_reasons.append("高波动方向同步走弱，先收一档仓位。")
+            else:
+                downgrade_steps = max(downgrade_steps, 2)
+                extra_reasons.append("同类高波动方向一起失守，先把仓位降到低风险。")
         if negative_news and structure_break and weak_relative:
             downgrade_steps = max(downgrade_steps, 2 if market_retreat or cluster_break else 1)
             extra_reasons.append("利空确认后，先按撤退处理。")
@@ -836,17 +1004,30 @@ def build_swing_report(
     analysis_date: str,
 ) -> Dict[str, Any]:
     regime_info = classify_market_regime(ai_input, historical_records)
+    risk_profile = _resolve_risk_profile(ai_input.get("strategy_preferences"))
     benchmark_context = build_benchmark_context(ai_input.get("stocks", []) or [], historical_records, analysis_date=analysis_date)
     context = {
         "regime": regime_info["regime"],
         "stressed_clusters": regime_info["stressed_clusters"],
         "benchmark_snapshot": benchmark_context.get("benchmark_snapshot", {}),
+        "risk_profile": risk_profile,
     }
 
     decisions = [score_holding(stock, context) for stock in ai_input.get("stocks", []) or []]
-    decisions = apply_cluster_risk_overlay(decisions, regime_info["stressed_clusters"])
-    decisions = apply_emergency_retreat_overlay(decisions, ai_input, regime_info, benchmark_context)
-    position_output = build_position_plan(decisions, regime_info["regime"])
+    decisions = apply_cluster_risk_overlay(
+        decisions,
+        regime_info["stressed_clusters"],
+        risk_profile=risk_profile,
+        regime=regime_info["regime"],
+    )
+    decisions = apply_emergency_retreat_overlay(
+        decisions,
+        ai_input,
+        regime_info,
+        benchmark_context,
+        risk_profile=risk_profile,
+    )
+    position_output = build_position_plan(decisions, regime_info["regime"], risk_profile=risk_profile)
     snapshot_output = build_current_position_snapshot(
         position_output["actions"],
         ai_input.get("portfolio_state"),

@@ -28,8 +28,9 @@ def _make_swing_input():
     }
 
 
-def test_run_analysis_swing_mode_uses_deterministic_report_without_gemini(monkeypatch):
+def test_run_analysis_swing_mode_uses_deterministic_report_without_gemini(monkeypatch, tmp_path):
     service = AnalysisService()
+    service.data_path = tmp_path / "latest_context.json"
     captured = {}
     history = [{"date": "2026-03-20", "raw_data": {"stocks": []}, "ai_result": {"actions": []}}]
 
@@ -71,8 +72,9 @@ def test_run_analysis_swing_mode_uses_deterministic_report_without_gemini(monkey
     assert captured["analysis_date"] == "2026-03-23"
 
 
-def test_run_analysis_swing_mode_loads_close_history_for_scorecard(monkeypatch):
+def test_run_analysis_swing_mode_loads_close_history_for_scorecard(monkeypatch, tmp_path):
     service = AnalysisService()
+    service.data_path = tmp_path / "latest_context.json"
     calls = []
 
     async def fake_collect(_portfolio):
@@ -103,6 +105,41 @@ def test_run_analysis_swing_mode_loads_close_history_for_scorecard(monkeypatch):
 
     assert calls == [90]
     assert result["swing_scorecard"]["summary_text"].startswith("20日样本")
+
+
+def test_run_analysis_swing_mode_injects_strategy_preferences(monkeypatch, tmp_path):
+    service = AnalysisService()
+    service.data_path = tmp_path / "latest_context.json"
+    service.config.setdefault("strategy", {}).setdefault("swing", {})["risk_profile"] = "aggressive"
+    captured = {}
+
+    async def fake_collect(_portfolio):
+        return _make_swing_input()
+
+    monkeypatch.setattr("src.service.analysis_service.should_run_market_report", lambda **kwargs: {"should_run": True})
+    monkeypatch.setattr(service, "collect_and_process_data", fake_collect)
+    monkeypatch.setattr(service, "_get_swing_history_records", lambda days=90: [])
+    monkeypatch.setattr(
+        "src.service.analysis_service.build_swing_report",
+        lambda ai_input, historical_records, analysis_date: captured.update(
+            {"strategy_preferences": ai_input.get("strategy_preferences"), "historical_records": historical_records}
+        )
+        or {
+            "mode": "swing",
+            "market_regime": "均衡",
+            "market_conclusion": "当前偏均衡。",
+            "position_plan": {"total_exposure": "75%-90%"},
+            "portfolio_actions": {"增配": [], "持有": [], "减配": [], "回避": [], "观察": []},
+            "actions": [],
+            "technical_evidence": [],
+        },
+    )
+    monkeypatch.setattr(service, "_compute_swing_scorecard", lambda historical_records: None)
+    monkeypatch.setattr(service.db, "save_record", lambda **_kwargs: None)
+
+    asyncio.run(service.run_analysis(mode="swing"))
+
+    assert captured["strategy_preferences"] == {"risk_profile": "aggressive"}
 
 
 def test_ask_question_accuracy_query_in_swing_mode_uses_medium_term_report(monkeypatch):

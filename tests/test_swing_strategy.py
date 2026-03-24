@@ -576,3 +576,129 @@ def test_build_swing_report_adds_current_position_snapshot_and_rebalance_moves()
     assert small["current_shares"] == 1200
     assert small["current_weight"] == "27.3%"
     assert small["rebalance_action"] == "卖出1200份"
+
+
+def test_build_swing_report_aggressive_profile_keeps_core_and_relative_leader_exposure():
+    history = _make_multi_history(
+        {
+            "510300": [4.00 + (idx * 0.015) for idx in range(41)],
+            "159338": [1.00 + (idx * 0.0045) for idx in range(41)],
+            "159819": [1.12 + (idx * 0.011) for idx in range(41)],
+            "588760": [0.70 + (idx * 0.0025) for idx in range(41)],
+            "512480": [1.34 + (idx * 0.0055) for idx in range(41)],
+            "563300": [1.24 + (idx * 0.006) for idx in range(41)],
+        }
+    )
+    ai_input = {
+        "market_breadth": "2400家上涨，2500家下跌",
+        "indices": {"上证指数": {"change_pct": 0.2}, "创业板指": {"change_pct": -0.4}},
+        "macro_news": {"telegraph": ["消息偏中性"]},
+        "strategy_preferences": {"risk_profile": "aggressive"},
+        "portfolio_state": {"cash_balance": 33091.73, "lot_size": 100},
+        "stocks": [
+            _make_stock(
+                "510300",
+                "沪深300ETF",
+                signal="DANGER",
+                confidence="高",
+                bias_pct=-0.04,
+                pct_change=0.6,
+                current_price=4.40,
+                ma20=4.60,
+                tech_summary="跌回20日线下方，但日内有承接",
+                macd_trend="BEARISH",
+                obv_trend="OUTFLOW",
+                shares=600,
+            ),
+            _make_stock(
+                "159338",
+                "中证A500ETF",
+                signal="DANGER",
+                confidence="高",
+                bias_pct=-0.03,
+                pct_change=0.5,
+                current_price=1.12,
+                ma20=1.20,
+                tech_summary="围绕20日线震荡",
+                macd_trend="BEARISH",
+                obv_trend="OUTFLOW",
+                shares=9700,
+            ),
+            _make_stock(
+                "159819",
+                "人工智能ETF",
+                signal="DANGER",
+                confidence="高",
+                bias_pct=-0.05,
+                pct_change=0.3,
+                current_price=1.45,
+                ma20=1.54,
+                tech_summary="主线回撤后缩量企稳",
+                macd_trend="BEARISH",
+                obv_trend="OUTFLOW",
+                shares=6500,
+            ),
+            _make_stock(
+                "588760",
+                "科创人工智能ETF",
+                signal="DANGER",
+                confidence="高",
+                bias_pct=-0.08,
+                pct_change=-1.8,
+                current_price=0.67,
+                ma20=0.80,
+                tech_summary="弱反抽后继续承压",
+                macd_trend="DEATH_CROSS",
+                obv_trend="OUTFLOW",
+                shares=10500,
+            ),
+            _make_stock(
+                "512480",
+                "半导体ETF",
+                signal="DANGER",
+                confidence="高",
+                bias_pct=-0.07,
+                pct_change=0.6,
+                current_price=1.43,
+                ma20=1.57,
+                tech_summary="破位后反弹力度一般",
+                macd_trend="BEARISH",
+                obv_trend="OUTFLOW",
+                shares=4200,
+            ),
+            _make_stock(
+                "563300",
+                "中证2000ETF",
+                signal="DANGER",
+                confidence="高",
+                bias_pct=-0.06,
+                pct_change=1.0,
+                current_price=1.38,
+                ma20=1.50,
+                tech_summary="下探后有回拉",
+                macd_trend="BEARISH",
+                obv_trend="OUTFLOW",
+                shares=5200,
+            ),
+        ],
+    }
+
+    report = build_swing_report(ai_input, history, analysis_date="2026-03-24")
+
+    assert report["market_regime"] == "均衡"
+    assert report["position_plan"]["cash_target"] != "100%"
+    assert report["position_plan"]["total_exposure"] != "0%"
+    assert report["position_plan"]["regime_total_exposure"] == "75%-90%"
+
+    broad = next(item for item in report["actions"] if item["code"] == "510300")
+    ai_leader = next(item for item in report["actions"] if item["code"] == "159819")
+    ai_laggard = next(item for item in report["actions"] if item["code"] == "588760")
+
+    assert broad["action_label"] in {"持有", "观察"}
+    assert broad["target_weight"] != "0%"
+    assert ai_leader["action_label"] in {"增配", "持有", "观察"}
+    assert ai_leader["target_weight"] != "0%"
+    assert "强于对照基准" in ai_leader["reason"]
+    assert ai_laggard["action_label"] == "回避"
+    assert ai_laggard["target_weight"] == "0%"
+    assert "加" in broad["rebalance_action"] or "加" in ai_leader["rebalance_action"]
