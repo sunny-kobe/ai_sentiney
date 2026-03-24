@@ -227,7 +227,24 @@ def test_build_swing_report_returns_plain_language_portfolio_guidance():
                 macd_trend="BEARISH",
                 obv_trend="OUTFLOW",
             ),
+            _make_stock(
+                "512660",
+                "军工ETF",
+                signal="OPPORTUNITY",
+                confidence="高",
+                bias_pct=0.05,
+                pct_change=1.9,
+                current_price=0.92,
+                ma20=0.88,
+                tech_summary="重新站上20日线，量能放大",
+                macd_trend="GOLDEN_CROSS",
+                obv_trend="INFLOW",
+            ),
         ],
+        "held_codes": {"512480", "510300", "563300"},
+        "watchlist_codes": {"512660"},
+        "watchlist": [{"code": "512660", "name": "军工ETF", "strategy": "trend", "priority": "high"}],
+        "strategy_preferences": {"risk_profile": "aggressive", "candidate_limit": 2},
     }
 
     report = build_swing_report(
@@ -239,6 +256,9 @@ def test_build_swing_report_returns_plain_language_portfolio_guidance():
     assert report["market_regime"] == "进攻"
     assert report["market_conclusion"]
     assert set(report["portfolio_actions"]) == {"增配", "持有", "减配", "回避"}
+    assert all(item["code"] != "512660" for item in report["actions"])
+    assert report["watchlist_candidates"][0]["code"] == "512660"
+    assert report["watchlist_actions"]["进入试仓区"][0]["code"] == "512660"
 
     lead = next(item for item in report["actions"] if item["code"] == "512480")
     assert lead["conclusion"] == "持有"

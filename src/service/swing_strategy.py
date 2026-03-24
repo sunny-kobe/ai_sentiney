@@ -6,6 +6,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set
 
 from src.processor.swing_tracker import build_price_matrix, calculate_max_drawdown
 from src.service.strategy_engine import build_strategy_snapshot
+from src.service.watchlist_engine import build_watchlist_candidates
 
 
 ACTION_ORDER = ["增配", "持有", "减配", "回避", "观察"]
@@ -1129,10 +1130,17 @@ def build_swing_report(
         for stock in ai_input.get("stocks", []) or []
         if stock.get("code")
     }
+    held_codes = {str(code) for code in (ai_input.get("held_codes") or set())}
+    watchlist_codes = {str(code) for code in (ai_input.get("watchlist_codes") or set())}
     decisions = []
+    watchlist_holdings = []
     for holding in strategy_snapshot.get("holdings", []):
+        code = str(holding.get("code", "") or "")
+        if watchlist_codes and code in watchlist_codes and code not in held_codes:
+            watchlist_holdings.append(holding)
+            continue
         decision = {
-            "code": holding.get("code"),
+            "code": code,
             "name": holding.get("name"),
             "cluster": holding.get("cluster"),
             "signal": holding.get("signal"),
@@ -1216,6 +1224,14 @@ def build_swing_report(
     for decision in ordered_actions:
         portfolio_actions.setdefault(decision["action_label"], []).append(decision)
 
+    watchlist_output = build_watchlist_candidates(
+        watchlist_holdings,
+        held_codes=held_codes,
+        watchlist_codes=watchlist_codes,
+        strategy_preferences=ai_input.get("strategy_preferences", {}),
+        market_regime=strategy_snapshot["market_regime"],
+    )
+
     technical_evidence = [
         {
             "code": stock.get("code"),
@@ -1236,6 +1252,8 @@ def build_swing_report(
         "position_plan": position_plan,
         "portfolio_actions": portfolio_actions,
         "actions": ordered_actions,
+        "watchlist_actions": watchlist_output["action_buckets"],
+        "watchlist_candidates": watchlist_output["active_candidates"],
         "technical_evidence": technical_evidence,
         "strategy_snapshot": strategy_snapshot,
     }
