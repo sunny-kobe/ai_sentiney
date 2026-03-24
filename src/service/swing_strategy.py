@@ -5,6 +5,7 @@ import re
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set
 
 from src.processor.swing_tracker import build_price_matrix, calculate_max_drawdown
+from src.service.strategy_engine import build_strategy_snapshot
 
 
 ACTION_ORDER = ["增配", "持有", "减配", "回避", "观察"]
@@ -177,6 +178,20 @@ def _weight_score(decision: Mapping[str, Any]) -> int:
     return max(base + max(raw_score, 0), 1)
 
 
+def _fixed_position_range(decision: Mapping[str, Any]) -> Optional[Sequence[int]]:
+    action_label = str(decision.get("action_label", "观察"))
+    signal = str(decision.get("signal", "")).upper()
+    shares = int(decision.get("shares", 0) or 0)
+
+    if action_label == "回避":
+        return 0, 0
+    if action_label == "减配":
+        return (0, 0) if shares <= 0 else SMALL_POSITION_RANGES["减配"]
+    if action_label == "持有" and signal in {"WATCH", "OBSERVED", "OVERBOUGHT"} and shares <= 0:
+        return SMALL_POSITION_RANGES["观察"]
+    return None
+
+
 def _allocate_bucket_ranges(
     decisions: Sequence[Mapping[str, Any]],
     target_range: Sequence[int],
@@ -185,13 +200,13 @@ def _allocate_bucket_ranges(
     if not decisions:
         return allocations
 
-    fixed_items = [item for item in decisions if str(item.get("action_label")) in SMALL_POSITION_RANGES]
-    strong_items = [item for item in decisions if str(item.get("action_label")) not in SMALL_POSITION_RANGES]
+    fixed_items = [item for item in decisions if _fixed_position_range(item) is not None]
+    strong_items = [item for item in decisions if _fixed_position_range(item) is None]
 
     fixed_min = 0
     fixed_max = 0
     for item in fixed_items:
-        min_weight, max_weight = SMALL_POSITION_RANGES[str(item.get("action_label"))]
+        min_weight, max_weight = _fixed_position_range(item) or (0, 0)
         allocations[str(item.get("code"))] = {"min": min_weight, "max": max_weight}
         fixed_min += min_weight
         fixed_max += max_weight
@@ -308,7 +323,7 @@ def build_position_plan(
             "regime_satellite_target": _format_pct_range(*template["satellite"]),
             "regime_cash_target": _format_pct_range(*template["cash"]),
             "weekly_rebalance": "每周五收盘后生成计划，下一交易日分批执行。",
-            "daily_rule": "日级只减不加，先减卫星仓，再减观察位。",
+            "daily_rule": "下一交易日按优先级分批执行，先减弱势仓，再处理持有仓，最后考虑新增仓。",
             "buckets": buckets,
         },
     }
@@ -350,10 +365,13 @@ def build_current_position_snapshot(
         target_max_value = account_total_assets * target_max_pct / 100
 
         if current_price <= 0 or shares <= 0:
-            if target_max_pct > 0:
-                updated["rebalance_action"] = "暂无持仓，等重新转强后再分批建仓"
+            action_label = str(updated.get("action_label", "持有"))
+            if action_label == "增配" and target_max_pct > 0:
+                updated["rebalance_action"] = "暂无持仓，下一交易日满足条件后再试仓"
+            elif action_label == "持有" and target_max_pct > 0:
+                updated["rebalance_action"] = "暂无持仓，列入候选，等下一交易日继续转强再试仓"
             else:
-                updated["rebalance_action"] = "暂无持仓"
+                updated["rebalance_action"] = "暂无持仓，不在执行清单"
             continue
 
         if target_max_value <= 0:
@@ -998,27 +1016,155 @@ def apply_emergency_retreat_overlay(
     return adjusted
 
 
+def _normalize_swing_reason(reason: str) -> str:
+    text = str(reason or "")
+    text = text.replace("相对基准更强", "强于对照基准")
+    text = text.replace("相对基准偏弱", "弱于对照基准")
+    return text
+
+
+def _apply_aggressive_hold_overlay(
+    decisions: Sequence[Mapping[str, Any]],
+    *,
+    regime: str,
+    stock_map: Mapping[str, Mapping[str, Any]],
+) -> List[Dict[str, Any]]:
+    if regime == "撤退":
+        return [dict(item) for item in decisions]
+
+    cluster_leaders = _select_cluster_leaders(decisions)
+    adjusted: List[Dict[str, Any]] = []
+    for item in decisions:
+        updated = dict(item)
+        if str(updated.get("action_label", "持有")) != "减配":
+            adjusted.append(updated)
+            continue
+
+        code = str(updated.get("code", "") or "")
+        stock = stock_map.get(code, {})
+        cluster = str(updated.get("cluster", "") or "")
+        relative_20 = updated.get("relative_return_20")
+        relative_40 = updated.get("relative_return_40")
+        weak_relative = _is_weak_relative(relative_20, relative_40)
+        strong_relative = _is_strong_relative(relative_20, relative_40)
+        current_price = float(updated.get("current_price", 0) or 0)
+        ma20 = float(updated.get("ma20", 0) or 0)
+        pct_change = float(stock.get("pct_change", 0) or 0)
+
+        preserve_core = cluster == "broad_beta" and not weak_relative and pct_change >= 0
+        preserve_leader = strong_relative and cluster_leaders.get(cluster) == code and pct_change >= 0
+        mild_break = ma20 > 0 and current_price < ma20 and (ma20 - current_price) / ma20 <= 0.08
+
+        if mild_break and (preserve_core or preserve_leader):
+            updated["action_label"] = "持有"
+            updated["conclusion"] = "持有"
+            updated["operation"] = "持有"
+            updated["plan"] = "先把现有仓位拿住，只保留相对更强的一档主仓。"
+            updated["reason"] = f"{updated['reason']} 激进模式下先保留相对更强的一档主仓。".strip()
+
+        adjusted.append(updated)
+
+    return adjusted
+
+
+def _apply_weakness_overlay(
+    decisions: Sequence[Mapping[str, Any]],
+    *,
+    stock_map: Mapping[str, Mapping[str, Any]],
+) -> List[Dict[str, Any]]:
+    adjusted: List[Dict[str, Any]] = []
+    for item in decisions:
+        updated = dict(item)
+        if str(updated.get("action_label", "持有")) != "持有":
+            adjusted.append(updated)
+            continue
+
+        code = str(updated.get("code", "") or "")
+        stock = stock_map.get(code, {})
+        signal = str(updated.get("signal", "")).upper()
+        current_price = float(updated.get("current_price", 0) or 0)
+        ma20 = float(updated.get("ma20", 0) or 0)
+        weak_relative = _is_weak_relative(updated.get("relative_return_20"), updated.get("relative_return_40"))
+
+        should_reduce = False
+        extra_reason = ""
+        if ma20 > 0 and current_price < ma20 and weak_relative:
+            should_reduce = True
+            extra_reason = "已经弱于对照基准，先降一档处理。"
+        elif ma20 > 0 and current_price < ma20 and signal in {"WARNING", "DANGER", "LOCKED_DANGER"}:
+            should_reduce = True
+            extra_reason = "价格回到MA20下方，先把仓位收一档。"
+
+        if should_reduce:
+            updated["action_label"] = "减配"
+            updated["conclusion"] = "减配"
+            updated["operation"] = "减配"
+            updated["plan"] = ACTION_PLANS["减配"]
+            updated["reason"] = f"{updated['reason']} {extra_reason}".strip()
+
+        adjusted.append(updated)
+
+    return adjusted
+
+
 def build_swing_report(
     ai_input: Mapping[str, Any],
     historical_records: Sequence[Mapping[str, Any]],
     analysis_date: str,
 ) -> Dict[str, Any]:
-    regime_info = classify_market_regime(ai_input, historical_records)
     risk_profile = _resolve_risk_profile(ai_input.get("strategy_preferences"))
-    benchmark_context = build_benchmark_context(ai_input.get("stocks", []) or [], historical_records, analysis_date=analysis_date)
-    context = {
-        "regime": regime_info["regime"],
-        "stressed_clusters": regime_info["stressed_clusters"],
-        "benchmark_snapshot": benchmark_context.get("benchmark_snapshot", {}),
-        "risk_profile": risk_profile,
+    benchmark_context = build_benchmark_context(
+        ai_input.get("stocks", []) or [],
+        historical_records,
+        analysis_date=analysis_date,
+    )
+    strategy_snapshot = build_strategy_snapshot(
+        ai_input,
+        historical_records,
+        mode="swing",
+        performance_context=ai_input.get("performance_context"),
+    )
+    stock_map = {
+        str(stock.get("code", "") or ""): stock
+        for stock in ai_input.get("stocks", []) or []
+        if stock.get("code")
     }
+    decisions = []
+    for holding in strategy_snapshot.get("holdings", []):
+        decision = {
+            "code": holding.get("code"),
+            "name": holding.get("name"),
+            "cluster": holding.get("cluster"),
+            "signal": holding.get("signal"),
+            "score": 0,
+            "confidence": holding.get("confidence", ""),
+            "action_label": holding.get("final_action", "持有"),
+            "conclusion": holding.get("final_action", "持有"),
+            "operation": holding.get("final_action", "持有"),
+            "reason": _normalize_swing_reason(holding.get("evidence_text", "")),
+            "plan": holding.get("rebalance_instruction", ""),
+            "risk_line": holding.get("invalid_condition", ""),
+            "technical_evidence": holding.get("tech_summary", ""),
+            "current_price": holding.get("current_price", 0.0),
+            "ma20": holding.get("ma20", 0.0),
+            "shares": int(holding.get("shares", 0) or 0),
+            "relative_return_20": holding.get("relative_return_20"),
+            "relative_return_40": holding.get("relative_return_40"),
+            "setup_type": holding.get("setup_type"),
+            "execution_window": holding.get("execution_window"),
+        }
+        decisions.append(decision)
 
-    decisions = [score_holding(stock, context) for stock in ai_input.get("stocks", []) or []]
+    regime_info = {
+        "regime": strategy_snapshot["market_regime"],
+        "stressed_clusters": set(strategy_snapshot.get("stressed_clusters", []) or []),
+    }
+    decisions = _apply_weakness_overlay(decisions, stock_map=stock_map)
     decisions = apply_cluster_risk_overlay(
         decisions,
-        regime_info["stressed_clusters"],
+        stressed_clusters=set(strategy_snapshot.get("stressed_clusters", []) or []),
         risk_profile=risk_profile,
-        regime=regime_info["regime"],
+        regime=strategy_snapshot["market_regime"],
     )
     decisions = apply_emergency_retreat_overlay(
         decisions,
@@ -1027,22 +1173,48 @@ def build_swing_report(
         benchmark_context,
         risk_profile=risk_profile,
     )
-    position_output = build_position_plan(decisions, regime_info["regime"], risk_profile=risk_profile)
+    for decision in decisions:
+        if str(decision.get("action_label", "")) != "观察":
+            continue
+        signal = str(decision.get("signal", "")).upper()
+        collapsed_action = "减配" if signal in {"WARNING", "DANGER", "LOCKED_DANGER", "LIMIT_DOWN"} else "持有"
+        decision["action_label"] = collapsed_action
+        decision["conclusion"] = collapsed_action
+        decision["operation"] = collapsed_action
+        decision["plan"] = ACTION_PLANS[collapsed_action]
+    if risk_profile == "aggressive":
+        decisions = _apply_aggressive_hold_overlay(
+            decisions,
+            regime=strategy_snapshot["market_regime"],
+            stock_map=stock_map,
+        )
+
+    position_output = build_position_plan(decisions, strategy_snapshot["market_regime"], risk_profile=risk_profile)
     snapshot_output = build_current_position_snapshot(
         position_output["actions"],
         ai_input.get("portfolio_state"),
     )
     decisions = snapshot_output["actions"]
+    for decision in decisions:
+        if int(decision.get("current_shares", 0) or 0) <= 0 and decision.get("action_label") == "持有":
+            decision["plan"] = "暂无持仓，先列入候选，等下一交易日确认后再考虑建立试仓。"
     position_plan = dict(position_output["position_plan"])
     position_plan.update(snapshot_output["position_snapshot"])
+    execution_order = [
+        f"{item.get('name')}:{item.get('rebalance_action')}"
+        for item in decisions
+        if item.get("action_label") in {"回避", "减配", "增配"}
+    ]
+    if execution_order:
+        position_plan["execution_order"] = execution_order
 
     ordered_actions = sorted(
         decisions,
         key=lambda item: (ACTION_ORDER.index(item["action_label"]), str(item.get("name", ""))),
     )
-    portfolio_actions = {label: [] for label in ACTION_ORDER}
+    portfolio_actions = {label: [] for label in ("增配", "持有", "减配", "回避")}
     for decision in ordered_actions:
-        portfolio_actions[decision["action_label"]].append(decision)
+        portfolio_actions.setdefault(decision["action_label"], []).append(decision)
 
     technical_evidence = [
         {
@@ -1058,11 +1230,12 @@ def build_swing_report(
     return {
         "mode": "swing",
         "analysis_date": analysis_date,
-        "market_regime": regime_info["regime"],
-        "market_conclusion": REGIME_CONCLUSIONS[regime_info["regime"]],
-        "market_drivers": regime_info["reasons"],
+        "market_regime": strategy_snapshot["market_regime"],
+        "market_conclusion": REGIME_CONCLUSIONS[strategy_snapshot["market_regime"]],
+        "market_drivers": strategy_snapshot["market_drivers"],
         "position_plan": position_plan,
         "portfolio_actions": portfolio_actions,
         "actions": ordered_actions,
         "technical_evidence": technical_evidence,
+        "strategy_snapshot": strategy_snapshot,
     }

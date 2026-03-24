@@ -71,10 +71,11 @@ class TelegramClient:
             f"{summary_label}: {data.get('macro_summary', 'N/A')}",
         ]
         for action in data.get("actions", [])[:8]:
-            signal = action.get('signal', action.get('action', '')).upper()
-            if signal in ('OPPORTUNITY', 'ACCUMULATE'):
+            signal = str(action.get('signal') or action.get('action') or action.get('operation', ''))
+            signal_upper = signal.upper()
+            if signal in ('增配',) or signal_upper in ('OPPORTUNITY', 'ACCUMULATE'):
                 prefix = "🟣"
-            elif signal in ('DANGER', 'WARNING'):
+            elif signal in ('减配', '回避') or signal_upper in ('DANGER', 'WARNING'):
                 prefix = "🔴"
             else:
                 prefix = "-"

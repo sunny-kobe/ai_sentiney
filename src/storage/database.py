@@ -44,6 +44,7 @@ class SentinelDB:
                 if "ai_result" not in columns:
                     conn.execute("ALTER TABLE daily_records ADD COLUMN ai_result JSON;")
                     logger.info("Migrated DB: Added ai_result column.")
+                conn.commit()
                     
         except Exception as e:
             logger.error(f"DB Initialization failed: {e}")
@@ -81,6 +82,7 @@ class SentinelDB:
                     raw_json,
                     ai_result_json
                 ))
+                conn.commit()
             logger.info(f"✅ Saved {mode} record to DB for {date_str}.")
             
         except Exception as e:

@@ -19,6 +19,7 @@ from src.utils.trading_calendar import should_run_market_report
 from src.service.report_quality import evaluate_input_quality, evaluate_output_quality
 from src.service.structured_report import build_structured_report
 from src.service.swing_strategy import build_swing_report, resolve_benchmark_code
+from src.service.strategy_engine import build_strategy_snapshot, build_intraday_rule_report, build_close_rule_report
 
 class AnalysisService:
     def __init__(self):
@@ -173,7 +174,7 @@ class AnalysisService:
                 if 'signal_note' in stock_obj:
                     action['signal_note'] = stock_obj['signal_note']
                 # 传递多维指标字段
-                if 'signal' in stock_obj:
+                if 'signal' in stock_obj and not action.get('signal'):
                     action['signal'] = stock_obj['signal']
                 if 'confidence' in stock_obj:
                     action['confidence'] = stock_obj['confidence']
@@ -181,7 +182,8 @@ class AnalysisService:
                     action['tech_summary'] = stock_obj['tech_summary']
                 structured_stock = structured_map.get(code)
                 if structured_stock:
-                    action['operation'] = structured_stock.get('operation', action.get('operation', ''))
+                    if not action.get('operation'):
+                        action['operation'] = structured_stock.get('operation', action.get('operation', ''))
                     action['source_labels'] = structured_stock.get('source_labels', [])
                     action['data_timestamp'] = structured_stock.get('data_timestamp')
                     action['news_evidence'] = structured_stock.get('news_evidence', [])
@@ -346,13 +348,39 @@ class AnalysisService:
                 analysis_result.setdefault("quality_issues", [])
                 analysis_result.setdefault("data_timestamp", analysis_date)
                 analysis_result.setdefault("source_labels", ["rule_engine", "history"])
+            elif mode in ("midday", "preclose", "close") and quality_input["status"] == "degraded":
+                analysis_result = self._build_degraded_report(mode, ai_input["structured_report"], quality_input["issues"])
+            elif mode in ("midday", "preclose", "close"):
+                historical_records = self._get_swing_history_records(days=90)
+                strategy_snapshot = build_strategy_snapshot(
+                    ai_input,
+                    historical_records=historical_records,
+                    mode=mode,
+                )
+                if mode == "close":
+                    analysis_result = build_close_rule_report(
+                        ai_input,
+                        strategy_snapshot,
+                        scorecard=ai_input.get("signal_scorecard"),
+                    )
+                else:
+                    analysis_result = build_intraday_rule_report(
+                        ai_input,
+                        strategy_snapshot,
+                        mode=mode,
+                        scorecard=ai_input.get("signal_scorecard"),
+                    )
+                analysis_result.setdefault("strategy_snapshot", strategy_snapshot)
+                analysis_result.setdefault("structured_report", ai_input.get("structured_report"))
+                analysis_result.setdefault("data_timestamp", ai_input.get("structured_report", {}).get("data_timestamp"))
+                analysis_result.setdefault("source_labels", ai_input.get("structured_report", {}).get("source_labels", []))
             elif dry_run:
                 logger.info("Dry Run Mode: Mocking AI response.")
                 for s in ai_input.get('stocks', []):
                     logger.info(f"[DRY-RUN TAGS] {s['name']} Tech: {s.get('tech_summary')}")
                 analysis_result = {
-                    "market_sentiment": "DryRun", 
-                    "summary": "This is a dry run.", 
+                    "market_sentiment": "DryRun",
+                    "summary": "This is a dry run.",
                     "actions": [],
                     "quality_status": quality_input["status"],
                     "quality_issues": quality_input["issues"],
@@ -360,24 +388,9 @@ class AnalysisService:
                     "data_timestamp": ai_input.get("structured_report", {}).get("data_timestamp"),
                     "source_labels": ai_input.get("structured_report", {}).get("source_labels", []),
                 }
-            elif mode in ("midday", "preclose", "close") and quality_input["status"] == "degraded":
-                analysis_result = self._build_degraded_report(mode, ai_input["structured_report"], quality_input["issues"])
             else:
                 analyst = GeminiClient()
-                if mode in ('midday', 'preclose'):
-                    last_close = self.db.get_last_close_analysis()
-                    ai_input['yesterday_context'] = last_close
-                    if mode == 'midday':
-                        analysis_result = analyst.analyze(ai_input)
-                    else:
-                        analysis_result = analyst.analyze_preclose(ai_input)
-                elif mode == 'close':
-                    system_prompt = self.config['prompts'].get('close_review')
-                    if system_prompt:
-                        analysis_result = analyst.analyze_with_prompt(ai_input, system_prompt)
-                    else:
-                        analysis_result = analyst.analyze(ai_input)
-                elif mode == 'morning':
+                if mode == 'morning':
                     system_prompt = self.config['prompts'].get('morning_brief')
                     if system_prompt:
                         analysis_result = analyst.analyze_morning(ai_input, system_prompt)

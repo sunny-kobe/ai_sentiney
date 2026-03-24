@@ -20,7 +20,7 @@ def _make_swing_result():
             "account_total_assets": "105744.34",
             "cash_balance": "33091.73",
             "weekly_rebalance": "每周五收盘后生成计划，下一交易日分批执行。",
-            "daily_rule": "日级只减不加，先减卫星仓，再减观察位。",
+            "daily_rule": "下一交易日按优先级分批执行，先减弱势仓，再处理持有仓，最后考虑新增仓。",
             "buckets": {
                 "核心仓": [{"code": "510300", "name": "沪深300ETF", "target_weight": "25%-35%"}],
                 "卫星仓": [{"code": "563300", "name": "中证2000ETF", "target_weight": "0%-3%"}],
@@ -32,7 +32,6 @@ def _make_swing_result():
             "持有": [{"code": "510300", "name": "沪深300ETF"}],
             "减配": [{"code": "563300", "name": "中证2000ETF"}],
             "回避": [],
-            "观察": [{"code": "512480", "name": "半导体ETF"}],
         },
         "actions": [
             {

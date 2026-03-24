@@ -169,10 +169,13 @@ class FeishuClient:
             "WARNING": "SELL",
             "SELL": "SELL",
             "LOCKED_DANGER": "SELL",  # T+1锁定但处于危险状态，仍需警示
+            "减配": "SELL",
+            "回避": "SELL",
             # OPPORTUNITY组 (加仓机会)
             "OPPORTUNITY": "OPPORTUNITY",
             "ACCUMULATE": "OPPORTUNITY",
             "BUY": "OPPORTUNITY",
+            "增配": "OPPORTUNITY",
             # WATCH组 (需要观察)
             "WATCH": "WATCH",
             "OBSERVED": "WATCH",
@@ -180,6 +183,7 @@ class FeishuClient:
             # HOLD组 (安全持有)
             "SAFE": "HOLD",
             "HOLD": "HOLD",
+            "持有": "HOLD",
             # 涨跌停特殊处理
             "LIMIT_UP": "LIMIT",
             "LIMIT_DOWN": "LIMIT",

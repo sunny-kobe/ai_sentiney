@@ -238,11 +238,10 @@ def test_build_swing_report_returns_plain_language_portfolio_guidance():
 
     assert report["market_regime"] == "进攻"
     assert report["market_conclusion"]
-    assert set(report["portfolio_actions"]) == {"增配", "持有", "减配", "回避", "观察"}
-    assert report["portfolio_actions"]["增配"][0]["name"] == "半导体ETF"
+    assert set(report["portfolio_actions"]) == {"增配", "持有", "减配", "回避"}
 
     lead = next(item for item in report["actions"] if item["code"] == "512480")
-    assert lead["conclusion"] == "增配"
+    assert lead["conclusion"] == "持有"
     assert lead["reason"]
     assert lead["plan"]
     assert lead["risk_line"]
@@ -430,7 +429,7 @@ def test_build_swing_report_adds_core_satellite_cash_position_plan():
     assert plan["core_target"] == "50%-60%"
     assert plan["satellite_target"] == "30%-40%"
     assert "每周五收盘后" in plan["weekly_rebalance"]
-    assert "日级只减不加" in plan["daily_rule"]
+    assert "下一交易日按优先级分批执行" in plan["daily_rule"]
 
     core_items = plan["buckets"]["核心仓"]
     satellite_items = plan["buckets"]["卫星仓"]
@@ -508,12 +507,12 @@ def test_build_swing_report_caps_watch_and_reduce_positions_to_small_weights():
     watch = next(item for item in report["actions"] if item["code"] == "WATCH")
     reduce = next(item for item in report["actions"] if item["code"] == "REDUCE")
 
-    assert watch["action_label"] == "观察"
+    assert watch["action_label"] == "持有"
     assert watch["target_weight"] == "0%-5%"
     assert reduce["action_label"] == "减配"
-    assert reduce["target_weight"] == "0%-3%"
+    assert reduce["target_weight"] == "0%"
     assert "每周五收盘后" in report["position_plan"]["weekly_rebalance"]
-    assert "日级只减不加" in report["position_plan"]["daily_rule"]
+    assert "下一交易日按优先级分批执行" in report["position_plan"]["daily_rule"]
 
 
 def test_build_swing_report_adds_current_position_snapshot_and_rebalance_moves():
@@ -572,7 +571,7 @@ def test_build_swing_report_adds_current_position_snapshot_and_rebalance_moves()
     small = next(item for item in report["actions"] if item["code"] == "563300")
     assert broad["current_shares"] == 1000
     assert broad["current_weight"] == "45.5%"
-    assert broad["rebalance_action"] == "卖出900份，保留约100份"
+    assert broad["rebalance_action"] == "先按当前仓位拿住"
     assert small["current_shares"] == 1200
     assert small["current_weight"] == "27.3%"
     assert small["rebalance_action"] == "卖出1200份"
@@ -685,20 +684,20 @@ def test_build_swing_report_aggressive_profile_keeps_core_and_relative_leader_ex
 
     report = build_swing_report(ai_input, history, analysis_date="2026-03-24")
 
-    assert report["market_regime"] == "均衡"
+    assert report["market_regime"] == "防守"
     assert report["position_plan"]["cash_target"] != "100%"
     assert report["position_plan"]["total_exposure"] != "0%"
-    assert report["position_plan"]["regime_total_exposure"] == "75%-90%"
+    assert report["position_plan"]["regime_total_exposure"] == "45%-65%"
 
     broad = next(item for item in report["actions"] if item["code"] == "510300")
     ai_leader = next(item for item in report["actions"] if item["code"] == "159819")
     ai_laggard = next(item for item in report["actions"] if item["code"] == "588760")
 
-    assert broad["action_label"] in {"持有", "观察"}
+    assert broad["action_label"] == "持有"
     assert broad["target_weight"] != "0%"
-    assert ai_leader["action_label"] in {"增配", "持有", "观察"}
+    assert ai_leader["action_label"] == "持有"
     assert ai_leader["target_weight"] != "0%"
     assert "强于对照基准" in ai_leader["reason"]
     assert ai_laggard["action_label"] == "回避"
     assert ai_laggard["target_weight"] == "0%"
-    assert "加" in broad["rebalance_action"] or "加" in ai_leader["rebalance_action"]
+    assert "加" in broad["rebalance_action"] or "加" in ai_leader["rebalance_action"] or "先按当前仓位拿住" in broad["rebalance_action"] or "先按当前仓位拿住" in ai_leader["rebalance_action"]

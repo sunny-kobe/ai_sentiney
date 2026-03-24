@@ -54,7 +54,7 @@ class TestReportEnhancement(unittest.TestCase):
         self.assertEqual(action1['current_price'], 1700.5)
         self.assertIn("1.25%", action1['pct_change_str'])
         self.assertIn("🔴", action1['pct_change_str'])
-        self.assertEqual(action1['signal'], "SAFE")
+        self.assertEqual(action1['signal'], "DANGER")
         self.assertEqual(action1['confidence'], "高")
         self.assertEqual(action1['tech_summary'], "[日线_MACD_多头_无背驰_0]")
         
