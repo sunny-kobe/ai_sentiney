@@ -65,3 +65,12 @@ class ConfigLoader:
     @staticmethod
     def get_api_keys():
         return ConfigLoader().config.get('api_keys', {})
+
+    @staticmethod
+    def get_watchlist():
+        return ConfigLoader().config.get('watchlist', [])
+
+    @staticmethod
+    def get_swing_strategy_config():
+        strategy = ConfigLoader().config.get('strategy', {})
+        return strategy.get('swing', {})

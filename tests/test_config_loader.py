@@ -33,3 +33,21 @@ def test_portfolio_loading():
     if len(portfolio) > 0:
         assert 'code' in portfolio[0]
         assert 'strategy' in portfolio[0]
+
+
+def test_watchlist_loading():
+    watchlist = ConfigLoader.get_watchlist()
+
+    assert isinstance(watchlist, list)
+    if len(watchlist) > 0:
+        assert "code" in watchlist[0]
+        assert "strategy" in watchlist[0]
+
+
+def test_swing_strategy_config_loading():
+    swing_config = ConfigLoader.get_swing_strategy_config()
+
+    assert isinstance(swing_config, dict)
+    assert swing_config.get("risk_profile") in {"balanced", "aggressive"}
+    assert "candidate_limit" in swing_config
+    assert "min_cash_buffer" in swing_config

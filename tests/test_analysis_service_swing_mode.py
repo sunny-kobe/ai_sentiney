@@ -111,6 +111,8 @@ def test_run_analysis_swing_mode_injects_strategy_preferences(monkeypatch, tmp_p
     service = AnalysisService()
     service.data_path = tmp_path / "latest_context.json"
     service.config.setdefault("strategy", {}).setdefault("swing", {})["risk_profile"] = "aggressive"
+    service.config.setdefault("strategy", {}).setdefault("swing", {})["candidate_limit"] = 3
+    service.config["watchlist"] = [{"code": "512660", "name": "军工ETF", "strategy": "trend", "priority": "high"}]
     captured = {}
 
     async def fake_collect(_portfolio):
@@ -122,7 +124,12 @@ def test_run_analysis_swing_mode_injects_strategy_preferences(monkeypatch, tmp_p
     monkeypatch.setattr(
         "src.service.analysis_service.build_swing_report",
         lambda ai_input, historical_records, analysis_date: captured.update(
-            {"strategy_preferences": ai_input.get("strategy_preferences"), "historical_records": historical_records}
+            {
+                "strategy_preferences": ai_input.get("strategy_preferences"),
+                "historical_records": historical_records,
+                "watchlist": ai_input.get("watchlist"),
+                "watchlist_codes": ai_input.get("watchlist_codes"),
+            }
         )
         or {
             "mode": "swing",
@@ -139,7 +146,10 @@ def test_run_analysis_swing_mode_injects_strategy_preferences(monkeypatch, tmp_p
 
     asyncio.run(service.run_analysis(mode="swing"))
 
-    assert captured["strategy_preferences"] == {"risk_profile": "aggressive"}
+    assert captured["strategy_preferences"]["risk_profile"] == "aggressive"
+    assert captured["strategy_preferences"]["candidate_limit"] == 3
+    assert captured["watchlist"][0]["code"] == "512660"
+    assert captured["watchlist_codes"] == {"512660"}
 
 
 def test_ask_question_accuracy_query_in_swing_mode_uses_medium_term_report(monkeypatch):

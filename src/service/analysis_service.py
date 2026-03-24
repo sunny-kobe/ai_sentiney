@@ -18,6 +18,7 @@ from src.processor.swing_tracker import build_swing_scorecard
 from src.utils.trading_calendar import should_run_market_report
 from src.service.report_quality import evaluate_input_quality, evaluate_output_quality
 from src.service.structured_report import build_structured_report
+from src.service.portfolio_advisor import build_investor_snapshot
 from src.service.swing_strategy import build_swing_report, resolve_benchmark_code
 from src.service.strategy_engine import build_strategy_snapshot, build_intraday_rule_report, build_close_rule_report
 
@@ -30,11 +31,12 @@ class AnalysisService:
 
     def _get_swing_strategy_preferences(self) -> Dict[str, Any]:
         swing_config = ((self.config.get("strategy") or {}).get("swing") or {})
-        preferences: Dict[str, Any] = {}
-        risk_profile = swing_config.get("risk_profile")
-        if risk_profile:
-            preferences["risk_profile"] = risk_profile
-        return preferences
+        return build_investor_snapshot(
+            portfolio=self.config.get("portfolio", []),
+            watchlist=self.config.get("watchlist", []),
+            portfolio_state=self.config.get("portfolio_state", {}),
+            swing_config=swing_config,
+        ).get("strategy_preferences", {})
 
     def _load_cached_context(self, mode: str) -> Optional[Dict[str, Any]]:
         if self.data_path.exists():
@@ -276,6 +278,13 @@ class AnalysisService:
             }
         
         portfolio = self.config.get('portfolio', [])
+        investor_snapshot = build_investor_snapshot(
+            portfolio=portfolio,
+            watchlist=self.config.get("watchlist", []),
+            portfolio_state=self.config.get("portfolio_state", {}),
+            swing_config=((self.config.get("strategy") or {}).get("swing") or {}),
+        )
+        market_universe = investor_snapshot["universe"] if mode == "swing" else portfolio
         ai_input = None
 
         # --- Step 1: Data Preparation ---
@@ -291,15 +300,15 @@ class AnalysisService:
                 logger.error("No historical data found for replay.")
                 return {"error": "No replay data"}
         else:
-            if not portfolio:
-                logger.warning("Portfolio is empty.")
-                return {"error": "Portfolio is empty"}
+            if not market_universe:
+                logger.warning("Market universe is empty.")
+                return {"error": "Portfolio is empty" if mode != "swing" else "Portfolio and watchlist are empty"}
             
             try:
                 if mode == 'morning':
                     ai_input = await self.collect_and_process_morning_data(portfolio)
                 else:
-                    ai_input = await self.collect_and_process_data(portfolio)
+                    ai_input = await self.collect_and_process_data(market_universe)
                 # Save context
                 with open(self.data_path, 'w', encoding='utf-8') as f:
                     json.dump(ai_input, f, ensure_ascii=False, indent=2)
@@ -336,8 +345,12 @@ class AnalysisService:
         try:
             if mode == "swing":
                 analysis_date = ai_input.get("context_date") or datetime.now().strftime('%Y-%m-%d')
-                ai_input.setdefault("portfolio_state", self.config.get("portfolio_state", {}))
-                ai_input.setdefault("strategy_preferences", self._get_swing_strategy_preferences())
+                ai_input.setdefault("portfolio_state", investor_snapshot.get("portfolio_state", {}))
+                ai_input.setdefault("strategy_preferences", investor_snapshot.get("strategy_preferences", {}))
+                ai_input.setdefault("holdings", investor_snapshot.get("holdings", []))
+                ai_input.setdefault("watchlist", investor_snapshot.get("watchlist", []))
+                ai_input.setdefault("held_codes", investor_snapshot.get("held_codes", set()))
+                ai_input.setdefault("watchlist_codes", investor_snapshot.get("watchlist_codes", set()))
                 historical_records = self._get_swing_history_records(days=90)
                 analysis_result = build_swing_report(ai_input, historical_records, analysis_date)
                 swing_scorecard = self._compute_swing_scorecard(historical_records)
