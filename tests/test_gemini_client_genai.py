@@ -207,6 +207,60 @@ def test_gemini_client_uses_close_and_morning_schemas(monkeypatch):
     assert morning_result["a_share_outlook"] == "平开"
 
 
+def test_gemini_client_uses_dedicated_preclose_prompt_with_midday_schema(monkeypatch):
+    captured = {}
+
+    def fake_handler(**kwargs):
+        captured["request"] = kwargs
+        parsed = MiddayAnalysis(
+            market_sentiment="执行窗口",
+            volume_analysis="尾盘缩量",
+            macro_summary="以执行清单为主",
+            actions=[],
+        )
+        return SimpleNamespace(parsed=parsed, text='{"market_sentiment":"执行窗口","actions":[]}')
+
+    monkeypatch.setattr(
+        "src.analyst.gemini_client.ConfigLoader",
+        lambda: SimpleNamespace(
+            config={
+                "api_keys": {"gemini_api_key": "test-key"},
+                "ai": {"model_name": "gemini-3.1-pro-preview"},
+                "prompts": {
+                    "midday_focus": "午盘 prompt",
+                    "preclose_focus": "尾盘 prompt",
+                },
+            }
+        ),
+    )
+    monkeypatch.setattr("src.analyst.gemini_client.genai.configure", lambda **_kwargs: None, raising=False)
+    monkeypatch.setattr(
+        "src.analyst.gemini_client.genai.GenerativeModel",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("old SDK path must not be used")),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "src.analyst.gemini_client.genai.Client",
+        lambda api_key=None: _FakeClient(fake_handler, captured, api_key=api_key),
+        raising=False,
+    )
+
+    client = GeminiClient()
+    result = client.analyze_preclose(
+        {
+            "context_date": "2026-03-23",
+            "market_breadth": "涨: 10 / 跌: 5",
+            "indices": {"上证指数": {"change_pct": 0.5}},
+            "macro_news": {"telegraph": ["尾盘波动收敛"]},
+            "stocks": [],
+        }
+    )
+
+    assert _get_config_value(captured["request"]["config"], "system_instruction") == "尾盘 prompt"
+    assert _get_config_value(captured["request"]["config"], "response_schema") is MiddayAnalysis
+    assert result["macro_summary"] == "以执行清单为主"
+
+
 def test_gemini_client_qa_stays_text_only(monkeypatch):
     captured = {}
 

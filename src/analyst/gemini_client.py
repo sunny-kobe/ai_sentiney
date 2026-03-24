@@ -224,12 +224,7 @@ class GeminiClient:
         )
         return (getattr(response, "text", "") or "").strip()
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
-    def analyze(self, market_data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Sends data to Gemini and retrieves structured analysis.
-        🔧 增强: 使用Pydantic进行输出校验
-        """
+    def _build_intraday_context_json(self, market_data: Dict[str, Any]) -> str:
         market_breadth = market_data.get('market_breadth', "Unknown")
         north_funds = market_data.get('north_funds', 0.0)
         portfolio = market_data.get('stocks', [])
@@ -241,15 +236,23 @@ class GeminiClient:
 
         structured_report = market_data.get("structured_report")
         if structured_report:
-            context_json = json.dumps({"Structured_Report": structured_report}, ensure_ascii=False, indent=1)
-        else:
-            context_json = self._build_context(market_breadth, north_funds, indices, macro_news, portfolio, yesterday_context, scorecard, context_date)
+            return json.dumps({"Structured_Report": structured_report}, ensure_ascii=False, indent=1)
 
-        # Load Prompt Template
-        # Using the midday focus from config
-        system_prompt = self.config['prompts']['midday_focus']
+        return self._build_context(
+            market_breadth,
+            north_funds,
+            indices,
+            macro_news,
+            portfolio,
+            yesterday_context,
+            scorecard,
+            context_date,
+        )
 
-        logger.info("Sending request to Gemini...")
+    def _analyze_intraday(self, market_data: Dict[str, Any], system_prompt: str, log_label: str) -> Dict[str, Any]:
+        context_json = self._build_intraday_context_json(market_data)
+
+        logger.info(log_label)
         try:
             parsed = self._generate_structured_content(
                 system_prompt=system_prompt,
@@ -262,6 +265,21 @@ class GeminiClient:
         except Exception as e:
             logger.error(f"Gemini API call failed: {e}")
             raise
+
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+    def analyze(self, market_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Sends data to Gemini and retrieves structured analysis.
+        🔧 增强: 使用Pydantic进行输出校验
+        """
+        system_prompt = self.config['prompts']['midday_focus']
+        return self._analyze_intraday(market_data, system_prompt, "Sending request to Gemini...")
+
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+    def analyze_preclose(self, market_data: Dict[str, Any]) -> Dict[str, Any]:
+        """收盘前模式：复用盘中结构化 schema，但使用独立执行 prompt。"""
+        system_prompt = self.config['prompts']['preclose_focus']
+        return self._analyze_intraday(market_data, system_prompt, "Sending preclose execution request to Gemini...")
 
     def analyze_with_prompt(self, market_data: Dict[str, Any], system_prompt: str) -> Dict[str, Any]:
         """

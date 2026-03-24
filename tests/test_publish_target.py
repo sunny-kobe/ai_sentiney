@@ -8,6 +8,9 @@ class _DummyGemini:
     def analyze(self, ai_input):
         return {"actions": []}
 
+    def analyze_preclose(self, ai_input):
+        return {"actions": []}
+
     def analyze_with_prompt(self, ai_input, system_prompt):
         return {"actions": []}
 

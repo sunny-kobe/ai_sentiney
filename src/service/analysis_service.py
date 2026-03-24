@@ -367,7 +367,10 @@ class AnalysisService:
                 if mode in ('midday', 'preclose'):
                     last_close = self.db.get_last_close_analysis()
                     ai_input['yesterday_context'] = last_close
-                    analysis_result = analyst.analyze(ai_input)
+                    if mode == 'midday':
+                        analysis_result = analyst.analyze(ai_input)
+                    else:
+                        analysis_result = analyst.analyze_preclose(ai_input)
                 elif mode == 'close':
                     system_prompt = self.config['prompts'].get('close_review')
                     if system_prompt:
