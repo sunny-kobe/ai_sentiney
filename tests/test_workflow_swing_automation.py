@@ -7,11 +7,11 @@ WORKFLOW_PATH = Path(".github/workflows/daily_sentinel.yml")
 def test_daily_workflow_supports_swing_schedule_and_manual_inputs():
     content = WORKFLOW_PATH.read_text(encoding="utf-8")
 
-    assert 'cron: "45 0 * * 1-5"' in content
-    assert 'cron: "40 3 * * 1-5"' in content
-    assert 'cron: "48 6 * * 1-5"' in content
-    assert 'cron: "20 7 * * 1-5"' in content
-    assert 'cron: "30 12 * * 1-5"' in content
+    assert 'cron: "10 0 * * 1-5"' in content
+    assert 'cron: "20 3 * * 1-5"' in content
+    assert 'cron: "35 6 * * 1-5"' in content
+    assert 'cron: "5 7 * * 1-5"' in content
+    assert 'cron: "0 12 * * 1-5"' in content
     assert "workflow_dispatch:" in content
     assert "mode:" in content
     assert "publish_target:" in content

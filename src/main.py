@@ -198,6 +198,7 @@ def _print_text_summary(result: Dict[str, Any], mode: str):
 
 def entry_point():
     parser = argparse.ArgumentParser(description="Project Sentinel V2")
+    parser.add_argument('command', nargs='?', choices=['run', 'validate', 'experiment'], default='run', help='CLI command')
     parser.add_argument('--mode', type=str, default='midday', choices=['midday', 'preclose', 'close', 'morning', 'swing'], help='Execution mode')
     parser.add_argument('--dry-run', action='store_true', help='Run without calling expensive APIs or sending notifications')
     parser.add_argument('--replay', action='store_true', help='Replay analysis using last saved data')
@@ -208,6 +209,11 @@ def entry_point():
     parser.add_argument('--output', type=str, default='text', choices=['text', 'json'], help='Output format')
     parser.add_argument('--ask', type=str, default=None, help='Ask a follow-up question about cached analysis')
     parser.add_argument('--date', type=str, default=None, help='Target date (YYYY-MM-DD) for analysis or Q&A')
+    parser.add_argument('--days', type=int, default=90, help='Lookback days for validation/experiment commands')
+    parser.add_argument('--from', dest='date_from', type=str, default=None, help='Start date (YYYY-MM-DD) for validation/experiment commands')
+    parser.add_argument('--to', dest='date_to', type=str, default=None, help='End date (YYYY-MM-DD) for validation/experiment commands')
+    parser.add_argument('--codes', nargs='*', default=None, help='Optional stock codes for validation/experiment commands')
+    parser.add_argument('--preset', type=str, default=None, help='Optional validation/experiment preset')
 
     args = parser.parse_args()
 
@@ -222,6 +228,20 @@ def entry_point():
         init_routes(service)
         server = WebServer(port=8000)
         server.run()
+    elif args.command in {'validate', 'experiment'}:
+        result = service.build_validation_result(
+            mode=args.mode,
+            days=args.days,
+            date_from=args.date_from,
+            date_to=args.date_to,
+            codes=args.codes,
+            preset=args.preset if args.command == 'experiment' else args.preset,
+        )
+        payload = result.to_dict() if hasattr(result, "to_dict") else result
+        if args.output == 'json':
+            print(json.dumps(payload, ensure_ascii=False))
+        else:
+            print(payload.get("text") or payload.get("summary_text", "暂无验证结果"))
     elif args.validation_report:
         snapshot = service.build_validation_snapshot(mode=args.mode)
         if args.output == 'json':
