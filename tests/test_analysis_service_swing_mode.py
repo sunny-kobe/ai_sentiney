@@ -712,6 +712,81 @@ def test_compute_swing_validation_report_prefers_live_summary_when_samples_are_r
     assert report["performance_context"]["offensive"]["pullback_resume"]["allowed"] is True
 
 
+def test_build_validation_snapshot_returns_compact_payload_without_heavy_evaluations(monkeypatch):
+    service = AnalysisService()
+    historical_records = [{"date": "2026-03-23", "raw_data": {"stocks": [{"code": "510300"}]}, "ai_result": {"actions": []}}]
+
+    monkeypatch.setattr(service, "_get_swing_history_records", lambda days=90: historical_records)
+    monkeypatch.setattr(
+        service,
+        "_compute_swing_validation_report",
+        lambda records: {
+            "live": {
+                "summary_text": "真实建议跟踪近90天已兑现20日建议6笔，平均跑赢基准1.8%，增配组平均收益4.6%，平均回撤-3.1%；这套建议近期仍有效，可以继续进攻，但继续分批。",
+                "scorecard": {
+                    "windows": [20],
+                    "stats": {
+                        "overall": {
+                            20: {
+                                "count": 6,
+                                "avg_absolute_return": 0.041,
+                                "avg_relative_return": 0.018,
+                                "avg_max_drawdown": -0.031,
+                            }
+                        }
+                    },
+                    "evaluations": [{"code": "510300", "window": 20}],
+                },
+            },
+            "scorecard": {
+                "windows": [20],
+                "stats": {
+                    "overall": {
+                        20: {
+                            "count": 12,
+                            "avg_absolute_return": 0.033,
+                            "avg_relative_return": 0.012,
+                            "avg_max_drawdown": -0.052,
+                        }
+                    }
+                },
+                "evaluations": [{"code": "510300", "window": 20}],
+            },
+            "backtest": {
+                "summary_text": "回测收益9.4%，最大回撤-5.2%，交易4笔",
+                "total_return": 0.094,
+                "max_drawdown": -0.052,
+                "trade_count": 4,
+            },
+            "walkforward": {"segment_count": 5, "segments": [{"id": 1}], "avg_total_return": 0.012},
+            "performance_context": {
+                "offensive": {
+                    "pullback_resume": {"allowed": True, "reason": "真实建议近期进攻统计仍有效，正式回测未见明显恶化"}
+                }
+            },
+            "summary_text": "最近这套中期动作整体有效，可以继续进攻，但仍按分批方式执行。参考：20日样本12，平均收益3.3%，平均跑赢基准1.2%，平均回撤-5.2%；回测收益9.4%，最大回撤-5.2%，交易4笔；滚动验证5段，平均收益1.2%。",
+        },
+    )
+
+    snapshot = service.build_validation_snapshot("swing")
+
+    assert snapshot["mode"] == "swing"
+    assert snapshot["compact"] == {
+        "verdict": "最近这套中期动作整体有效，可以继续进攻，但仍按分批方式执行。",
+        "live_sample_count": 6,
+        "live_primary_window": 20,
+        "synthetic_sample_count": 12,
+        "synthetic_primary_window": 20,
+        "backtest_trade_count": 4,
+        "walkforward_segment_count": 5,
+        "offensive_allowed": True,
+        "offensive_reason": "真实建议近期进攻统计仍有效，正式回测未见明显恶化",
+    }
+    assert "scorecard" not in snapshot
+    assert "live" not in snapshot
+    assert "evaluations" not in json.dumps(snapshot, ensure_ascii=False)
+
+
 def test_collect_and_process_data_closes_data_collector(monkeypatch):
     service = AnalysisService()
     lifecycle = {"closed": False}

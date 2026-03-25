@@ -42,7 +42,8 @@ WebUI Preview:
 - 输出格式：`今日结论 / 账户动作 / 持仓处理 / 观察池机会 / 风险清单`
 - 评估口径：`10/20/40` 个交易日的 `平均收益 / 平均超额 / 平均回撤`
 - 不再把短线命中率作为主KPI，`midday` / `close` 只保留为战术诊断
-- 新增 `验证摘要`：把事件研究、正式回测、滚动验证压缩成一段你能直接读懂的结论
+- 新增 `验证摘要`：把真实建议跟踪、正式回测、滚动验证压缩成一段你能直接读懂的结论
+- 新增 `compact validation snapshot`：CLI JSON / WebUI / 推送统一显示真实样本、历史样本和进攻权限
 
 ## 30 秒看效果
 
@@ -162,6 +163,9 @@ python -m src.main --mode swing --publish
 # 直接查看中期验证快照
 python -m src.main --mode swing --validation-report
 
+# 直接查看压缩 JSON 验证快照
+python -m src.main --mode swing --validation-report --output json
+
 # 查看中期验证摘要
 python -m src.main --ask "最近验证情况怎么样" --mode swing
 
@@ -212,6 +216,8 @@ python -m src.main --webui
 - 健康检查
 - 手动触发分析
 - 基础配置编辑
+- `swing` 验证面板：直接看真实样本 / 历史样本 / 回测笔数 / 进攻权限
+- 页面加载后自动拉取 `/api/validation?mode=swing`
 
 ## CLI 参数
 
@@ -222,7 +228,7 @@ python -m src.main --webui
 | `--publish-target {feishu,telegram}` | 推送目标（默认 feishu） |
 | `--dry-run` | 试运行，不推送；`swing` 下会直接拉实时行情做预览 |
 | `--replay` | 使用历史缓存重放分析，适合验证渲染/结构，不替代实时预览 |
-| `--validation-report` | 直接输出当前模式的验证摘要；`swing` 下会优先展示真实历史建议跟踪 |
+| `--validation-report` | 直接输出当前模式的验证摘要；`swing` 下文本显示自然语言总结，JSON 默认返回 compact snapshot |
 | `--output {text,json}` | 输出格式 |
 | `--ask "问题"` | 进入追问模式 |
 | `--date YYYY-MM-DD` | 指定日期上下文 |

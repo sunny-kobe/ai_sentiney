@@ -434,6 +434,8 @@ class AnalysisService:
                 historical_records = self._get_swing_history_records(days=90)
                 validation_report = self._compute_swing_validation_report(historical_records)
                 if validation_report:
+                    validation_compact = self._build_compact_validation_snapshot(validation_report)
+                    validation_report = {**validation_report, "compact": validation_compact}
                     ai_input.setdefault("performance_context", validation_report.get("performance_context", {}))
                     ai_input.setdefault("validation_report", validation_report)
                 analysis_result = build_swing_report(ai_input, historical_records, analysis_date)
@@ -441,6 +443,7 @@ class AnalysisService:
                     if validation_report.get("scorecard"):
                         analysis_result["swing_scorecard"] = validation_report.get("scorecard")
                     analysis_result["validation_report"] = validation_report
+                    analysis_result["validation_compact"] = validation_report.get("compact")
                 analysis_result.setdefault("summary", analysis_result.get("market_conclusion", ""))
                 analysis_result.setdefault("quality_status", "normal")
                 analysis_result.setdefault("quality_issues", [])
@@ -1032,6 +1035,45 @@ class AnalysisService:
             return verdict
         return f"{verdict} 参考：{'；'.join(evidence_parts)}。"
 
+    def _extract_validation_verdict(self, summary_text: str) -> str:
+        text = str(summary_text or "").strip()
+        if not text:
+            return "中期策略统计数据不足，暂无报告。"
+        if "参考：" in text:
+            return text.split("参考：", 1)[0].strip()
+        if "；" in text:
+            return text.rsplit("；", 1)[-1].strip()
+        return text
+
+    def _build_compact_validation_snapshot(
+        self,
+        validation_report: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        live_window, live_stats = self._primary_window_stats(
+            (validation_report.get("live") or {}).get("scorecard"),
+            preferred_windows=(20, 10, 40),
+        )
+        synthetic_window, synthetic_stats = self._primary_window_stats(
+            validation_report.get("scorecard"),
+            preferred_windows=(20, 10, 40),
+        )
+        offensive_gate = (
+            ((validation_report.get("performance_context") or {}).get("offensive") or {}).get("pullback_resume")
+            or {}
+        )
+        compact = {
+            "verdict": self._extract_validation_verdict(validation_report.get("summary_text", "")),
+            "live_sample_count": int(live_stats.get("count", 0) or 0),
+            "live_primary_window": live_window,
+            "synthetic_sample_count": int(synthetic_stats.get("count", 0) or 0),
+            "synthetic_primary_window": synthetic_window,
+            "backtest_trade_count": int((validation_report.get("backtest") or {}).get("trade_count", 0) or 0),
+            "walkforward_segment_count": int((validation_report.get("walkforward") or {}).get("segment_count", 0) or 0),
+            "offensive_allowed": bool(offensive_gate.get("allowed")),
+            "offensive_reason": str(offensive_gate.get("reason", "样本不足")),
+        }
+        return compact
+
     def _build_live_validation_records(
         self,
         swing_records: List[Dict[str, Any]],
@@ -1193,6 +1235,12 @@ class AnalysisService:
             if not validation_report:
                 return {"mode": mode, "summary_text": "中期策略统计数据不足，暂无报告。"}
 
+            latest_record_date = max(
+                (str(record.get("date", "") or "") for record in historical_records if record.get("date")),
+                default="",
+            ) or None
+            compact = self._build_compact_validation_snapshot(validation_report)
+
             lines = [validation_report.get("summary_text", "中期策略统计数据不足，暂无报告。")]
             live_summary = ((validation_report.get("live") or {}).get("summary_text") or "").strip()
             if live_summary:
@@ -1205,7 +1253,13 @@ class AnalysisService:
                     f"平均收益{validation_report['walkforward']['avg_total_return'] * 100:.1f}%"
                 )
 
-            snapshot = {"mode": mode, **validation_report}
+            snapshot = {
+                "mode": mode,
+                "summary_text": validation_report.get("summary_text", "中期策略统计数据不足，暂无报告。"),
+                "compact": compact,
+            }
+            if latest_record_date:
+                snapshot["as_of_date"] = latest_record_date
             snapshot["text"] = "\n".join(lines)
             return snapshot
 

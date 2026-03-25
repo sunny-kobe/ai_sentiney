@@ -5,6 +5,24 @@ from typing import Dict, Any, List
 from src.utils.logger import logger
 from src.utils.config_loader import ConfigLoader
 
+
+def _build_validation_hint(data: Dict[str, Any]) -> str:
+    compact = data.get("validation_compact") or ((data.get("validation_report") or {}).get("compact")) or {}
+    if not compact:
+        return ""
+
+    live_window = f"{compact.get('live_primary_window')}日" if compact.get("live_primary_window") else "暂无"
+    synthetic_window = f"{compact.get('synthetic_primary_window')}日" if compact.get("synthetic_primary_window") else "暂无"
+    offensive_text = "允许" if compact.get("offensive_allowed") else "关闭"
+    reason = str(compact.get("offensive_reason", "") or "").strip()
+    reason_suffix = f"（{reason}）" if reason else ""
+    return (
+        f"真实样本: {live_window}{int(compact.get('live_sample_count', 0) or 0)}笔"
+        f" | 历史样本: {synthetic_window}{int(compact.get('synthetic_sample_count', 0) or 0)}笔"
+        f" | 进攻权限: {offensive_text}{reason_suffix}"
+    )
+
+
 class FeishuClient:
     def __init__(self):
         self.config = ConfigLoader().config
@@ -732,6 +750,20 @@ class FeishuClient:
                 }
             },
         ]
+        validation_hint = _build_validation_hint(data)
+        if validation_hint:
+            elements.extend(
+                [
+                    {
+                        "tag": "div",
+                        "text": {
+                            "tag": "lark_md",
+                            "content": validation_hint,
+                        },
+                    },
+                    {"tag": "hr"},
+                ]
+            )
 
         for action in data.get("actions", []):
             content = (

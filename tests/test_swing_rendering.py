@@ -11,6 +11,17 @@ def _make_swing_result():
         "market_regime": "防守",
         "market_conclusion": "当前偏防守，先守住已有成果，弱势方向以收缩仓位为主。",
         "validation_summary": "真实建议跟踪近90天已兑现20日建议8笔，平均跑赢基准1.6%，增配组平均收益4.2%；这套建议近期仍有效，可以继续进攻，但继续分批。",
+        "validation_compact": {
+            "verdict": "最近这套中期动作整体有效，可以继续进攻，但仍按分批方式执行。",
+            "live_sample_count": 8,
+            "live_primary_window": 20,
+            "synthetic_sample_count": 12,
+            "synthetic_primary_window": 20,
+            "backtest_trade_count": 4,
+            "walkforward_segment_count": 5,
+            "offensive_allowed": True,
+            "offensive_reason": "真实建议近期进攻统计仍有效，正式回测未见明显恶化",
+        },
         "position_plan": {
             "total_exposure": "35%-50%",
             "core_target": "25%-35%",
@@ -137,6 +148,7 @@ def test_telegram_swing_text_shows_action_buckets_and_risk_lines():
     assert "军工ETF" in text
     assert "验证摘要" in text
     assert "真实建议跟踪" in text
+    assert "真实样本: 20日8笔 | 历史样本: 20日12笔 | 进攻权限: 允许（真实建议近期进攻统计仍有效，正式回测未见明显恶化）" in text
     assert "风险清单" in text
 
 
@@ -158,6 +170,7 @@ def test_feishu_swing_card_shows_plain_language_sections():
     assert "观察池机会" in joined
     assert "验证摘要" in joined
     assert "真实建议跟踪" in joined
+    assert "真实样本: 20日8笔 | 历史样本: 20日12笔 | 进攻权限: 允许（真实建议近期进攻统计仍有效，正式回测未见明显恶化）" in joined
     assert "风险清单" in joined
 
 

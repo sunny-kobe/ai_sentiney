@@ -1,6 +1,7 @@
 import json
 import asyncio
 from http.server import BaseHTTPRequestHandler
+from urllib.parse import parse_qs, urlparse
 from src.web.router import get_router
 from src.web.templates import DASHBOARD_HTML
 from src.service.analysis_service import AnalysisService
@@ -30,6 +31,24 @@ def init_routes(service: AnalysisService):
         handler.send_header('Content-type', 'application/json')
         handler.end_headers()
         handler.wfile.write(json.dumps({"status": "running", "service": "AnalysisService"}).encode('utf-8'))
+
+    @router.get("/api/validation")
+    def validation(handler: BaseHTTPRequestHandler):
+        try:
+            query = parse_qs(urlparse(handler.path).query)
+            mode = (query.get("mode") or ["swing"])[0] or "swing"
+            snapshot = service.build_validation_snapshot(mode=mode)
+
+            handler.send_response(200)
+            handler.send_header('Content-type', 'application/json')
+            handler.end_headers()
+            handler.wfile.write(json.dumps(snapshot, ensure_ascii=False).encode('utf-8'))
+        except Exception as e:
+            logger.error(f"Web validation API Error: {e}")
+            handler.send_response(500)
+            handler.send_header('Content-type', 'application/json')
+            handler.end_headers()
+            handler.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
 
     @router.post("/api/analyze")
     def analyze(handler: BaseHTTPRequestHandler):

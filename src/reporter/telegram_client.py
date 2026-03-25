@@ -5,6 +5,23 @@ from src.utils.config_loader import ConfigLoader
 from src.utils.logger import logger
 
 
+def _build_validation_hint(data: Dict[str, Any]) -> str:
+    compact = data.get("validation_compact") or ((data.get("validation_report") or {}).get("compact")) or {}
+    if not compact:
+        return ""
+
+    live_window = f"{compact.get('live_primary_window')}日" if compact.get("live_primary_window") else "暂无"
+    synthetic_window = f"{compact.get('synthetic_primary_window')}日" if compact.get("synthetic_primary_window") else "暂无"
+    offensive_text = "允许" if compact.get("offensive_allowed") else "关闭"
+    reason = str(compact.get("offensive_reason", "") or "").strip()
+    reason_suffix = f"（{reason}）" if reason else ""
+    return (
+        f"真实样本: {live_window}{int(compact.get('live_sample_count', 0) or 0)}笔"
+        f" | 历史样本: {synthetic_window}{int(compact.get('synthetic_sample_count', 0) or 0)}笔"
+        f" | 进攻权限: {offensive_text}{reason_suffix}"
+    )
+
+
 class TelegramClient:
     def __init__(self):
         self.config = ConfigLoader().config
@@ -125,13 +142,20 @@ class TelegramClient:
             data.get('market_conclusion', '暂无结论'),
             "验证摘要:",
             data.get("validation_summary", "暂无验证摘要"),
-            "账户动作:",
-            f"当前总仓位: {position_plan.get('current_total_exposure', 'N/A')}",
-            f"建议总仓位: {position_plan.get('total_exposure', 'N/A')}",
-            f"现金目标: {position_plan.get('cash_target', 'N/A')}",
-            f"优先动作: {'；'.join(position_plan.get('execution_order', []) or []) or '暂无'}",
-            "持仓处理:",
         ]
+        validation_hint = _build_validation_hint(data)
+        if validation_hint:
+            lines.append(validation_hint)
+        lines.extend(
+            [
+                "账户动作:",
+                f"当前总仓位: {position_plan.get('current_total_exposure', 'N/A')}",
+                f"建议总仓位: {position_plan.get('total_exposure', 'N/A')}",
+                f"现金目标: {position_plan.get('cash_target', 'N/A')}",
+                f"优先动作: {'；'.join(position_plan.get('execution_order', []) or []) or '暂无'}",
+                "持仓处理:",
+            ]
+        )
         for action in data.get("actions", [])[:8]:
             lines.append(
                 f"- {action.get('name', '')} | {action.get('conclusion', action.get('action_label', '观察'))}"
