@@ -43,6 +43,8 @@ class DaemonThreadPoolExecutor(ThreadPoolExecutor):
     """Thread pool whose workers do not block process exit when third-party calls hang."""
 
     def _adjust_thread_count(self):
+        # Follow the stdlib implementation for the current Python runtime,
+        # then only add daemonization to avoid hanging process exits.
         if self._idle_semaphore.acquire(timeout=0):
             return
 
@@ -55,7 +57,7 @@ class DaemonThreadPoolExecutor(ThreadPoolExecutor):
             thread = threading.Thread(
                 name=thread_name,
                 target=_worker,
-                args=(weakref.ref(self, weakref_cb), self._work_queue, self._initializer, self._initargs),
+                args=(weakref.ref(self, weakref_cb), self._create_worker_context(), self._work_queue),
             )
             thread.daemon = True
             thread.start()

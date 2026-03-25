@@ -24,11 +24,13 @@ from src.service.swing_strategy import build_swing_report, resolve_benchmark_cod
 from src.service.strategy_engine import build_strategy_snapshot, build_intraday_rule_report, build_close_rule_report
 from src.backtest.engine import run_deterministic_backtest
 from src.backtest.walkforward import run_walkforward_validation
+from src.service.validation_service import ValidationService
 
 class AnalysisService:
     def __init__(self):
         self.config = ConfigLoader().config
         self.db = SentinelDB()
+        self.validation_service = ValidationService(self.db, self.config)
         self.data_path = Path("data/latest_context.json")
         self.data_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -787,13 +789,10 @@ class AnalysisService:
         return "\n".join(lines)
 
     def _get_swing_history_records(self, days: int = 90) -> List[Dict]:
-        records = self.db.get_records_range(mode='close', days=days)
-        if records:
-            return records
-        return self.db.get_records_range(mode='midday', days=days)
+        return self.validation_service._get_swing_history_records(days=days)
 
     def _get_swing_report_records(self, days: int = 90) -> List[Dict]:
-        return self.db.get_records_range(mode='swing', days=days)
+        return self.validation_service._get_swing_report_records(days=days)
 
     def _build_swing_benchmark_map(self, records: List[Dict]) -> Dict[str, str]:
         benchmark_map = {}
@@ -1049,30 +1048,7 @@ class AnalysisService:
         self,
         validation_report: Dict[str, Any],
     ) -> Dict[str, Any]:
-        live_window, live_stats = self._primary_window_stats(
-            (validation_report.get("live") or {}).get("scorecard"),
-            preferred_windows=(20, 10, 40),
-        )
-        synthetic_window, synthetic_stats = self._primary_window_stats(
-            validation_report.get("scorecard"),
-            preferred_windows=(20, 10, 40),
-        )
-        offensive_gate = (
-            ((validation_report.get("performance_context") or {}).get("offensive") or {}).get("pullback_resume")
-            or {}
-        )
-        compact = {
-            "verdict": self._extract_validation_verdict(validation_report.get("summary_text", "")),
-            "live_sample_count": int(live_stats.get("count", 0) or 0),
-            "live_primary_window": live_window,
-            "synthetic_sample_count": int(synthetic_stats.get("count", 0) or 0),
-            "synthetic_primary_window": synthetic_window,
-            "backtest_trade_count": int((validation_report.get("backtest") or {}).get("trade_count", 0) or 0),
-            "walkforward_segment_count": int((validation_report.get("walkforward") or {}).get("segment_count", 0) or 0),
-            "offensive_allowed": bool(offensive_gate.get("allowed")),
-            "offensive_reason": str(offensive_gate.get("reason", "样本不足")),
-        }
-        return compact
+        return self.validation_service._build_compact_validation_snapshot(validation_report)
 
     def _build_live_validation_records(
         self,
@@ -1133,28 +1109,12 @@ class AnalysisService:
         benchmark_map: Optional[Dict[str, str]] = None,
         windows: tuple[int, ...] = (10, 20, 40),
     ) -> Optional[Dict[str, Any]]:
-        if not swing_records or not close_records:
-            return None
-
-        live_records = self._build_live_validation_records(swing_records, close_records)
-        if not live_records:
-            return None
-
-        scorecard = build_swing_scorecard(
-            live_records,
-            benchmark_map=benchmark_map or self._build_swing_benchmark_map(close_records),
+        return self.validation_service._compute_live_swing_validation_report(
+            swing_records,
+            close_records,
+            benchmark_map=benchmark_map,
             windows=windows,
         )
-        if not any(
-            ((scorecard.get("stats") or {}).get("overall") or {}).get(int(window), {}).get("count", 0) > 0
-            for window in windows
-        ):
-            return None
-
-        return {
-            "scorecard": scorecard,
-            "summary_text": self._build_live_validation_summary_text(scorecard),
-        }
 
     def _compute_swing_validation_report(self, historical_records: List[Dict]) -> Optional[Dict]:
         if not historical_records:
@@ -1171,10 +1131,26 @@ class AnalysisService:
             return {
                 "live": live_report,
                 "scorecard": None,
-                "backtest": {"summary_text": "正式回测样本不足，暂不放大解释", "total_return": 0.0, "max_drawdown": 0.0, "trade_count": 0},
+                "backtest": {
+                    "summary_text": "正式回测样本不足，暂不放大解释",
+                    "total_return": 0.0,
+                    "max_drawdown": 0.0,
+                    "trade_count": 0,
+                    "trades": [],
+                    "equity_curve": [],
+                },
                 "walkforward": {"segment_count": 0, "segments": [], "avg_total_return": 0.0},
-                "performance_context": self._build_validation_performance_context(None, None, (live_report or {}).get("scorecard")),
-                "summary_text": self._build_validation_summary_text(live_report, None, None, None),
+                "performance_context": self.validation_service._build_validation_performance_context(
+                    None,
+                    None,
+                    (live_report or {}).get("scorecard"),
+                ),
+                "summary_text": self.validation_service._build_validation_summary_text(
+                    live_report,
+                    None,
+                    None,
+                    None,
+                ),
             }
 
         scorecard = build_swing_scorecard(
@@ -1194,6 +1170,10 @@ class AnalysisService:
             "max_drawdown": backtest_result.get("max_drawdown", 0.0),
             "trade_count": len(backtest_result.get("trades", []) or []),
             "summary_text": "",
+            "trades": backtest_result.get("trades", []) or [],
+            "equity_curve": backtest_result.get("equity_curve", []) or [],
+            "final_value": backtest_result.get("final_value", 0.0),
+            "initial_value": backtest_result.get("initial_value", 0.0),
         }
         if backtest_report["trade_count"] >= 3:
             backtest_report["summary_text"] = (
@@ -1213,7 +1193,7 @@ class AnalysisService:
             if len(synthetic_records) >= 4
             else {"segment_count": 0, "segments": [], "avg_total_return": 0.0}
         )
-        performance_context = self._build_validation_performance_context(
+        performance_context = self.validation_service._build_validation_performance_context(
             scorecard,
             backtest_report,
             (live_report or {}).get("scorecard"),
@@ -1225,7 +1205,12 @@ class AnalysisService:
             "backtest": backtest_report,
             "walkforward": walkforward_report,
             "performance_context": performance_context,
-            "summary_text": self._build_validation_summary_text(live_report, scorecard, backtest_report, walkforward_report),
+            "summary_text": self.validation_service._build_validation_summary_text(
+                live_report,
+                scorecard,
+                backtest_report,
+                walkforward_report,
+            ),
         }
 
     def build_validation_snapshot(self, mode: str) -> Dict[str, Any]:
@@ -1264,6 +1249,25 @@ class AnalysisService:
             return snapshot
 
         return {"mode": mode, "summary_text": self._run_accuracy_report(mode=mode)}
+
+    def build_validation_result(
+        self,
+        *,
+        mode: str,
+        days: int = 90,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        codes: Optional[List[str]] = None,
+        preset: Optional[str] = None,
+    ):
+        return self.validation_service.build_validation_result(
+            mode=mode,
+            days=days,
+            date_from=date_from,
+            date_to=date_to,
+            codes=codes,
+            preset=preset,
+        )
 
     def _run_swing_accuracy_report(self) -> str:
         snapshot = self.build_validation_snapshot("swing")

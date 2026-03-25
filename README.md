@@ -77,6 +77,7 @@ python -m src.main --mode swing
 - 对称信号体系：卖出侧（DANGER/WARNING/WATCH）+ 买入侧（OPPORTUNITY/ACCUMULATE）
 - 中期评估：按 `10/20/40` 个交易日统计 `平均收益 / 平均超额 / 平均回撤`
 - 正式验证：新增组合级回测与滚动验证摘要，用来约束中期进攻信号
+- 历史实验：支持按时间区间 / 最近 N 天 / 真实持仓范围发起中期验证
 - 日内诊断：`midday` / `close` 保留短线信号追踪，但不再作为主策略 KPI
 - 智能追问：基于缓存上下文做二次问答（`--ask`）
 - 趋势分析：自动识别”最近一周/本月走势”等问题
@@ -165,6 +166,18 @@ python -m src.main --mode swing --validation-report
 
 # 直接查看压缩 JSON 验证快照
 python -m src.main --mode swing --validation-report --output json
+
+# 对最近 60 个交易日做正式历史验证
+python -m src.main validate --mode swing --days 60
+
+# 验证指定时间区间
+python -m src.main validate --mode swing --from 2026-03-01 --to 2026-03-25
+
+# 只验证指定标的
+python -m src.main validate --mode swing --from 2026-03-01 --to 2026-03-25 --codes 510300 512660
+
+# 用真实持仓 + 观察池做中期实验
+python -m src.main experiment --preset aggressive_midterm --mode swing
 
 # 查看中期验证摘要
 python -m src.main --ask "最近验证情况怎么样" --mode swing
