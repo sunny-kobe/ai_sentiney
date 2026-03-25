@@ -201,6 +201,7 @@ def entry_point():
     parser.add_argument('--mode', type=str, default='midday', choices=['midday', 'preclose', 'close', 'morning', 'swing'], help='Execution mode')
     parser.add_argument('--dry-run', action='store_true', help='Run without calling expensive APIs or sending notifications')
     parser.add_argument('--replay', action='store_true', help='Replay analysis using last saved data')
+    parser.add_argument('--validation-report', action='store_true', help='Print validation summary for the selected mode')
     parser.add_argument('--webui', action='store_true', help='Start WebUI server')
     parser.add_argument('--publish', action='store_true', help='Push results to configured channel (default: no push)')
     parser.add_argument('--publish-target', type=str, nargs='+', default=['feishu'], choices=['feishu', 'telegram'], help='Publish destination(s), can specify multiple')
@@ -221,6 +222,12 @@ def entry_point():
         init_routes(service)
         server = WebServer(port=8000)
         server.run()
+    elif args.validation_report:
+        snapshot = service.build_validation_snapshot(mode=args.mode)
+        if args.output == 'json':
+            print(json.dumps(snapshot, ensure_ascii=False))
+        else:
+            print(snapshot.get("text") or snapshot.get("summary_text", "暂无验证结果"))
     elif args.ask:
         # Q&A mode
         answer = asyncio.run(service.ask_question(

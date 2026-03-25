@@ -789,6 +789,9 @@ class AnalysisService:
             return records
         return self.db.get_records_range(mode='midday', days=days)
 
+    def _get_swing_report_records(self, days: int = 90) -> List[Dict]:
+        return self.db.get_records_range(mode='swing', days=days)
+
     def _build_swing_benchmark_map(self, records: List[Dict]) -> Dict[str, str]:
         benchmark_map = {}
         available_codes = {
@@ -858,22 +861,88 @@ class AnalysisService:
 
         return synthetic_records
 
+    def _primary_window_stats(
+        self,
+        scorecard: Optional[Dict[str, Any]],
+        *,
+        bucket: str = "overall",
+        action_label: Optional[str] = None,
+        preferred_windows: tuple[int, ...] = (20, 10, 40),
+    ) -> tuple[Optional[int], Dict[str, Any]]:
+        stats_root = ((scorecard or {}).get("stats") or {}).get(bucket, {})
+        if action_label is not None:
+            stats_root = stats_root.get(action_label, {})
+        available_windows = [int(window) for window in ((scorecard or {}).get("windows") or [])]
+        search_windows = list(preferred_windows) + sorted(
+            [window for window in available_windows if window not in preferred_windows],
+            reverse=True,
+        )
+        primary_window = next((window for window in search_windows if stats_root.get(window, {}).get("count", 0) > 0), None)
+        return primary_window, stats_root.get(primary_window, {}) if primary_window is not None else {}
+
+    def _build_live_validation_summary_text(self, scorecard: Optional[Dict[str, Any]]) -> str:
+        primary_window, stats = self._primary_window_stats(scorecard, preferred_windows=(20, 10, 40))
+        if primary_window is None:
+            return "真实建议跟踪样本还不够，先继续积累。"
+
+        count = int(stats.get("count", 0) or 0)
+        avg_return = float(stats.get("avg_absolute_return", 0.0) or 0.0)
+        avg_relative = stats.get("avg_relative_return")
+        avg_drawdown = float(stats.get("avg_max_drawdown", 0.0) or 0.0)
+        by_action = ((scorecard or {}).get("stats") or {}).get("by_action", {})
+        add_stats = (by_action.get("增配") or {}).get(primary_window, {})
+        add_count = int(add_stats.get("count", 0) or 0)
+        add_return = float(add_stats.get("avg_absolute_return", 0.0) or 0.0)
+
+        parts = [f"真实建议跟踪近90天已兑现{primary_window}日建议{count}笔"]
+        if avg_relative is not None:
+            if float(avg_relative) >= 0:
+                parts.append(f"平均跑赢基准{avg_relative * 100:.1f}%")
+            else:
+                parts.append(f"平均落后基准{abs(float(avg_relative)) * 100:.1f}%")
+        else:
+            parts.append(f"平均收益{avg_return * 100:.1f}%")
+
+        if add_count > 0:
+            parts.append(f"增配组平均收益{add_return * 100:.1f}%")
+        parts.append(f"平均回撤{avg_drawdown * 100:.1f}%")
+        if count < 5:
+            verdict = "样本还少，先继续积累。"
+        elif avg_relative is not None and float(avg_relative) <= 0:
+            verdict = "暂时没有稳定跑赢基准，先别主动放大仓位。"
+        elif avg_drawdown <= -0.10:
+            verdict = "有收益但回撤偏大，进攻也要留撤退空间。"
+        else:
+            verdict = "这套建议近期仍有效，可以继续进攻，但继续分批。"
+        return "，".join(parts) + f"；{verdict}"
+
     def _build_validation_performance_context(
         self,
         scorecard: Optional[Dict[str, Any]],
         backtest_report: Optional[Dict[str, Any]],
+        live_scorecard: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         context = build_default_performance_context()
-        by_action = ((scorecard or {}).get("stats") or {}).get("by_action", {})
-        action_stats = by_action.get("增配", {})
-        primary_window = next(
-            (window for window in (20, 10, 40) if action_stats.get(window, {}).get("count", 0) > 0),
-            None,
+        live_window, live_stats = self._primary_window_stats(
+            live_scorecard,
+            bucket="by_action",
+            action_label="增配",
+        )
+        synthetic_window, synthetic_stats = self._primary_window_stats(
+            scorecard,
+            bucket="by_action",
+            action_label="增配",
         )
 
         gate = {"allowed": False, "reason": "样本不足"}
-        if primary_window is not None:
-            gate = gate_offensive_setup(action_stats[primary_window])
+        if live_window is not None and int(live_stats.get("count", 0) or 0) >= 5:
+            live_gate = gate_offensive_setup(live_stats)
+            gate = {
+                "allowed": bool(live_gate.get("allowed")),
+                "reason": f"真实建议{live_gate.get('reason', '')}",
+            }
+        elif synthetic_window is not None:
+            gate = gate_offensive_setup(synthetic_stats)
 
         if backtest_report and int(backtest_report.get("trade_count", 0) or 0) >= 3:
             if float(backtest_report.get("total_return", 0) or 0) <= 0:
@@ -888,16 +957,34 @@ class AnalysisService:
 
     def _build_validation_summary_text(
         self,
+        live_report: Optional[Dict[str, Any]],
         scorecard: Optional[Dict[str, Any]],
         backtest_report: Optional[Dict[str, Any]],
         walkforward_report: Optional[Dict[str, Any]],
     ) -> str:
-        overall_stats = ((scorecard or {}).get("stats") or {}).get("overall", {})
-        primary_window = next(
-            (window for window in (20, 10, 40) if overall_stats.get(window, {}).get("count", 0) > 0),
-            None,
-        )
-        stats = overall_stats.get(primary_window, {}) if primary_window is not None else {}
+        live_scorecard = (live_report or {}).get("scorecard")
+        live_window, live_stats = self._primary_window_stats(live_scorecard, preferred_windows=(20, 10, 40))
+
+        if live_window is not None and int(live_stats.get("count", 0) or 0) >= 5:
+            evidence_parts: List[str] = []
+            if (live_report or {}).get("summary_text"):
+                evidence_parts.append(str(live_report["summary_text"]).strip())
+
+            trade_count = int((backtest_report or {}).get("trade_count", 0) or 0)
+            if trade_count >= 3:
+                evidence_parts.append(
+                    f"正式回测收益{float((backtest_report or {}).get('total_return', 0.0) or 0.0) * 100:.1f}%，"
+                    f"最大回撤{float((backtest_report or {}).get('max_drawdown', 0.0) or 0.0) * 100:.1f}%，"
+                    f"交易{trade_count}笔"
+                )
+            if (walkforward_report or {}).get("segment_count", 0) > 0:
+                evidence_parts.append(
+                    f"滚动验证{walkforward_report['segment_count']}段，平均收益{walkforward_report['avg_total_return'] * 100:.1f}%"
+                )
+
+            return " 参考：".join([evidence_parts[0], "；".join(evidence_parts[1:]) + "。"]) if len(evidence_parts) > 1 else evidence_parts[0]
+
+        primary_window, stats = self._primary_window_stats(scorecard, preferred_windows=(20, 10, 40))
         count = int(stats.get("count", 0) or 0)
         avg_return = float(stats.get("avg_absolute_return", 0.0) or 0.0)
         avg_relative = stats.get("avg_relative_return")
@@ -945,14 +1032,108 @@ class AnalysisService:
             return verdict
         return f"{verdict} 参考：{'；'.join(evidence_parts)}。"
 
+    def _build_live_validation_records(
+        self,
+        swing_records: List[Dict[str, Any]],
+        close_records: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        merged: Dict[str, Dict[str, Any]] = {}
+
+        for record in sorted(close_records, key=lambda item: item.get("date", "")):
+            record_date = record.get("date")
+            if not record_date:
+                continue
+            merged.setdefault(record_date, {"date": record_date, "raw_data": None, "ai_result": None})
+            if record.get("raw_data"):
+                merged[record_date]["raw_data"] = record.get("raw_data")
+
+        for record in sorted(swing_records, key=lambda item: item.get("date", "")):
+            record_date = record.get("date")
+            if not record_date:
+                continue
+            merged.setdefault(record_date, {"date": record_date, "raw_data": None, "ai_result": None})
+            if merged[record_date].get("raw_data") is None and record.get("raw_data"):
+                merged[record_date]["raw_data"] = record.get("raw_data")
+
+            actions = []
+            for action in ((record.get("ai_result") or {}).get("actions") or []):
+                if not action.get("code"):
+                    continue
+                label = str(
+                    action.get("action_label")
+                    or action.get("conclusion")
+                    or action.get("operation")
+                    or "观察"
+                )
+                actions.append(
+                    {
+                        "code": action.get("code"),
+                        "name": action.get("name", action.get("code")),
+                        "action_label": label,
+                        "confidence": action.get("confidence", "未知"),
+                    }
+                )
+            if actions:
+                merged[record_date]["ai_result"] = {"actions": actions}
+
+        ordered = []
+        for record_date in sorted(merged):
+            record = merged[record_date]
+            stocks = ((record.get("raw_data") or {}).get("stocks") or [])
+            if stocks:
+                ordered.append(record)
+        return ordered
+
+    def _compute_live_swing_validation_report(
+        self,
+        swing_records: List[Dict[str, Any]],
+        close_records: List[Dict[str, Any]],
+        benchmark_map: Optional[Dict[str, str]] = None,
+        windows: tuple[int, ...] = (10, 20, 40),
+    ) -> Optional[Dict[str, Any]]:
+        if not swing_records or not close_records:
+            return None
+
+        live_records = self._build_live_validation_records(swing_records, close_records)
+        if not live_records:
+            return None
+
+        scorecard = build_swing_scorecard(
+            live_records,
+            benchmark_map=benchmark_map or self._build_swing_benchmark_map(close_records),
+            windows=windows,
+        )
+        if not any(
+            ((scorecard.get("stats") or {}).get("overall") or {}).get(int(window), {}).get("count", 0) > 0
+            for window in windows
+        ):
+            return None
+
+        return {
+            "scorecard": scorecard,
+            "summary_text": self._build_live_validation_summary_text(scorecard),
+        }
+
     def _compute_swing_validation_report(self, historical_records: List[Dict]) -> Optional[Dict]:
         if not historical_records:
             return None
 
         sorted_records = sorted(historical_records, key=lambda item: item.get("date", ""))
+        live_report = self._compute_live_swing_validation_report(
+            self._get_swing_report_records(days=max(len(sorted_records), 90)),
+            sorted_records,
+            benchmark_map=self._build_swing_benchmark_map(sorted_records),
+        )
         synthetic_records = self._build_synthetic_swing_records(sorted_records)
         if not synthetic_records:
-            return None
+            return {
+                "live": live_report,
+                "scorecard": None,
+                "backtest": {"summary_text": "正式回测样本不足，暂不放大解释", "total_return": 0.0, "max_drawdown": 0.0, "trade_count": 0},
+                "walkforward": {"segment_count": 0, "segments": [], "avg_total_return": 0.0},
+                "performance_context": self._build_validation_performance_context(None, None, (live_report or {}).get("scorecard")),
+                "summary_text": self._build_validation_summary_text(live_report, None, None, None),
+            }
 
         scorecard = build_swing_scorecard(
             synthetic_records,
@@ -990,62 +1171,49 @@ class AnalysisService:
             if len(synthetic_records) >= 4
             else {"segment_count": 0, "segments": [], "avg_total_return": 0.0}
         )
-        performance_context = self._build_validation_performance_context(scorecard, backtest_report)
+        performance_context = self._build_validation_performance_context(
+            scorecard,
+            backtest_report,
+            (live_report or {}).get("scorecard"),
+        )
 
         return {
+            "live": live_report,
             "scorecard": scorecard,
             "backtest": backtest_report,
             "walkforward": walkforward_report,
             "performance_context": performance_context,
-            "summary_text": self._build_validation_summary_text(scorecard, backtest_report, walkforward_report),
+            "summary_text": self._build_validation_summary_text(live_report, scorecard, backtest_report, walkforward_report),
         }
 
+    def build_validation_snapshot(self, mode: str) -> Dict[str, Any]:
+        if mode == "swing":
+            historical_records = self._get_swing_history_records(days=90)
+            validation_report = self._compute_swing_validation_report(historical_records)
+            if not validation_report:
+                return {"mode": mode, "summary_text": "中期策略统计数据不足，暂无报告。"}
+
+            lines = [validation_report.get("summary_text", "中期策略统计数据不足，暂无报告。")]
+            live_summary = ((validation_report.get("live") or {}).get("summary_text") or "").strip()
+            if live_summary:
+                lines.append(f"真实建议: {live_summary}")
+            if validation_report.get("backtest", {}).get("summary_text"):
+                lines.append(f"回测: {validation_report['backtest']['summary_text']}")
+            if validation_report.get("walkforward", {}).get("segment_count", 0) > 0:
+                lines.append(
+                    f"滚动验证: {validation_report['walkforward']['segment_count']}段，"
+                    f"平均收益{validation_report['walkforward']['avg_total_return'] * 100:.1f}%"
+                )
+
+            snapshot = {"mode": mode, **validation_report}
+            snapshot["text"] = "\n".join(lines)
+            return snapshot
+
+        return {"mode": mode, "summary_text": self._run_accuracy_report(mode=mode)}
+
     def _run_swing_accuracy_report(self) -> str:
-        historical_records = self._get_swing_history_records(days=90)
-        validation_report = self._compute_swing_validation_report(historical_records)
-        if not validation_report:
-            return "中期策略统计数据不足，暂无报告。"
-
-        scorecard = validation_report.get("scorecard") or {}
-        lines = ["📈 中期策略跟踪报告", ""]
-        for window in scorecard.get("windows", []):
-            stats = scorecard.get("stats", {}).get("overall", {}).get(window, {})
-            if stats.get("count", 0) <= 0:
-                continue
-            line = (
-                f"{window}日样本{stats['count']}，平均收益{stats['avg_absolute_return'] * 100:.1f}%"
-                f"，平均回撤{stats['avg_max_drawdown'] * 100:.1f}%"
-            )
-            if stats.get("avg_relative_return") is not None:
-                line += f"，平均超额{stats['avg_relative_return'] * 100:.1f}%"
-            lines.append(line)
-
-        for label, label_stats in scorecard.get("stats", {}).get("by_action", {}).items():
-            window_stats = next(
-                (
-                    (window, label_stats.get(window))
-                    for window in scorecard.get("windows", [])
-                    if label_stats.get(window, {}).get("count", 0) > 0
-                ),
-                None,
-            )
-            if not window_stats:
-                continue
-            window, stats = window_stats
-            action_line = f"{label}: {window}日样本{stats['count']}，平均收益{stats['avg_absolute_return'] * 100:.1f}%"
-            if stats.get("avg_relative_return") is not None:
-                action_line += f"，平均超额{stats['avg_relative_return'] * 100:.1f}%"
-            lines.append(action_line)
-
-        if validation_report.get("backtest", {}).get("summary_text"):
-            lines.append(validation_report["backtest"]["summary_text"])
-        if validation_report.get("walkforward", {}).get("segment_count", 0) > 0:
-            lines.append(
-                f"滚动验证{validation_report['walkforward']['segment_count']}段，"
-                f"平均收益{validation_report['walkforward']['avg_total_return'] * 100:.1f}%"
-            )
-
-        return "\n".join(lines)
+        snapshot = self.build_validation_snapshot("swing")
+        return snapshot.get("text") or snapshot.get("summary_text", "中期策略统计数据不足，暂无报告。")
 
     def _run_swing_question(self, question: str) -> str:
         historical_records = self._get_swing_history_records(days=90)

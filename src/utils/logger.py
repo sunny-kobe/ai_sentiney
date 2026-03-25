@@ -16,11 +16,11 @@ def setup_logger(name: str = "sentinel") -> logging.Logger:
     logger.setLevel(logging.INFO)
 
     # Avoid adding handlers multiple times
-    if logger.hasHandlers():
+    if logger.handlers:
         return logger
 
     # 1. Console Handler (with Colors)
-    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler = logging.StreamHandler(sys.stderr)
     console_handler.setLevel(logging.INFO)
     
     color_formatter = colorlog.ColoredFormatter(

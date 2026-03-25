@@ -463,6 +463,7 @@ def test_run_analysis_swing_replay_prefers_cached_context_that_matches_current_u
 
 def test_compute_swing_validation_report_summarizes_in_plain_language(monkeypatch):
     service = AnalysisService()
+    monkeypatch.setattr(service, "_get_swing_report_records", lambda days=90: [])
 
     monkeypatch.setattr(
         service,
@@ -514,6 +515,201 @@ def test_compute_swing_validation_report_summarizes_in_plain_language(monkeypatc
     assert "可以继续进攻" in report["summary_text"]
     assert "20日样本12" in report["summary_text"]
     assert "回测收益9.4%" in report["summary_text"]
+
+
+def test_compute_live_swing_validation_report_merges_swing_and_close_records():
+    service = AnalysisService()
+
+    swing_records = [
+        {
+            "date": "2026-03-20",
+            "raw_data": {
+                "stocks": [
+                    {"code": "510300", "name": "沪深300ETF", "current_price": 4.00},
+                    {"code": "159338", "name": "A500ETF", "current_price": 1.00},
+                ]
+            },
+            "ai_result": {
+                "actions": [
+                    {"code": "510300", "name": "沪深300ETF", "action_label": "增配", "confidence": "高"}
+                ]
+            },
+        }
+    ]
+    close_records = [
+        {
+            "date": "2026-03-20",
+            "raw_data": {
+                "stocks": [
+                    {"code": "510300", "name": "沪深300ETF", "current_price": 4.00},
+                    {"code": "159338", "name": "A500ETF", "current_price": 1.00},
+                ]
+            },
+            "ai_result": {"actions": []},
+        },
+        {
+            "date": "2026-03-21",
+            "raw_data": {
+                "stocks": [
+                    {"code": "510300", "name": "沪深300ETF", "current_price": 4.20, "low": 4.10},
+                    {"code": "159338", "name": "A500ETF", "current_price": 1.01, "low": 1.00},
+                ]
+            },
+            "ai_result": {"actions": []},
+        },
+        {
+            "date": "2026-03-22",
+            "raw_data": {
+                "stocks": [
+                    {"code": "510300", "name": "沪深300ETF", "current_price": 4.36, "low": 4.18},
+                    {"code": "159338", "name": "A500ETF", "current_price": 1.02, "low": 1.00},
+                ]
+            },
+            "ai_result": {"actions": []},
+        },
+    ]
+
+    report = service._compute_live_swing_validation_report(
+        swing_records,
+        close_records,
+        benchmark_map={"510300": "159338"},
+        windows=(1, 2),
+    )
+
+    assert report["scorecard"]["stats"]["overall"][1]["count"] == 1
+    assert report["scorecard"]["stats"]["by_action"]["增配"][2]["count"] == 1
+    assert report["scorecard"]["stats"]["overall"][2]["avg_relative_return"] > 0
+    assert "真实建议跟踪" in report["summary_text"]
+    assert "2日建议1笔" in report["summary_text"]
+
+
+def test_build_validation_performance_context_prefers_live_add_signals():
+    service = AnalysisService()
+
+    live_scorecard = {
+        "stats": {
+            "by_action": {
+                "增配": {
+                    20: {"count": 6, "avg_relative_return": -0.01, "avg_max_drawdown": -0.03}
+                }
+            }
+        }
+    }
+    synthetic_scorecard = {
+        "stats": {
+            "by_action": {
+                "增配": {
+                    20: {"count": 12, "avg_relative_return": 0.03, "avg_max_drawdown": -0.02}
+                }
+            }
+        }
+    }
+
+    context = service._build_validation_performance_context(
+        live_scorecard=live_scorecard,
+        scorecard=synthetic_scorecard,
+        backtest_report={"trade_count": 4, "total_return": 0.08, "max_drawdown": -0.05},
+    )
+
+    gate = context["offensive"]["pullback_resume"]
+    assert gate["allowed"] is False
+    assert "真实建议" in gate["reason"]
+
+
+def test_compute_swing_validation_report_prefers_live_summary_when_samples_are_ready(monkeypatch):
+    service = AnalysisService()
+
+    monkeypatch.setattr(service, "_get_swing_report_records", lambda days=120: [{"date": "2026-03-20"}])
+    monkeypatch.setattr(
+        service,
+        "_compute_live_swing_validation_report",
+        lambda swing_records, close_records, benchmark_map=None, windows=(10, 20, 40): {
+            "summary_text": "真实建议跟踪近90天已兑现20日建议8笔，平均跑赢基准1.6%，增配组平均收益4.2%。",
+            "scorecard": {
+                "windows": [20],
+                "stats": {
+                    "overall": {
+                        20: {
+                            "count": 8,
+                            "avg_absolute_return": 0.042,
+                            "avg_relative_return": 0.016,
+                            "avg_max_drawdown": -0.035,
+                        }
+                    },
+                    "by_action": {
+                        "增配": {
+                            20: {
+                                "count": 6,
+                                "avg_absolute_return": 0.051,
+                                "avg_relative_return": 0.021,
+                                "avg_max_drawdown": -0.031,
+                            }
+                        }
+                    },
+                },
+            },
+        },
+    )
+    monkeypatch.setattr(
+        service,
+        "_build_synthetic_swing_records",
+        lambda historical_records: [
+            {"date": "2026-03-20", "raw_data": {"stocks": [{"code": "510300"}]}, "ai_result": {"actions": [{"code": "510300"}]}},
+            {"date": "2026-03-21", "raw_data": {"stocks": [{"code": "510300"}]}, "ai_result": {"actions": [{"code": "510300"}]}},
+            {"date": "2026-03-22", "raw_data": {"stocks": [{"code": "510300"}]}, "ai_result": {"actions": [{"code": "510300"}]}},
+            {"date": "2026-03-23", "raw_data": {"stocks": [{"code": "510300"}]}, "ai_result": {"actions": [{"code": "510300"}]}},
+        ],
+    )
+    monkeypatch.setattr(
+        "src.service.analysis_service.build_swing_scorecard",
+        lambda synthetic_records, benchmark_map, windows: {
+            "windows": [20],
+            "stats": {
+                "overall": {
+                    20: {
+                        "count": 12,
+                        "avg_absolute_return": 0.031,
+                        "avg_relative_return": 0.012,
+                        "avg_max_drawdown": -0.052,
+                    }
+                },
+                "by_action": {
+                    "增配": {
+                        20: {
+                            "count": 12,
+                            "avg_absolute_return": 0.031,
+                            "avg_relative_return": 0.012,
+                            "avg_max_drawdown": -0.052,
+                        }
+                    }
+                },
+            },
+        },
+    )
+    monkeypatch.setattr(
+        "src.service.analysis_service.run_deterministic_backtest",
+        lambda synthetic_records, initial_cash, lot_size: {
+            "total_return": 0.094,
+            "max_drawdown": -0.052,
+            "trades": [{"side": "buy"}, {"side": "sell"}, {"side": "buy"}],
+        },
+    )
+    monkeypatch.setattr(
+        "src.service.analysis_service.run_walkforward_validation",
+        lambda synthetic_records, train_window, test_window, initial_cash: {
+            "segment_count": 5,
+            "segments": [],
+            "avg_total_return": 0.012,
+        },
+    )
+
+    report = service._compute_swing_validation_report(
+        [{"date": "2026-03-23", "raw_data": {"stocks": [{"code": "510300"}]}, "ai_result": {"actions": []}}]
+    )
+
+    assert report["live"]["summary_text"].startswith("真实建议跟踪")
+    assert report["summary_text"].startswith("真实建议跟踪")
+    assert report["performance_context"]["offensive"]["pullback_resume"]["allowed"] is True
 
 
 def test_collect_and_process_data_closes_data_collector(monkeypatch):

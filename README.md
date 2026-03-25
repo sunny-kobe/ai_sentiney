@@ -159,6 +159,9 @@ python -m src.main --mode swing
 # 中期主模式并推送到飞书
 python -m src.main --mode swing --publish
 
+# 直接查看中期验证快照
+python -m src.main --mode swing --validation-report
+
 # 查看中期验证摘要
 python -m src.main --ask "最近验证情况怎么样" --mode swing
 
@@ -219,6 +222,7 @@ python -m src.main --webui
 | `--publish-target {feishu,telegram}` | 推送目标（默认 feishu） |
 | `--dry-run` | 试运行，不推送；`swing` 下会直接拉实时行情做预览 |
 | `--replay` | 使用历史缓存重放分析，适合验证渲染/结构，不替代实时预览 |
+| `--validation-report` | 直接输出当前模式的验证摘要；`swing` 下会优先展示真实历史建议跟踪 |
 | `--output {text,json}` | 输出格式 |
 | `--ask "问题"` | 进入追问模式 |
 | `--date YYYY-MM-DD` | 指定日期上下文 |

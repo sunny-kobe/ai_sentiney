@@ -10,7 +10,7 @@ def _make_swing_result():
     return {
         "market_regime": "防守",
         "market_conclusion": "当前偏防守，先守住已有成果，弱势方向以收缩仓位为主。",
-        "validation_summary": "20日样本12，平均收益3.1%；回测收益9.4%，最大回撤-5.2%。",
+        "validation_summary": "真实建议跟踪近90天已兑现20日建议8笔，平均跑赢基准1.6%，增配组平均收益4.2%；这套建议近期仍有效，可以继续进攻，但继续分批。",
         "position_plan": {
             "total_exposure": "35%-50%",
             "core_target": "25%-35%",
@@ -115,6 +115,7 @@ def test_cli_swing_summary_uses_plain_language_sections():
     assert "观察池机会" in rendered
     assert "风险清单" in rendered
     assert "验证摘要" in rendered
+    assert "真实建议跟踪" in rendered
     assert "当前总仓位: 68.7%" in rendered
     assert "总仓位: 35%-50%" in rendered
     assert "优先动作: 中证2000ETF:卖出2900份，保留约2300份；军工ETF:先试仓5%-10%" in rendered
@@ -135,6 +136,7 @@ def test_telegram_swing_text_shows_action_buckets_and_risk_lines():
     assert "观察池机会" in text
     assert "军工ETF" in text
     assert "验证摘要" in text
+    assert "真实建议跟踪" in text
     assert "风险清单" in text
 
 
@@ -155,6 +157,7 @@ def test_feishu_swing_card_shows_plain_language_sections():
     assert "持仓处理" in joined
     assert "观察池机会" in joined
     assert "验证摘要" in joined
+    assert "真实建议跟踪" in joined
     assert "风险清单" in joined
 
 
