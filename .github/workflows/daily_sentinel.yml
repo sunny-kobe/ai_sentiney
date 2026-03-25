@@ -3,17 +3,17 @@ name: Sentinel Daily Briefing
 on:
   schedule:
     # UTC Time! China is UTC+8.
-    # OpenClaw 本地为主力，GitHub Actions 延后若干分钟作为兜底
-    # Morning 08:45 CST = 00:45 UTC
-    # Midday 11:40 CST = 03:40 UTC
-    # Preclose 14:48 CST = 06:48 UTC
-    # Close review 15:20 CST = 07:20 UTC
-    # Swing 20:30 CST = 12:30 UTC
-    - cron: "45 0 * * 1-5" # Morning Brief (兜底)
-    - cron: "40 3 * * 1-5" # Midday Check (兜底)
-    - cron: "48 6 * * 1-5" # Preclose Execution (主模式)
-    - cron: "20 7 * * 1-5" # Close Review (兜底)
-    - cron: "30 12 * * 1-5" # Swing Strategy (主模式)
+    # OpenClaw 本地为主力，GitHub Actions 再提前一档作为兜底
+    # Morning 08:10 CST = 00:10 UTC
+    # Midday 11:20 CST = 03:20 UTC
+    # Preclose 14:35 CST = 06:35 UTC
+    # Close review 15:05 CST = 07:05 UTC
+    # Swing 20:00 CST = 12:00 UTC
+    - cron: "10 0 * * 1-5" # Morning Brief (兜底)
+    - cron: "20 3 * * 1-5" # Midday Check (兜底)
+    - cron: "35 6 * * 1-5" # Preclose Execution (主模式)
+    - cron: "5 7 * * 1-5" # Close Review (兜底)
+    - cron: "0 12 * * 1-5" # Swing Strategy (主模式)
   workflow_dispatch:
     inputs:
       mode:
@@ -74,19 +74,19 @@ jobs:
             echo "Manual dispatch mode selected: $TARGET_MODE"
           else
             case "$SCHEDULE_EXPR" in
-              "45 0 * * 1-5")
+              "10 0 * * 1-5")
                 TARGET_MODE="morning"
                 ;;
-              "40 3 * * 1-5")
+              "20 3 * * 1-5")
                 TARGET_MODE="midday"
                 ;;
-              "48 6 * * 1-5")
+              "35 6 * * 1-5")
                 TARGET_MODE="preclose"
                 ;;
-              "20 7 * * 1-5")
+              "5 7 * * 1-5")
                 TARGET_MODE="close"
                 ;;
-              "30 12 * * 1-5")
+              "0 12 * * 1-5")
                 TARGET_MODE="swing"
                 ;;
               *)
