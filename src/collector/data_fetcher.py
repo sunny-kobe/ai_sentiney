@@ -1,6 +1,7 @@
 import asyncio
 import functools
 import re
+import sys
 import threading
 import time
 import weakref
@@ -42,22 +43,65 @@ class CircuitBreakerState:
 class DaemonThreadPoolExecutor(ThreadPoolExecutor):
     """Thread pool whose workers do not block process exit when third-party calls hang."""
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._worker_bootstrap_mode: Optional[str] = None
+        self._worker_bootstrap_logged = False
+
+    def _resolve_worker_bootstrap_mode(self) -> str:
+        if self._worker_bootstrap_mode:
+            return self._worker_bootstrap_mode
+
+        if hasattr(self, "_initializer") and hasattr(self, "_initargs"):
+            self._worker_bootstrap_mode = "legacy_initializer_args"
+        elif hasattr(self, "_create_worker_context"):
+            self._worker_bootstrap_mode = "worker_context_args"
+        else:
+            raise RuntimeError(
+                "Unsupported ThreadPoolExecutor worker bootstrap "
+                f"for Python {sys.version.split()[0]}: "
+                f"initializer={hasattr(self, '_initializer')} "
+                f"initargs={hasattr(self, '_initargs')} "
+                f"worker_context={hasattr(self, '_create_worker_context')}"
+            )
+        return self._worker_bootstrap_mode
+
+    def _build_worker_args(self):
+        def weakref_cb(_, q=self._work_queue):
+            q.put(None)
+
+        executor_ref = weakref.ref(self, weakref_cb)
+        mode = self._resolve_worker_bootstrap_mode()
+        if mode == "legacy_initializer_args":
+            worker_args = (
+                self._work_queue,
+                self._initializer,
+                self._initargs,
+            )
+        else:
+            worker_args = (
+                self._create_worker_context(),
+                self._work_queue,
+            )
+        if not self._worker_bootstrap_logged:
+            logger.info(f"DaemonThreadPoolExecutor bootstrap mode: {mode}")
+            self._worker_bootstrap_logged = True
+        return executor_ref, worker_args
+
     def _adjust_thread_count(self):
         # Follow the stdlib implementation for the current Python runtime,
         # then only add daemonization to avoid hanging process exits.
         if self._idle_semaphore.acquire(timeout=0):
             return
 
-        def weakref_cb(_, q=self._work_queue):
-            q.put(None)
-
         num_threads = len(self._threads)
         if num_threads < self._max_workers:
             thread_name = '%s_%d' % (self._thread_name_prefix or self, num_threads)
+            executor_ref, worker_args = self._build_worker_args()
             thread = threading.Thread(
                 name=thread_name,
                 target=_worker,
-                args=(weakref.ref(self, weakref_cb), self._create_worker_context(), self._work_queue),
+                args=(executor_ref, *worker_args),
             )
             thread.daemon = True
             thread.start()

@@ -115,3 +115,33 @@ def test_data_collector_uses_daemon_executor_threads(collector):
     assert future.result(timeout=1) == 1
     assert collector.executor._threads
     assert all(thread.daemon for thread in collector.executor._threads)
+
+
+def test_daemon_executor_exposes_stable_runtime_bootstrap_mode(collector):
+    mode = collector.executor._resolve_worker_bootstrap_mode()
+    assert mode in {"legacy_initializer_args", "worker_context_args"}
+    assert collector.executor._resolve_worker_bootstrap_mode() == mode
+
+
+def test_daemon_executor_builds_worker_args_for_current_runtime(collector):
+    executor = collector.executor
+    executor_ref, worker_args = executor._build_worker_args()
+
+    assert executor_ref() is executor
+
+    mode = executor._resolve_worker_bootstrap_mode()
+    if mode == "legacy_initializer_args":
+        assert worker_args == (
+            executor._work_queue,
+            executor._initializer,
+            executor._initargs,
+        )
+    else:
+        assert len(worker_args) == 2
+        assert worker_args[1] is executor._work_queue
+
+
+@pytest.mark.asyncio
+async def test_run_blocking_executes_callable_through_custom_executor(collector):
+    result = await collector._run_blocking(lambda: "ok", timeout=1)
+    assert result == "ok"
