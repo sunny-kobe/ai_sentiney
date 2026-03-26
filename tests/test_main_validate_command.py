@@ -97,8 +97,57 @@ def test_entry_point_experiment_command_prints_text(monkeypatch, capsys):
     assert "回测" in out
 
 
+def test_validate_command_outputs_diagnostics_when_group_by_is_set(monkeypatch, capsys):
+    class FakeResult:
+        def to_dict(self):
+            return {
+                "mode": "swing",
+                "summary_text": "历史验证支持继续进攻。",
+                "compact": {"verdict": "supportive"},
+                "diagnostics": {
+                    "group_by": "action",
+                    "summary_text": "最近拖累最大的组是持有组。",
+                    "groups": [{"key": "持有", "sample_count": 12}],
+                },
+            }
+
+    class FakeService:
+        def build_validation_result(self, **kwargs):
+            assert kwargs["group_by"] == "action"
+            return FakeResult()
+
+        async def run_analysis(self, **kwargs):
+            raise AssertionError("run_analysis should not be called for validate command")
+
+    monkeypatch.setattr(main_module, "setup_proxy", lambda: None)
+    monkeypatch.setattr(main_module, "AnalysisService", lambda: FakeService())
+    monkeypatch.setattr(
+        main_module.sys,
+        "argv",
+        [
+            "sentinel",
+            "validate",
+            "--mode",
+            "swing",
+            "--days",
+            "60",
+            "--group-by",
+            "action",
+            "--output",
+            "json",
+        ],
+    )
+
+    main_module.entry_point()
+
+    out = capsys.readouterr().out
+    assert '"diagnostics"' in out
+    assert '"group_by": "action"' in out
+
+
 def test_readme_mentions_validate_and_experiment_commands():
     text = Path("README.md").read_text(encoding="utf-8")
 
     assert "python -m src.main validate --mode swing" in text
+    assert "--group-by action" in text
     assert "python -m src.main experiment --preset aggressive_midterm" in text

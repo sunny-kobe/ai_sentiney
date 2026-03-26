@@ -170,6 +170,10 @@ python -m src.main --mode swing --validation-report --output json
 # 对最近 60 个交易日做正式历史验证
 python -m src.main validate --mode swing --days 60
 
+# 直接看最近哪类动作/资产在拖后腿
+python -m src.main validate --mode swing --days 60 --group-by action
+python -m src.main validate --mode swing --days 90 --group-by cluster --output json
+
 # 验证指定时间区间
 python -m src.main validate --mode swing --from 2026-03-01 --to 2026-03-25
 
@@ -178,6 +182,9 @@ python -m src.main validate --mode swing --from 2026-03-01 --to 2026-03-25 --cod
 
 # 用真实持仓 + 观察池做中期实验
 python -m src.main experiment --preset aggressive_midterm --mode swing
+
+# 给实验结果追加分组诊断
+python -m src.main experiment --preset aggressive_midterm --mode swing --group-by action
 
 # 查看中期验证摘要
 python -m src.main --ask "最近验证情况怎么样" --mode swing

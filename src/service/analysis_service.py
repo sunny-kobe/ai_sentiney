@@ -1259,6 +1259,7 @@ class AnalysisService:
         date_to: Optional[str] = None,
         codes: Optional[List[str]] = None,
         preset: Optional[str] = None,
+        group_by: Optional[str] = None,
     ):
         return self.validation_service.build_validation_result(
             mode=mode,
@@ -1267,6 +1268,7 @@ class AnalysisService:
             date_to=date_to,
             codes=codes,
             preset=preset,
+            group_by=group_by,
         )
 
     def _run_swing_accuracy_report(self) -> str:
