@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Mapping
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
 
 CONFIDENCE_ORDER = {
@@ -34,6 +34,55 @@ def _degrade_action(action_label: str) -> str:
     return DOWNGRADE_MAP.get(str(action_label or "").strip(), str(action_label or "").strip())
 
 
+def _parse_target_weight_range(value: Any, action_label: str) -> Optional[Tuple[int, int]]:
+    raw_value = value
+    if raw_value is None:
+        default_map = {
+            "增配": (20, 20),
+            "减配": (5, 5),
+            "回避": (0, 0),
+        }
+        return default_map.get(str(action_label or "").strip())
+
+    text = str(raw_value).replace("%", "").strip()
+    if not text:
+        return None
+    if "-" in text:
+        start, end = text.split("-", 1)
+        return int(float(start)), int(float(end))
+    number = int(float(text))
+    return number, number
+
+
+def _format_target_weight_range(weight_range: Optional[Tuple[int, int]]) -> str:
+    if not weight_range:
+        return "0%"
+    low, high = max(int(weight_range[0]), 0), max(int(weight_range[1]), 0)
+    if high <= 0:
+        return "0%"
+    if low == high:
+        return f"{high}%"
+    return f"{low}%-{high}%"
+
+
+def _scale_weight_range(weight_range: Optional[Tuple[int, int]], factor: float) -> Optional[Tuple[int, int]]:
+    if weight_range is None:
+        return None
+    low, high = weight_range
+    return max(int(round(low * factor)), 0), max(int(round(high * factor)), 0)
+
+
+def _current_shares(action: Mapping[str, Any]) -> int:
+    return int(action.get("current_shares", action.get("shares", 0)) or 0)
+
+
+def _watchlist_rank(action: Mapping[str, Any]) -> tuple:
+    confidence = _confidence_rank(str(action.get("confidence", "") or ""))
+    weight_range = _parse_target_weight_range(action.get("target_weight") or action.get("target_weight_range"), str(action.get("action_label", "") or ""))
+    top_weight = weight_range[1] if weight_range else 0
+    return top_weight, confidence, str(action.get("code", ""))
+
+
 def apply_candidate_mutations(
     actions: Iterable[Mapping[str, Any]],
     *,
@@ -48,6 +97,15 @@ def apply_candidate_mutations(
     confidence_floor = _confidence_rank(confidence_min) if confidence_min else 0
     blocked_clusters = _parse_blocklist(rule_overrides.get("cluster_blocklist"))
     degrade_holds_in_defense = str(rule_overrides.get("hold_in_defense", "") or "").strip() == "degrade"
+    core_only = str(portfolio_overrides.get("core_only", "") or "").strip()
+    risk_profile = str(portfolio_overrides.get("risk_profile", "") or "").strip().lower()
+    watchlist_limit = int(portfolio_overrides.get("watchlist_limit", 0) or 0)
+
+    risk_factor = 1.0
+    if risk_profile == "balanced":
+        risk_factor = 0.8
+    elif risk_profile == "aggressive":
+        risk_factor = 1.15
 
     mutated: List[Dict[str, Any]] = []
     for action in actions:
@@ -62,5 +120,25 @@ def apply_candidate_mutations(
             and str(item.get("action_label", "") or "") == "持有"
         ):
             item["action_label"] = _degrade_action(str(item.get("action_label", "") or ""))
+        target_weight = item.get("target_weight") or item.get("target_weight_range")
+        weight_range = _parse_target_weight_range(target_weight, str(item.get("action_label", "") or ""))
+        if core_only and str(item.get("cluster", "") or "") != core_only:
+            weight_range = (0, 0)
+        weight_range = _scale_weight_range(weight_range, risk_factor)
+        item["target_weight"] = _format_target_weight_range(weight_range)
         mutated.append(item)
+
+    if watchlist_limit > 0:
+        watchlist_items = [item for item in mutated if _current_shares(item) <= 0]
+        keep_codes = {
+            item["code"]
+            for item in sorted(watchlist_items, key=_watchlist_rank, reverse=True)[:watchlist_limit]
+        }
+        for item in mutated:
+            if _current_shares(item) > 0:
+                continue
+            if item.get("code") in keep_codes:
+                continue
+            item["target_weight"] = "0%"
+
     return mutated

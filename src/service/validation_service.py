@@ -127,6 +127,8 @@ class ValidationService:
                     "confidence": action.get("confidence"),
                     "target_weight": action.get("target_weight"),
                     "target_weight_range": action.get("target_weight_range"),
+                    "shares": int(action.get("shares", 0) or 0),
+                    "current_shares": int(action.get("current_shares", action.get("shares", 0)) or 0),
                     "cluster": action.get("cluster")
                     or infer_cluster(stock_map.get(str(action.get("code", "") or ""), action)),
                     "market_regime": market_regime,

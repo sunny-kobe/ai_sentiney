@@ -116,3 +116,34 @@ def test_synthetic_swing_records_keep_target_weight_for_hold_actions(monkeypatch
     synthetic = service._build_synthetic_swing_records(records)
 
     assert synthetic[0]["ai_result"]["actions"][0]["target_weight"] == "35%-45%"
+
+
+def test_synthetic_swing_records_keep_share_metadata_for_lab_mutations(monkeypatch):
+    service = ValidationService(_FakeDB(), config={"portfolio_state": {"lot_size": 100}})
+
+    monkeypatch.setattr(
+        "src.service.validation_service.build_swing_report",
+        lambda report_input, context_window, analysis_date: {
+            "market_regime": "进攻",
+            "actions": [
+                {
+                    "code": "510300",
+                    "name": "沪深300ETF",
+                    "action_label": "持有",
+                    "confidence": "高",
+                    "target_weight": "35%-45%",
+                    "shares": 600,
+                    "current_shares": 600,
+                }
+            ]
+        },
+    )
+
+    records = [
+        {"date": "2026-03-24", "raw_data": {"stocks": [{"code": "510300", "name": "沪深300ETF", "close": 10.0}]}, "ai_result": {}}
+    ]
+
+    synthetic = service._build_synthetic_swing_records(records)
+
+    assert synthetic[0]["ai_result"]["actions"][0]["shares"] == 600
+    assert synthetic[0]["ai_result"]["actions"][0]["current_shares"] == 600

@@ -34,3 +34,44 @@ def test_apply_candidate_mutations_filters_low_confidence_and_blocked_clusters()
 
     kept_codes = [item["code"] for item in mutated]
     assert kept_codes == ["510300"]
+
+
+def test_apply_candidate_mutations_enforces_core_only_and_balanced_risk_profile():
+    actions = [
+        {"code": "510300", "action_label": "持有", "market_regime": "进攻", "cluster": "broad_beta", "confidence": "高", "target_weight": "40%-50%", "shares": 600},
+        {"code": "512480", "action_label": "持有", "market_regime": "进攻", "cluster": "semiconductor", "confidence": "高", "target_weight": "30%-40%", "shares": 500},
+    ]
+
+    mutated = apply_candidate_mutations(
+        actions,
+        rule_overrides={},
+        parameter_overrides={},
+        portfolio_overrides={"core_only": "broad_beta", "risk_profile": "balanced"},
+    )
+
+    broad = next(item for item in mutated if item["code"] == "510300")
+    semi = next(item for item in mutated if item["code"] == "512480")
+
+    assert broad["target_weight"] == "32%-40%"
+    assert semi["target_weight"] == "0%"
+
+
+def test_apply_candidate_mutations_limits_watchlist_candidates():
+    actions = [
+        {"code": "510300", "action_label": "持有", "market_regime": "进攻", "cluster": "broad_beta", "confidence": "高", "target_weight": "35%-45%", "shares": 600},
+        {"code": "512480", "action_label": "增配", "market_regime": "进攻", "cluster": "semiconductor", "confidence": "高", "target_weight": "12%-18%", "shares": 0},
+        {"code": "159819", "action_label": "增配", "market_regime": "进攻", "cluster": "ai", "confidence": "中", "target_weight": "5%-8%", "shares": 0},
+    ]
+
+    mutated = apply_candidate_mutations(
+        actions,
+        rule_overrides={},
+        parameter_overrides={},
+        portfolio_overrides={"watchlist_limit": "1"},
+    )
+
+    semi = next(item for item in mutated if item["code"] == "512480")
+    ai = next(item for item in mutated if item["code"] == "159819")
+
+    assert semi["target_weight"] == "12%-18%"
+    assert ai["target_weight"] == "0%"

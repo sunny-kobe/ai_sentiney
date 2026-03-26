@@ -1,6 +1,22 @@
 from src.service.strategy_lab_service import StrategyLabService
 
 
+def test_strategy_lab_service_merges_risk_profile_into_portfolio_overrides():
+    service = StrategyLabService(db=None, config={})
+
+    merged = service._merge_overrides(
+        {
+            "rule_overrides": {},
+            "parameter_overrides": {},
+            "portfolio_overrides": {},
+        },
+        {"risk_profile": "balanced", "watchlist_limit": "2"},
+    )
+
+    assert merged["portfolio_overrides"] == {"risk_profile": "balanced", "watchlist_limit": "2"}
+    assert merged["rule_overrides"] == {}
+
+
 def test_strategy_lab_service_returns_baseline_candidate_and_winner(monkeypatch):
     service = StrategyLabService(db=None, config={})
 

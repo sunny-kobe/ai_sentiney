@@ -29,7 +29,7 @@ class StrategyLabService:
                 rule_overrides[key] = value
             elif key in {"lookback_window", "drawdown_limit"}:
                 parameter_overrides[key] = value
-            elif key in {"core_only", "watchlist_limit"}:
+            elif key in {"core_only", "risk_profile", "watchlist_limit"}:
                 portfolio_overrides[key] = value
             else:
                 rule_overrides[key] = value
