@@ -97,6 +97,8 @@ def run_deterministic_backtest(
             total_value = _portfolio_value(cash, positions, current_bars)
             target_weight = float(order["target_weight"])
             fill_price = _trade_price(stock, side="buy" if target_weight > 0 else "sell", slippage_rate=slippage_rate)
+            if fill_price <= 0:
+                continue
             target_value = total_value * target_weight
             target_shares = _lot_round(target_value / fill_price, lot_size)
 

@@ -59,3 +59,22 @@ def test_build_orders_from_actions_supports_action_defaults_without_target_weigh
     assert orders[0]["code"] == "512480"
     assert orders[0]["target_weight"] == pytest.approx(0.2)
 
+
+def test_run_deterministic_backtest_skips_orders_without_tradable_price():
+    records = [
+        _record(
+            "2026-03-25",
+            [{"code": "159338", "name": "中证A500ETF", "open": 10.0, "current_price": 10.0, "close": 10.0}],
+            [{"code": "159338", "name": "中证A500ETF", "action_label": "增配", "target_weight": "30%"}],
+        ),
+        _record(
+            "2026-03-26",
+            [{"code": "159338", "name": "中证A500ETF", "open": None, "current_price": 0.0, "close": None}],
+            [],
+        ),
+    ]
+
+    result = run_deterministic_backtest(records, initial_cash=10_000, slippage_rate=0.0, lot_size=100)
+
+    assert result["trades"] == []
+    assert result["cash"] == 10_000
