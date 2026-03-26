@@ -27,6 +27,14 @@ from src.backtest.walkforward import run_walkforward_validation
 from src.service.strategy_lab_service import StrategyLabService
 from src.service.validation_service import ValidationService
 
+
+SWING_LAB_PRESETS = (
+    "aggressive_trend_guard",
+    "aggressive_leader_focus",
+    "aggressive_core_rotation",
+)
+
+
 class AnalysisService:
     def __init__(self):
         self.config = ConfigLoader().config
@@ -448,6 +456,7 @@ class AnalysisService:
                         analysis_result["swing_scorecard"] = validation_report.get("scorecard")
                     analysis_result["validation_report"] = validation_report
                     analysis_result["validation_compact"] = validation_report.get("compact")
+                analysis_result["lab_hint"] = self._build_swing_lab_hint()
                 analysis_result.setdefault("summary", analysis_result.get("market_conclusion", ""))
                 analysis_result.setdefault("quality_status", "normal")
                 analysis_result.setdefault("quality_issues", [])
@@ -1301,6 +1310,36 @@ class AnalysisService:
     def _run_swing_accuracy_report(self) -> str:
         snapshot = self.build_validation_snapshot("swing")
         return snapshot.get("text") or snapshot.get("summary_text", "中期策略统计数据不足，暂无报告。")
+
+    def _build_swing_lab_hint(self) -> Optional[Dict[str, Any]]:
+        best_hint: Optional[Dict[str, Any]] = None
+        best_key: Optional[tuple[float, int]] = None
+        for preset in SWING_LAB_PRESETS:
+            result = self.build_lab_result(mode="swing", preset=preset)
+            payload = result.to_dict(detail="compact") if hasattr(result, "to_dict") else dict(result or {})
+            summary = dict(payload.get("summary") or {})
+            diff = dict(payload.get("diff") or {})
+            score_delta = round(
+                float(summary.get("candidate_score", 0.0) or 0.0)
+                - float(summary.get("baseline_score", 0.0) or 0.0),
+                4,
+            )
+            candidate_trade_count = int(summary.get("candidate_trade_count", 0) or 0)
+            hint = {
+                "preset": payload.get("preset") or preset,
+                "winner": payload.get("winner", "baseline"),
+                "summary_text": payload.get("summary_text", ""),
+                "score_delta": score_delta,
+                "trade_count_delta": int(diff.get("trade_count_delta", 0) or 0),
+                "candidate_trade_count": candidate_trade_count,
+                "total_return_delta": float(diff.get("total_return_delta", 0.0) or 0.0),
+                "max_drawdown_delta": float(diff.get("max_drawdown_delta", 0.0) or 0.0),
+            }
+            ranking_key = (score_delta, -candidate_trade_count)
+            if best_key is None or ranking_key > best_key:
+                best_key = ranking_key
+                best_hint = hint
+        return best_hint
 
     def _run_swing_question(self, question: str) -> str:
         historical_records = self._get_swing_history_records(days=90)

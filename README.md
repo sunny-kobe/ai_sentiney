@@ -71,6 +71,7 @@ python -m src.main --mode swing
 
 - 四种模式：`swing` / `morning` / `midday` / `close`
 - 中期主模式：`swing` 直接给出 `增配 / 持有 / 减配 / 回避 / 观察`
+- `swing` 推送会额外附带一条 `实验提示`，自动比较激进中线 preset，告诉你当前哪组实验更值得参考
 - 持仓优先：围绕真实 `portfolio` 和少量 `watchlist` 生成中长期动作
 - 多源容灾采集：单一数据源异常时自动切换
 - 指标引擎：MA、MACD、RSI、BOLL、KDJ、ATR、OBV 等

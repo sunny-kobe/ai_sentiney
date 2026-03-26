@@ -22,6 +22,18 @@ def _build_validation_hint(data: Dict[str, Any]) -> str:
     )
 
 
+def _build_lab_hint(data: Dict[str, Any]) -> str:
+    hint = data.get("lab_hint") or {}
+    if not hint:
+        return ""
+    return (
+        f"实验提示: {hint.get('preset', 'unknown')} | {hint.get('summary_text', '')}\n"
+        f"分数差: {float(hint.get('score_delta', 0.0) or 0.0):.2f}"
+        f" | 交易变化: {int(hint.get('trade_count_delta', 0) or 0)}"
+        f" | 候选交易: {int(hint.get('candidate_trade_count', 0) or 0)}笔"
+    )
+
+
 class TelegramClient:
     def __init__(self):
         self.config = ConfigLoader().config
@@ -146,6 +158,9 @@ class TelegramClient:
         validation_hint = _build_validation_hint(data)
         if validation_hint:
             lines.append(validation_hint)
+        lab_hint = _build_lab_hint(data)
+        if lab_hint:
+            lines.append(lab_hint)
         lines.extend(
             [
                 "账户动作:",

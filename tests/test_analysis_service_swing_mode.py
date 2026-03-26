@@ -89,6 +89,111 @@ def test_run_analysis_swing_mode_uses_deterministic_report_without_gemini(monkey
     assert captured["validation_report"]["backtest"]["summary_text"].startswith("回测收益")
 
 
+def test_build_swing_lab_hint_selects_best_preset_by_score_delta(monkeypatch):
+    service = AnalysisService()
+    calls = []
+
+    payloads = {
+        "aggressive_trend_guard": {
+            "preset": "aggressive_trend_guard",
+            "winner": "baseline",
+            "summary_text": "baseline 更优",
+            "summary": {"baseline_score": 2.0, "candidate_score": 1.5, "candidate_trade_count": 40},
+            "diff": {"trade_count_delta": -10, "total_return_delta": -0.01, "max_drawdown_delta": -0.005},
+        },
+        "aggressive_leader_focus": {
+            "preset": "aggressive_leader_focus",
+            "winner": "candidate",
+            "summary_text": "candidate 更优",
+            "summary": {"baseline_score": 1.0, "candidate_score": 4.2, "candidate_trade_count": 18},
+            "diff": {"trade_count_delta": -60, "total_return_delta": 0.08, "max_drawdown_delta": 0.04},
+        },
+        "aggressive_core_rotation": {
+            "preset": "aggressive_core_rotation",
+            "winner": "candidate",
+            "summary_text": "candidate 更优",
+            "summary": {"baseline_score": 0.8, "candidate_score": 2.6, "candidate_trade_count": 12},
+            "diff": {"trade_count_delta": -70, "total_return_delta": 0.05, "max_drawdown_delta": 0.03},
+        },
+    }
+
+    class _FakeResult:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def to_dict(self, detail="compact"):
+            assert detail == "compact"
+            return self._payload
+
+    monkeypatch.setattr(
+        service,
+        "build_lab_result",
+        lambda **kwargs: calls.append(kwargs["preset"]) or _FakeResult(payloads[kwargs["preset"]]),
+    )
+
+    hint = service._build_swing_lab_hint()
+
+    assert calls == ["aggressive_trend_guard", "aggressive_leader_focus", "aggressive_core_rotation"]
+    assert hint["preset"] == "aggressive_leader_focus"
+    assert hint["winner"] == "candidate"
+    assert hint["score_delta"] == 3.2
+    assert hint["candidate_trade_count"] == 18
+
+
+def test_run_analysis_swing_mode_injects_lab_hint(monkeypatch, tmp_path):
+    service = AnalysisService()
+    service.data_path = tmp_path / "latest_context.json"
+
+    async def fake_collect(_portfolio):
+        return _make_swing_input()
+
+    monkeypatch.setattr("src.service.analysis_service.should_run_market_report", lambda **kwargs: {"should_run": True})
+    monkeypatch.setattr(service, "collect_and_process_data", fake_collect)
+    monkeypatch.setattr(service, "_get_swing_history_records", lambda days=90: [])
+    monkeypatch.setattr(
+        service,
+        "_compute_swing_validation_report",
+        lambda historical_records: {
+            "scorecard": None,
+            "backtest": {"summary_text": "样本不足，暂无正式回测"},
+            "performance_context": {"offensive": {"pullback_resume": {"allowed": False, "reason": "样本不足"}}},
+            "summary_text": "样本不足，暂无正式回测",
+        },
+    )
+    monkeypatch.setattr(
+        "src.service.analysis_service.build_swing_report",
+        lambda ai_input, historical_records, analysis_date: {
+            "mode": "swing",
+            "market_regime": "均衡",
+            "market_conclusion": "当前偏均衡。",
+            "position_plan": {"total_exposure": "75%-90%"},
+            "portfolio_actions": {"增配": [], "持有": [], "减配": [], "回避": [], "观察": []},
+            "actions": [],
+            "technical_evidence": [],
+        },
+    )
+    monkeypatch.setattr(
+        service,
+        "_build_swing_lab_hint",
+        lambda: {
+            "preset": "aggressive_leader_focus",
+            "winner": "candidate",
+            "summary_text": "candidate 更优",
+            "score_delta": 3.2,
+            "trade_count_delta": -60,
+            "candidate_trade_count": 18,
+            "total_return_delta": 0.08,
+            "max_drawdown_delta": 0.04,
+        },
+    )
+    monkeypatch.setattr(service.db, "save_record", lambda **_kwargs: None)
+
+    result = asyncio.run(service.run_analysis(mode="swing"))
+
+    assert result["lab_hint"]["preset"] == "aggressive_leader_focus"
+    assert result["lab_hint"]["score_delta"] == 3.2
+
+
 def test_run_analysis_swing_mode_loads_close_history_for_scorecard(monkeypatch, tmp_path):
     service = AnalysisService()
     service.data_path = tmp_path / "latest_context.json"

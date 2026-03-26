@@ -22,6 +22,16 @@ def _make_swing_result():
             "offensive_allowed": True,
             "offensive_reason": "真实建议近期进攻统计仍有效，正式回测未见明显恶化",
         },
+        "lab_hint": {
+            "preset": "aggressive_leader_focus",
+            "winner": "candidate",
+            "summary_text": "candidate 更优；回测收益变化10.4%，最大回撤变化10.5%，交易笔数变化-181。",
+            "score_delta": 6.834,
+            "trade_count_delta": -181,
+            "candidate_trade_count": 18,
+            "total_return_delta": 0.1038,
+            "max_drawdown_delta": 0.1048,
+        },
         "position_plan": {
             "total_exposure": "35%-50%",
             "core_target": "25%-35%",
@@ -127,6 +137,8 @@ def test_cli_swing_summary_uses_plain_language_sections():
     assert "风险清单" in rendered
     assert "验证摘要" in rendered
     assert "真实建议跟踪" in rendered
+    assert "实验提示" in rendered
+    assert "aggressive_leader_focus" in rendered
     assert "当前总仓位: 68.7%" in rendered
     assert "总仓位: 35%-50%" in rendered
     assert "优先动作: 中证2000ETF:卖出2900份，保留约2300份；军工ETF:先试仓5%-10%" in rendered
@@ -149,6 +161,8 @@ def test_telegram_swing_text_shows_action_buckets_and_risk_lines():
     assert "验证摘要" in text
     assert "真实建议跟踪" in text
     assert "真实样本: 20日8笔 | 历史样本: 20日12笔 | 进攻权限: 允许（真实建议近期进攻统计仍有效，正式回测未见明显恶化）" in text
+    assert "实验提示" in text
+    assert "aggressive_leader_focus" in text
     assert "风险清单" in text
 
 
@@ -171,6 +185,8 @@ def test_feishu_swing_card_shows_plain_language_sections():
     assert "验证摘要" in joined
     assert "真实建议跟踪" in joined
     assert "真实样本: 20日8笔 | 历史样本: 20日12笔 | 进攻权限: 允许（真实建议近期进攻统计仍有效，正式回测未见明显恶化）" in joined
+    assert "实验提示" in joined
+    assert "aggressive_leader_focus" in joined
     assert "风险清单" in joined
 
 
