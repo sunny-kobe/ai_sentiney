@@ -57,6 +57,7 @@ class ValidationResult:
     compact: Dict[str, Any]
     as_of_date: Optional[str] = None
     text: Optional[str] = None
+    diagnostics: Optional[Dict[str, Any]] = None
     details: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -69,6 +70,8 @@ class ValidationResult:
             payload["as_of_date"] = self.as_of_date
         if self.text:
             payload["text"] = self.text
+        if self.diagnostics:
+            payload["diagnostics"] = dict(self.diagnostics)
         if self.details:
             payload["details"] = self.details
         return payload

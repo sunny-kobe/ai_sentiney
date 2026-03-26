@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from collections import defaultdict
+from typing import Any, Dict, List, Optional, Tuple
 
 from src.backtest.engine import run_deterministic_backtest
 from src.backtest.walkforward import run_walkforward_validation
 from src.processor.swing_tracker import build_swing_scorecard
 from src.service.performance_gate import build_default_performance_context, gate_offensive_setup
 from src.service.portfolio_advisor import build_investor_snapshot
-from src.service.swing_strategy import build_swing_report, resolve_benchmark_code
+from src.service.swing_strategy import build_swing_report, infer_cluster, resolve_benchmark_code
+from src.validation.diagnostics import DiagnosisRequest, DiagnosisSummary, DiagnosticGroup
 from src.validation.history import slice_records
 from src.validation.models import ValidationRequest, ValidationResult
 
@@ -111,6 +113,12 @@ class ValidationService:
                 context_window,
                 analysis_date=record.get("date") or datetime.now().strftime("%Y-%m-%d"),
             )
+            stock_map = {
+                str(stock.get("code", "") or ""): stock
+                for stock in (raw_data.get("stocks") or [])
+                if stock.get("code")
+            }
+            market_regime = str(swing_report.get("market_regime", "unknown") or "unknown")
             actions = [
                 {
                     "code": action.get("code"),
@@ -119,6 +127,9 @@ class ValidationService:
                     "confidence": action.get("confidence"),
                     "target_weight": action.get("target_weight"),
                     "target_weight_range": action.get("target_weight_range"),
+                    "cluster": action.get("cluster")
+                    or infer_cluster(stock_map.get(str(action.get("code", "") or ""), action)),
+                    "market_regime": market_regime,
                 }
                 for action in swing_report.get("actions", [])
                 if action.get("code") and action.get("action_label")
@@ -130,7 +141,7 @@ class ValidationService:
                 {
                     "date": record.get("date"),
                     "raw_data": raw_data,
-                    "ai_result": {"actions": actions},
+                    "ai_result": {"actions": actions, "market_regime": market_regime},
                 }
             )
 
@@ -350,6 +361,200 @@ class ValidationService:
             "offensive_reason": str(offensive_gate.get("reason", "样本不足")),
         }
 
+    def _build_diagnostic_rows(
+        self,
+        *,
+        evaluations: List[Dict[str, Any]],
+        metadata_by_observation: Dict[Tuple[str, str], Dict[str, Any]],
+        window: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        rows: List[Dict[str, Any]] = []
+        for evaluation in evaluations or []:
+            windows = evaluation.get("windows") or {}
+            code = str(evaluation.get("code", "") or "")
+            fallback_meta = {
+                "cluster": infer_cluster({"code": code, "name": evaluation.get("name", "")}),
+                "market_regime": "unknown",
+            }
+            for raw_window, metrics in windows.items():
+                if not isinstance(metrics, dict):
+                    continue
+                current_window = int(raw_window)
+                if window is not None and current_window != int(window):
+                    continue
+                entry_date = str(metrics.get("entry_date", "") or "")
+                meta = metadata_by_observation.get((code, entry_date)) or fallback_meta
+                rows.append(
+                    {
+                        "code": code,
+                        "name": str(evaluation.get("name", "") or ""),
+                        "action_label": str(evaluation.get("action_label", "") or ""),
+                        "confidence": str(evaluation.get("confidence", "未知") or "未知"),
+                        "cluster": str(meta.get("cluster", fallback_meta["cluster"]) or fallback_meta["cluster"]),
+                        "market_regime": str(meta.get("market_regime", "unknown") or "unknown"),
+                        "window": current_window,
+                        "entry_date": entry_date,
+                        "absolute_return": float(metrics.get("absolute_return", 0.0) or 0.0),
+                        "relative_return": float(metrics.get("relative_return", 0.0) or 0.0),
+                        "max_drawdown": float(metrics.get("max_drawdown", 0.0) or 0.0),
+                    }
+                )
+        return rows
+
+    def _aggregate_diagnostics(self, rows: List[Dict[str, Any]], group_by: str) -> Dict[str, Any]:
+        group_field = {
+            "action": "action_label",
+            "cluster": "cluster",
+            "regime": "market_regime",
+            "confidence": "confidence",
+        }.get(str(group_by or "").strip().lower(), group_by)
+        grouped: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        for row in rows or []:
+            key = str(row.get(group_field, "unknown") or "unknown")
+            grouped[key].append(row)
+
+        groups: List[Dict[str, Any]] = []
+        for key, items in grouped.items():
+            sample_count = len(items)
+            groups.append(
+                {
+                    "key": key,
+                    "sample_count": sample_count,
+                    "avg_absolute_return": round(
+                        sum(float(item.get("absolute_return", 0.0) or 0.0) for item in items) / sample_count, 4
+                    ),
+                    "avg_relative_return": round(
+                        sum(float(item.get("relative_return", 0.0) or 0.0) for item in items) / sample_count, 4
+                    ),
+                    "avg_max_drawdown": round(
+                        sum(float(item.get("max_drawdown", 0.0) or 0.0) for item in items) / sample_count, 4
+                    ),
+                }
+            )
+
+        groups.sort(
+            key=lambda item: (
+                float(item.get("avg_relative_return", 0.0)),
+                float(item.get("avg_absolute_return", 0.0)),
+                float(item.get("avg_max_drawdown", 0.0)),
+                str(item.get("key", "")),
+            )
+        )
+        return {"group_by": group_by, "groups": groups}
+
+    def _build_diagnostic_metadata(
+        self,
+        synthetic_records: List[Dict[str, Any]],
+    ) -> Dict[Tuple[str, str], Dict[str, Any]]:
+        metadata: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        for record in synthetic_records or []:
+            record_date = str(record.get("date", "") or "")
+            raw_stock_map = {
+                str(stock.get("code", "") or ""): stock
+                for stock in (((record.get("raw_data") or {}).get("stocks")) or [])
+                if stock.get("code")
+            }
+            ai_result = record.get("ai_result") or {}
+            market_regime = str(ai_result.get("market_regime", "unknown") or "unknown")
+            for action in (ai_result.get("actions") or []):
+                code = str(action.get("code", "") or "")
+                if not code:
+                    continue
+                stock = raw_stock_map.get(code) or {"code": code, "name": action.get("name", "")}
+                metadata[(code, record_date)] = {
+                    "cluster": str(action.get("cluster") or infer_cluster(stock)),
+                    "market_regime": str(action.get("market_regime", market_regime) or market_regime),
+                }
+        return metadata
+
+    def _build_grouped_diagnostics(
+        self,
+        *,
+        scorecard: Optional[Dict[str, Any]],
+        synthetic_records: List[Dict[str, Any]],
+        diagnosis_request: DiagnosisRequest,
+    ) -> Optional[Dict[str, Any]]:
+        if not diagnosis_request.group_by:
+            return None
+
+        primary_window = diagnosis_request.primary_window
+        if primary_window is None:
+            primary_window, _ = self._primary_window_stats(scorecard, preferred_windows=(20, 10, 40))
+        if primary_window is None:
+            return DiagnosisSummary(
+                group_by=diagnosis_request.group_by,
+                primary_window=None,
+                summary_text="分组诊断样本不足，暂时无法定位主要拖累来源。",
+            ).to_dict()
+
+        rows = self._build_diagnostic_rows(
+            evaluations=list((scorecard or {}).get("evaluations") or []),
+            metadata_by_observation=self._build_diagnostic_metadata(synthetic_records),
+            window=primary_window,
+        )
+        aggregate = self._aggregate_diagnostics(rows, group_by=diagnosis_request.group_by)
+        groups = [DiagnosticGroup(**item) for item in (aggregate.get("groups") or [])]
+        summary = DiagnosisSummary(
+            group_by=diagnosis_request.group_by,
+            primary_window=primary_window,
+            summary_text=self._build_diagnosis_summary(
+                group_by=diagnosis_request.group_by,
+                primary_window=primary_window,
+                groups=[group.to_dict() for group in groups],
+            ),
+            groups=groups,
+        ).to_dict()
+        if groups:
+            summary["top_drag"] = groups[0].to_dict()
+            summary["top_strength"] = groups[-1].to_dict()
+        return summary
+
+    def _build_diagnosis_summary(
+        self,
+        *,
+        group_by: str,
+        primary_window: int,
+        groups: List[Dict[str, Any]],
+    ) -> str:
+        if not groups:
+            return f"{primary_window}日分组诊断样本不足。"
+
+        sorted_groups = sorted(
+            groups,
+            key=lambda item: (
+                float(item.get("avg_relative_return", 0.0)),
+                float(item.get("avg_absolute_return", 0.0)),
+                float(item.get("avg_max_drawdown", 0.0)),
+                str(item.get("key", "")),
+            ),
+        )
+        top_drag = sorted_groups[0]
+        strongest = sorted_groups[-1]
+        drag_key = str(top_drag.get("key", "") or "")
+        strong_key = str(strongest.get("key", "") or "")
+        offensive_keys = {"增配", "持有", "进攻"}
+        defensive_keys = {"减配", "回避", "防守", "撤退"}
+        if drag_key in offensive_keys:
+            bias_text = "这更像进攻侧失误，说明加仓或持有偏激进。"
+        elif drag_key in defensive_keys:
+            bias_text = "这更像防守侧失误，说明减仓或回避偏慢。"
+        elif strong_key in defensive_keys:
+            bias_text = "相对更稳的是防守侧，说明问题更像退出不够快。"
+        elif strong_key in offensive_keys:
+            bias_text = "相对更稳的是进攻侧，说明问题更像过早收缩。"
+        elif float(top_drag.get("avg_max_drawdown", 0.0) or 0.0) <= -0.08:
+            bias_text = "主要问题偏向进攻侧承受了过多波动。"
+        else:
+            bias_text = "暂时还看不出明显的进攻或防守偏差。"
+        return (
+            f"{primary_window}日按{group_by}分组看，主要拖累来自{top_drag.get('key')}组"
+            f"（样本{int(top_drag.get('sample_count', 0) or 0)}，"
+            f"平均收益{float(top_drag.get('avg_absolute_return', 0.0) or 0.0) * 100:.1f}%）；"
+            f"相对最强的是{strongest.get('key')}组"
+            f"（平均收益{float(strongest.get('avg_absolute_return', 0.0) or 0.0) * 100:.1f}%）。"
+            f"{bias_text}"
+        )
+
     def _build_live_validation_records(
         self,
         swing_records: List[Dict[str, Any]],
@@ -544,6 +749,7 @@ class ValidationService:
         date_to: Optional[str] = None,
         codes: Optional[List[str]] = None,
         preset: Optional[str] = None,
+        group_by: Optional[str] = None,
     ) -> ValidationResult:
         request = ValidationRequest(
             mode=mode,
@@ -553,6 +759,7 @@ class ValidationService:
             codes=codes or [],
             preset=preset,
         )
+        diagnosis_request = DiagnosisRequest(group_by=group_by)
         request = self._apply_request_preset(request)
         if request.mode != "swing":
             return ValidationResult(
@@ -580,6 +787,11 @@ class ValidationService:
             default="",
         ) or None
         compact = self._build_compact_validation_snapshot(validation_report)
+        diagnostics = self._build_grouped_diagnostics(
+            scorecard=validation_report.get("scorecard"),
+            synthetic_records=self._build_synthetic_swing_records(sorted(historical_records, key=lambda item: item.get("date", ""))),
+            diagnosis_request=diagnosis_request,
+        )
 
         lines = [validation_report.get("summary_text", "中期策略统计数据不足，暂无报告。")]
         live_summary = ((validation_report.get("live") or {}).get("summary_text") or "").strip()
@@ -592,6 +804,16 @@ class ValidationService:
                 f"滚动验证: {validation_report['walkforward']['segment_count']}段，"
                 f"平均收益{validation_report['walkforward']['avg_total_return'] * 100:.1f}%"
             )
+        if diagnostics:
+            lines.append(f"诊断: {diagnostics.get('summary_text', '暂无分组诊断')}")
+            for group in diagnostics.get("groups", [])[:5]:
+                lines.append(
+                    "  "
+                    f"{group.get('key')}: 样本{int(group.get('sample_count', 0) or 0)} | "
+                    f"平均收益{float(group.get('avg_absolute_return', 0.0) or 0.0) * 100:.1f}% | "
+                    f"平均超额{float(group.get('avg_relative_return', 0.0) or 0.0) * 100:.1f}% | "
+                    f"平均回撤{float(group.get('avg_max_drawdown', 0.0) or 0.0) * 100:.1f}%"
+                )
 
         return ValidationResult(
             mode=request.mode,
@@ -599,8 +821,11 @@ class ValidationService:
             investor_summary=validation_report.get("summary_text", "中期策略统计数据不足，暂无报告。"),
             compact=compact,
             text="\n".join(lines),
+            diagnostics=diagnostics,
             details={
                 "request": request.to_dict(),
+                "diagnosis_request": diagnosis_request.to_dict(),
+                **({"diagnostics": diagnostics} if diagnostics else {}),
                 **validation_report,
             },
         )

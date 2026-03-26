@@ -34,6 +34,7 @@ def test_validation_result_compact_snapshot_keeps_high_signal_fields_only():
         as_of_date="2026-03-25",
         investor_summary="历史验证支持继续进攻，但只做分批加仓。",
         compact={"verdict": "supportive", "offensive_allowed": True},
+        diagnostics={"group_by": "action", "summary_text": "拖累来自持有组。"},
         details={"backtest": {"trade_count": 4}},
     )
 
@@ -42,4 +43,5 @@ def test_validation_result_compact_snapshot_keeps_high_signal_fields_only():
     assert payload["mode"] == "swing"
     assert payload["as_of_date"] == "2026-03-25"
     assert payload["compact"]["verdict"] == "supportive"
+    assert payload["diagnostics"]["group_by"] == "action"
     assert payload["details"]["backtest"]["trade_count"] == 4

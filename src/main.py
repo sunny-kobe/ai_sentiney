@@ -214,6 +214,7 @@ def entry_point():
     parser.add_argument('--to', dest='date_to', type=str, default=None, help='End date (YYYY-MM-DD) for validation/experiment commands')
     parser.add_argument('--codes', nargs='*', default=None, help='Optional stock codes for validation/experiment commands')
     parser.add_argument('--preset', type=str, default=None, help='Optional validation/experiment preset')
+    parser.add_argument('--group-by', type=str, default=None, choices=['action', 'cluster', 'regime', 'confidence'], help='Optional grouped diagnostics dimension for validation/experiment commands')
 
     args = parser.parse_args()
 
@@ -236,6 +237,7 @@ def entry_point():
             date_to=args.date_to,
             codes=args.codes,
             preset=args.preset if args.command == 'experiment' else args.preset,
+            group_by=args.group_by,
         )
         payload = result.to_dict() if hasattr(result, "to_dict") else result
         if args.output == 'json':
