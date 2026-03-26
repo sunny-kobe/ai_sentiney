@@ -1158,6 +1158,7 @@ def build_swing_report(
             "shares": int(holding.get("shares", 0) or 0),
             "relative_return_20": holding.get("relative_return_20"),
             "relative_return_40": holding.get("relative_return_40"),
+            "drawdown_20": holding.get("drawdown_20"),
             "setup_type": holding.get("setup_type"),
             "execution_window": holding.get("execution_window"),
         }

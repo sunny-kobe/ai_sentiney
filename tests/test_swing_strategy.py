@@ -758,3 +758,27 @@ def test_build_swing_report_aggressive_profile_keeps_core_and_relative_leader_ex
     assert ai_laggard["action_label"] == "回避"
     assert ai_laggard["target_weight"] == "0%"
     assert "加" in broad["rebalance_action"] or "加" in ai_leader["rebalance_action"] or "先按当前仓位拿住" in broad["rebalance_action"] or "先按当前仓位拿住" in ai_leader["rebalance_action"]
+
+
+def test_build_swing_report_keeps_drawdown_metadata_for_lab_parameters():
+    ai_input = {
+        "market_breadth": "2600家上涨，2200家下跌",
+        "indices": {"上证指数": {"change_pct": 0.2}, "创业板指": {"change_pct": -0.1}},
+        "macro_news": {"telegraph": ["消息偏中性"]},
+        "stocks": [
+            _make_stock("510300", "沪深300ETF", signal="SAFE", confidence="高", shares=1000, current_price=1.18, ma20=1.20),
+            _make_stock("159338", "中证A500ETF", signal="SAFE", confidence="中", shares=0, current_price=0.98, ma20=1.00),
+        ],
+    }
+    history = _make_multi_history(
+        {
+            "510300": [1.20, 1.19, 1.18, 1.17, 1.16, 1.15, 1.14, 1.13, 1.12, 1.11, 1.10, 1.09, 1.08, 1.09, 1.10, 1.12, 1.11, 1.10, 1.09, 1.08, 1.07, 1.08, 1.09, 1.10, 1.08, 1.06, 1.04, 1.03, 1.02, 1.01, 1.00, 1.02, 1.03, 1.04, 1.05, 1.06, 1.08, 1.10, 1.12, 1.13, 1.14, 1.15, 1.16, 1.17, 1.18],
+            "159338": [1.00, 1.00, 1.01, 1.01, 1.02, 1.02, 1.03, 1.03, 1.04, 1.04, 1.05, 1.05, 1.06, 1.06, 1.07, 1.07, 1.08, 1.08, 1.09, 1.09, 1.10, 1.10, 1.09, 1.09, 1.08, 1.08, 1.07, 1.07, 1.06, 1.06, 1.05, 1.05, 1.04, 1.04, 1.03, 1.03, 1.02, 1.02, 1.01, 1.01, 1.00, 1.00, 0.99, 0.99, 0.98],
+        }
+    )
+
+    report = build_swing_report(ai_input, history, analysis_date="2026-03-24")
+    action = next(item for item in report["actions"] if item["code"] == "510300")
+
+    assert action["relative_return_40"] is not None
+    assert action["drawdown_20"] is not None

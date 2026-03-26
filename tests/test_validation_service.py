@@ -147,3 +147,80 @@ def test_synthetic_swing_records_keep_share_metadata_for_lab_mutations(monkeypat
 
     assert synthetic[0]["ai_result"]["actions"][0]["shares"] == 600
     assert synthetic[0]["ai_result"]["actions"][0]["current_shares"] == 600
+
+
+def test_synthetic_swing_records_keep_parameter_metadata_for_lab_mutations(monkeypatch):
+    service = ValidationService(_FakeDB(), config={"portfolio_state": {"lot_size": 100}})
+
+    monkeypatch.setattr(
+        "src.service.validation_service.build_swing_report",
+        lambda report_input, context_window, analysis_date: {
+            "market_regime": "均衡",
+            "actions": [
+                {
+                    "code": "510300",
+                    "name": "沪深300ETF",
+                    "action_label": "持有",
+                    "confidence": "高",
+                    "target_weight": "35%-45%",
+                    "signal": "SAFE",
+                    "score": 3,
+                    "relative_return_20": 0.01,
+                    "relative_return_40": -0.04,
+                    "drawdown_20": -0.09,
+                    "position_bucket": "核心仓",
+                }
+            ]
+        },
+    )
+
+    records = [
+        {"date": "2026-03-24", "raw_data": {"stocks": [{"code": "510300", "name": "沪深300ETF", "close": 10.0}]}, "ai_result": {}}
+    ]
+
+    synthetic = service._build_synthetic_swing_records(records)
+    action = synthetic[0]["ai_result"]["actions"][0]
+
+    assert action["signal"] == "SAFE"
+    assert action["score"] == 3
+    assert action["relative_return_20"] == 0.01
+    assert action["relative_return_40"] == -0.04
+    assert action["drawdown_20"] == -0.09
+    assert action["position_bucket"] == "核心仓"
+
+
+def test_synthetic_swing_records_use_long_enough_context_for_40_day_lab_parameters(monkeypatch):
+    service = ValidationService(_FakeDB(), config={"portfolio_state": {"lot_size": 100}})
+    context_lengths = []
+
+    monkeypatch.setattr(
+        "src.service.validation_service.build_swing_report",
+        lambda report_input, context_window, analysis_date: (
+            context_lengths.append(len(context_window)),
+            {
+                "market_regime": "均衡",
+                "actions": [
+                    {
+                        "code": "510300",
+                        "name": "沪深300ETF",
+                        "action_label": "持有",
+                        "confidence": "高",
+                        "target_weight": "35%-45%",
+                    }
+                ],
+            },
+        )[1],
+    )
+
+    records = [
+        {
+            "date": f"2026-02-{day:02d}",
+            "raw_data": {"stocks": [{"code": "510300", "name": "沪深300ETF", "close": 10.0 + day}]},
+            "ai_result": {},
+        }
+        for day in range(1, 55)
+    ]
+
+    service._build_synthetic_swing_records(records)
+
+    assert max(context_lengths) >= 41

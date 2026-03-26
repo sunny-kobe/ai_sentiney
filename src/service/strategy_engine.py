@@ -212,6 +212,7 @@ def build_strategy_snapshot(
                 "tech_summary": stock.get("tech_summary", ""),
                 "relative_return_20": benchmark_snapshot.get(code, {}).get("relative_return_20"),
                 "relative_return_40": benchmark_snapshot.get(code, {}).get("relative_return_40"),
+                "drawdown_20": benchmark_snapshot.get(code, {}).get("drawdown_20"),
             }
         )
 

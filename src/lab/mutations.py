@@ -72,6 +72,31 @@ def _scale_weight_range(weight_range: Optional[Tuple[int, int]], factor: float) 
     return max(int(round(low * factor)), 0), max(int(round(high * factor)), 0)
 
 
+def _parse_lookback_window(value: Any) -> Optional[int]:
+    if value in (None, ""):
+        return None
+    window = int(value)
+    if window in {10, 20, 40}:
+        return window
+    return None
+
+
+def _parse_drawdown_limit(value: Any) -> Optional[float]:
+    if value in (None, ""):
+        return None
+    limit = float(value)
+    return -abs(limit)
+
+
+def _relative_return_for_window(action: Mapping[str, Any], window: Optional[int]) -> Optional[float]:
+    if window is None:
+        return None
+    value = action.get(f"relative_return_{window}")
+    if isinstance(value, (int, float)):
+        return float(value)
+    return None
+
+
 def _current_shares(action: Mapping[str, Any]) -> int:
     return int(action.get("current_shares", action.get("shares", 0)) or 0)
 
@@ -90,13 +115,12 @@ def apply_candidate_mutations(
     parameter_overrides: Mapping[str, Any],
     portfolio_overrides: Mapping[str, Any],
 ) -> List[Dict[str, Any]]:
-    _ = parameter_overrides
-    _ = portfolio_overrides
-
     confidence_min = str(rule_overrides.get("confidence_min", "") or "").strip()
     confidence_floor = _confidence_rank(confidence_min) if confidence_min else 0
     blocked_clusters = _parse_blocklist(rule_overrides.get("cluster_blocklist"))
     degrade_holds_in_defense = str(rule_overrides.get("hold_in_defense", "") or "").strip() == "degrade"
+    lookback_window = _parse_lookback_window(parameter_overrides.get("lookback_window"))
+    drawdown_limit = _parse_drawdown_limit(parameter_overrides.get("drawdown_limit"))
     core_only = str(portfolio_overrides.get("core_only", "") or "").strip()
     risk_profile = str(portfolio_overrides.get("risk_profile", "") or "").strip().lower()
     watchlist_limit = int(portfolio_overrides.get("watchlist_limit", 0) or 0)
@@ -110,6 +134,8 @@ def apply_candidate_mutations(
     mutated: List[Dict[str, Any]] = []
     for action in actions:
         item = dict(action)
+        current_shares = _current_shares(item)
+        forced_weight_range: Optional[Tuple[int, int]] = None
         if blocked_clusters and str(item.get("cluster", "") or "") in blocked_clusters:
             continue
         if confidence_floor and _confidence_rank(str(item.get("confidence", "") or "")) < confidence_floor:
@@ -120,8 +146,31 @@ def apply_candidate_mutations(
             and str(item.get("action_label", "") or "") == "持有"
         ):
             item["action_label"] = _degrade_action(str(item.get("action_label", "") or ""))
+            forced_weight_range = _parse_target_weight_range(None, str(item.get("action_label", "") or ""))
+
+        relative_return = _relative_return_for_window(item, lookback_window)
+        if relative_return is not None and relative_return <= -0.05:
+            item["action_label"] = _degrade_action(str(item.get("action_label", "") or ""))
+            forced_weight_range = _parse_target_weight_range(None, str(item.get("action_label", "") or ""))
+
+        drawdown_20 = item.get("drawdown_20")
+        if (
+            drawdown_limit is not None
+            and isinstance(drawdown_20, (int, float))
+            and float(drawdown_20) <= drawdown_limit
+        ):
+            if current_shares > 0:
+                item["action_label"] = "减配"
+                forced_weight_range = _parse_target_weight_range(None, "减配")
+            else:
+                item["action_label"] = "回避"
+                forced_weight_range = (0, 0)
+
         target_weight = item.get("target_weight") or item.get("target_weight_range")
-        weight_range = _parse_target_weight_range(target_weight, str(item.get("action_label", "") or ""))
+        weight_range = forced_weight_range or _parse_target_weight_range(
+            target_weight,
+            str(item.get("action_label", "") or ""),
+        )
         if core_only and str(item.get("cluster", "") or "") != core_only:
             weight_range = (0, 0)
         weight_range = _scale_weight_range(weight_range, risk_factor)

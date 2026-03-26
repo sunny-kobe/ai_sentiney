@@ -107,7 +107,7 @@ class ValidationService:
             report_input = dict(raw_data)
             report_input.setdefault("strategy_preferences", self._get_swing_strategy_preferences())
 
-            context_window = sorted_records[max(0, index - 20) : index + 1]
+            context_window = sorted_records[max(0, index - 40) : index + 1]
             swing_report = build_swing_report(
                 report_input,
                 context_window,
@@ -125,10 +125,16 @@ class ValidationService:
                     "name": action.get("name"),
                     "action_label": action.get("action_label"),
                     "confidence": action.get("confidence"),
+                    "signal": action.get("signal"),
+                    "score": action.get("score"),
                     "target_weight": action.get("target_weight"),
                     "target_weight_range": action.get("target_weight_range"),
                     "shares": int(action.get("shares", 0) or 0),
                     "current_shares": int(action.get("current_shares", action.get("shares", 0)) or 0),
+                    "relative_return_20": action.get("relative_return_20"),
+                    "relative_return_40": action.get("relative_return_40"),
+                    "drawdown_20": action.get("drawdown_20"),
+                    "position_bucket": action.get("position_bucket"),
                     "cluster": action.get("cluster")
                     or infer_cluster(stock_map.get(str(action.get("code", "") or ""), action)),
                     "market_regime": market_regime,

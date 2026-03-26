@@ -75,3 +75,54 @@ def test_apply_candidate_mutations_limits_watchlist_candidates():
 
     assert semi["target_weight"] == "12%-18%"
     assert ai["target_weight"] == "0%"
+
+
+def test_apply_candidate_mutations_uses_lookback_window_to_degrade_weak_trend():
+    actions = [
+        {
+            "code": "159819",
+            "action_label": "持有",
+            "market_regime": "均衡",
+            "cluster": "ai",
+            "confidence": "高",
+            "target_weight": "18%-24%",
+            "shares": 300,
+            "relative_return_20": 0.03,
+            "relative_return_40": -0.09,
+        }
+    ]
+
+    mutated = apply_candidate_mutations(
+        actions,
+        rule_overrides={},
+        parameter_overrides={"lookback_window": "40"},
+        portfolio_overrides={},
+    )
+
+    assert mutated[0]["action_label"] == "减配"
+    assert mutated[0]["target_weight"] == "5%"
+
+
+def test_apply_candidate_mutations_uses_drawdown_limit_to_block_new_exposure():
+    actions = [
+        {
+            "code": "512480",
+            "action_label": "增配",
+            "market_regime": "进攻",
+            "cluster": "semiconductor",
+            "confidence": "高",
+            "target_weight": "20%",
+            "shares": 0,
+            "drawdown_20": -0.18,
+        }
+    ]
+
+    mutated = apply_candidate_mutations(
+        actions,
+        rule_overrides={},
+        parameter_overrides={"drawdown_limit": "0.10"},
+        portfolio_overrides={},
+    )
+
+    assert mutated[0]["action_label"] == "回避"
+    assert mutated[0]["target_weight"] == "0%"
