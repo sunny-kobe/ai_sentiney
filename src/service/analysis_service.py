@@ -24,6 +24,7 @@ from src.service.swing_strategy import build_swing_report, resolve_benchmark_cod
 from src.service.strategy_engine import build_strategy_snapshot, build_intraday_rule_report, build_close_rule_report
 from src.backtest.engine import run_deterministic_backtest
 from src.backtest.walkforward import run_walkforward_validation
+from src.service.strategy_lab_service import StrategyLabService
 from src.service.validation_service import ValidationService
 
 class AnalysisService:
@@ -31,6 +32,7 @@ class AnalysisService:
         self.config = ConfigLoader().config
         self.db = SentinelDB()
         self.validation_service = ValidationService(self.db, self.config)
+        self.strategy_lab_service = StrategyLabService(self.db, self.config, self.validation_service)
         self.data_path = Path("data/latest_context.json")
         self.data_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -1269,6 +1271,31 @@ class AnalysisService:
             codes=codes,
             preset=preset,
             group_by=group_by,
+        )
+
+    def build_lab_result(
+        self,
+        *,
+        mode: str,
+        preset: str,
+        days: int = 90,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        codes: Optional[List[str]] = None,
+        group_by: Optional[str] = None,
+        scoring_mode: str = "composite",
+        overrides: Optional[List[str]] = None,
+    ):
+        return self.strategy_lab_service.build_lab_result(
+            mode=mode,
+            preset=preset,
+            days=days,
+            date_from=date_from,
+            date_to=date_to,
+            codes=codes,
+            group_by=group_by,
+            scoring_mode=scoring_mode,
+            overrides=overrides,
         )
 
     def _run_swing_accuracy_report(self) -> str:

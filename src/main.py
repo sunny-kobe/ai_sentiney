@@ -198,7 +198,7 @@ def _print_text_summary(result: Dict[str, Any], mode: str):
 
 def entry_point():
     parser = argparse.ArgumentParser(description="Project Sentinel V2")
-    parser.add_argument('command', nargs='?', choices=['run', 'validate', 'experiment'], default='run', help='CLI command')
+    parser.add_argument('command', nargs='?', choices=['run', 'validate', 'experiment', 'lab'], default='run', help='CLI command')
     parser.add_argument('--mode', type=str, default='midday', choices=['midday', 'preclose', 'close', 'morning', 'swing'], help='Execution mode')
     parser.add_argument('--dry-run', action='store_true', help='Run without calling expensive APIs or sending notifications')
     parser.add_argument('--replay', action='store_true', help='Replay analysis using last saved data')
@@ -215,6 +215,7 @@ def entry_point():
     parser.add_argument('--codes', nargs='*', default=None, help='Optional stock codes for validation/experiment commands')
     parser.add_argument('--preset', type=str, default=None, help='Optional validation/experiment preset')
     parser.add_argument('--group-by', type=str, default=None, choices=['action', 'cluster', 'regime', 'confidence'], help='Optional grouped diagnostics dimension for validation/experiment commands')
+    parser.add_argument('--override', action='append', default=None, help='Optional key=value override for lab experiments; can repeat')
 
     args = parser.parse_args()
 
@@ -229,6 +230,22 @@ def entry_point():
         init_routes(service)
         server = WebServer(port=8000)
         server.run()
+    elif args.command == 'lab':
+        result = service.build_lab_result(
+            mode=args.mode,
+            preset=args.preset or "aggressive_midterm",
+            days=args.days,
+            date_from=args.date_from,
+            date_to=args.date_to,
+            codes=args.codes,
+            group_by=args.group_by,
+            overrides=args.override,
+        )
+        payload = result.to_dict() if hasattr(result, "to_dict") else result
+        if args.output == 'json':
+            print(json.dumps(payload, ensure_ascii=False))
+        else:
+            print(payload.get("summary_text", "暂无实验结果"))
     elif args.command in {'validate', 'experiment'}:
         result = service.build_validation_result(
             mode=args.mode,

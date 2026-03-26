@@ -361,6 +361,144 @@ class ValidationService:
             "offensive_reason": str(offensive_gate.get("reason", "样本不足")),
         }
 
+    def _build_validation_report_from_synthetic_records(
+        self,
+        *,
+        historical_records: List[Dict[str, Any]],
+        synthetic_records: List[Dict[str, Any]],
+        group_by: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        if not synthetic_records:
+            empty_report = {
+                "live": None,
+                "scorecard": None,
+                "backtest": {
+                    "summary_text": "正式回测样本不足，暂不放大解释",
+                    "total_return": 0.0,
+                    "max_drawdown": 0.0,
+                    "trade_count": 0,
+                    "trades": [],
+                    "equity_curve": [],
+                },
+                "walkforward": {"segment_count": 0, "segments": [], "avg_total_return": 0.0},
+                "performance_context": self._build_validation_performance_context(None, None, None),
+                "summary_text": self._build_validation_summary_text(None, None, None, None),
+            }
+            empty_report["compact"] = self._build_compact_validation_snapshot(empty_report)
+            empty_report["diagnostics"] = self._build_grouped_diagnostics(
+                scorecard=None,
+                synthetic_records=[],
+                diagnosis_request=DiagnosisRequest(group_by=group_by),
+            )
+            return empty_report
+
+        sorted_records = sorted(historical_records, key=lambda item: item.get("date", ""))
+        scorecard = build_swing_scorecard(
+            synthetic_records,
+            benchmark_map=self._build_swing_benchmark_map(sorted_records),
+            windows=(10, 20, 40),
+        )
+        lot_size = int((self.config.get("portfolio_state") or {}).get("lot_size", 100) or 100)
+        backtest_result = run_deterministic_backtest(
+            synthetic_records,
+            initial_cash=100_000.0,
+            lot_size=lot_size,
+        )
+        backtest_report = {
+            "total_return": backtest_result.get("total_return", 0.0),
+            "max_drawdown": backtest_result.get("max_drawdown", 0.0),
+            "trade_count": len(backtest_result.get("trades", []) or []),
+            "summary_text": "",
+            "trades": backtest_result.get("trades", []) or [],
+            "equity_curve": backtest_result.get("equity_curve", []) or [],
+            "final_value": backtest_result.get("final_value", 0.0),
+            "initial_value": backtest_result.get("initial_value", 0.0),
+        }
+        if backtest_report["trade_count"] >= 3:
+            backtest_report["summary_text"] = (
+                f"回测收益{backtest_report['total_return'] * 100:.1f}%，"
+                f"最大回撤{backtest_report['max_drawdown'] * 100:.1f}%，"
+                f"交易{backtest_report['trade_count']}笔"
+            )
+        else:
+            backtest_report["summary_text"] = "正式回测样本不足，暂不放大解释"
+        walkforward_report = (
+            run_walkforward_validation(
+                synthetic_records,
+                train_window=2,
+                test_window=2,
+                initial_cash=100_000.0,
+            )
+            if len(synthetic_records) >= 4
+            else {"segment_count": 0, "segments": [], "avg_total_return": 0.0}
+        )
+        report = {
+            "live": None,
+            "scorecard": scorecard,
+            "backtest": backtest_report,
+            "walkforward": walkforward_report,
+            "performance_context": self._build_validation_performance_context(scorecard, backtest_report, None),
+            "summary_text": self._build_validation_summary_text(None, scorecard, backtest_report, walkforward_report),
+        }
+        report["compact"] = self._build_compact_validation_snapshot(report)
+        report["diagnostics"] = self._build_grouped_diagnostics(
+            scorecard=scorecard,
+            synthetic_records=synthetic_records,
+            diagnosis_request=DiagnosisRequest(group_by=group_by),
+        )
+        return report
+
+    def _score_validation_report(self, report: Dict[str, Any], scoring_mode: str = "composite") -> float:
+        if scoring_mode != "composite":
+            scoring_mode = "composite"
+
+        total_return = float(((report.get("backtest") or {}).get("total_return", 0.0) or 0.0))
+        max_drawdown = float(((report.get("backtest") or {}).get("max_drawdown", 0.0) or 0.0))
+        trade_count = int(((report.get("backtest") or {}).get("trade_count", 0) or 0))
+        primary_window, stats = self._primary_window_stats(report.get("scorecard"), preferred_windows=(20, 10, 40))
+        avg_relative = float(stats.get("avg_relative_return", 0.0) or 0.0)
+        sample_count = int(stats.get("count", 0) or 0) if primary_window is not None else 0
+        stability = min(sample_count / 20.0, 1.0)
+
+        score = (
+            (total_return * 35.0)
+            + (avg_relative * 30.0)
+            + (max_drawdown * 25.0)
+            + (stability * 10.0)
+            - (max(trade_count - 12, 0) * 0.002)
+        )
+        return round(score, 4)
+
+    def _build_comparison_diff(self, baseline: Dict[str, Any], candidate: Dict[str, Any]) -> Dict[str, Any]:
+        baseline_backtest = baseline.get("backtest") or {}
+        candidate_backtest = candidate.get("backtest") or {}
+        baseline_window, baseline_stats = self._primary_window_stats(baseline.get("scorecard"), preferred_windows=(20, 10, 40))
+        candidate_window, candidate_stats = self._primary_window_stats(candidate.get("scorecard"), preferred_windows=(20, 10, 40))
+
+        return {
+            "baseline_primary_window": baseline_window,
+            "candidate_primary_window": candidate_window,
+            "total_return_delta": round(
+                float(candidate_backtest.get("total_return", 0.0) or 0.0)
+                - float(baseline_backtest.get("total_return", 0.0) or 0.0),
+                4,
+            ),
+            "max_drawdown_delta": round(
+                float(candidate_backtest.get("max_drawdown", 0.0) or 0.0)
+                - float(baseline_backtest.get("max_drawdown", 0.0) or 0.0),
+                4,
+            ),
+            "trade_count_delta": int(candidate_backtest.get("trade_count", 0) or 0)
+            - int(baseline_backtest.get("trade_count", 0) or 0),
+            "avg_relative_return_delta": round(
+                float(candidate_stats.get("avg_relative_return", 0.0) or 0.0)
+                - float(baseline_stats.get("avg_relative_return", 0.0) or 0.0),
+                4,
+            ),
+            "sample_count_delta": int(candidate_stats.get("count", 0) or 0)
+            - int(baseline_stats.get("count", 0) or 0),
+        }
+
     def _build_diagnostic_rows(
         self,
         *,

@@ -186,6 +186,10 @@ python -m src.main experiment --preset aggressive_midterm --mode swing
 # 给实验结果追加分组诊断
 python -m src.main experiment --preset aggressive_midterm --mode swing --group-by action
 
+# 策略实验台：对比 baseline vs candidate
+python -m src.main lab --preset aggressive_midterm
+python -m src.main lab --preset defensive_exit_fix --override confidence_min=高 --output json
+
 # 查看中期验证摘要
 python -m src.main --ask "最近验证情况怎么样" --mode swing
 
