@@ -4,6 +4,7 @@ import time
 from typing import Dict, Any, List
 from src.utils.logger import logger
 from src.utils.config_loader import ConfigLoader
+from src.utils.lab_hint_formatter import build_lab_hint_detail, build_lab_hint_header
 
 
 def _build_validation_hint(data: Dict[str, Any]) -> str:
@@ -27,13 +28,7 @@ def _build_lab_hint(data: Dict[str, Any]) -> str:
     hint = data.get("lab_hint") or {}
     if not hint:
         return ""
-    return (
-        f"**实验提示**\n"
-        f"{hint.get('preset', 'unknown')} | {hint.get('summary_text', '')}\n"
-        f"分数差: {float(hint.get('score_delta', 0.0) or 0.0):.2f}"
-        f" | 交易变化: {int(hint.get('trade_count_delta', 0) or 0)}"
-        f" | 候选交易: {int(hint.get('candidate_trade_count', 0) or 0)}笔"
-    )
+    return build_lab_hint_detail(hint, markdown=True)
 
 
 class FeishuClient:
@@ -707,6 +702,7 @@ class FeishuClient:
 
     def _construct_swing_card(self, data: Dict[str, Any]) -> Dict[str, Any]:
         position_plan = data.get("position_plan") or {}
+        header_hint = build_lab_hint_header(data.get("lab_hint") or {})
         position_lines = [
             f"- **当前总仓位**: {position_plan.get('current_total_exposure', 'N/A')}",
             f"- **建议总仓位**: {position_plan.get('total_exposure', 'N/A')}",
@@ -731,38 +727,55 @@ class FeishuClient:
                 }
             },
             {"tag": "hr"},
-            {
-                "tag": "div",
-                "text": {
-                    "tag": "lark_md",
-                    "content": f"**今日结论**\n{data.get('market_conclusion', '暂无结论')}"
-                }
-            },
-            {"tag": "hr"},
-            {
-                "tag": "div",
-                "text": {
-                    "tag": "lark_md",
-                    "content": f"**验证摘要**\n{data.get('validation_summary', '暂无验证摘要')}"
-                }
-            },
-            {"tag": "hr"},
-            {
-                "tag": "div",
-                "text": {
-                    "tag": "lark_md",
-                    "content": "**账户动作**\n" + "\n".join(position_lines)
-                }
-            },
-            {"tag": "hr"},
-            {
-                "tag": "div",
-                "text": {
-                    "tag": "lark_md",
-                    "content": f"**持仓处理 ({len(data.get('actions', []))}只)**"
-                }
-            },
         ]
+        if header_hint:
+            elements.extend(
+                [
+                    {
+                        "tag": "div",
+                        "text": {
+                            "tag": "lark_md",
+                            "content": header_hint,
+                        },
+                    },
+                    {"tag": "hr"},
+                ]
+            )
+        elements.extend(
+            [
+                {
+                    "tag": "div",
+                    "text": {
+                        "tag": "lark_md",
+                        "content": f"**今日结论**\n{data.get('market_conclusion', '暂无结论')}"
+                    }
+                },
+                {"tag": "hr"},
+                {
+                    "tag": "div",
+                    "text": {
+                        "tag": "lark_md",
+                        "content": f"**验证摘要**\n{data.get('validation_summary', '暂无验证摘要')}"
+                    }
+                },
+                {"tag": "hr"},
+                {
+                    "tag": "div",
+                    "text": {
+                        "tag": "lark_md",
+                        "content": "**账户动作**\n" + "\n".join(position_lines)
+                    }
+                },
+                {"tag": "hr"},
+                {
+                    "tag": "div",
+                    "text": {
+                        "tag": "lark_md",
+                        "content": f"**持仓处理 ({len(data.get('actions', []))}只)**"
+                    }
+                },
+            ]
+        )
         validation_hint = _build_validation_hint(data)
         if validation_hint:
             elements.extend(

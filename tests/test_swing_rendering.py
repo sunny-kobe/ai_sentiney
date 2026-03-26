@@ -130,6 +130,7 @@ def test_cli_swing_summary_uses_plain_language_sections():
         _print_text_summary(_make_swing_result(), "swing")
 
     rendered = output.getvalue()
+    lines = rendered.splitlines()
     assert "今日结论" in rendered
     assert "账户动作" in rendered
     assert "持仓处理" in rendered
@@ -138,7 +139,8 @@ def test_cli_swing_summary_uses_plain_language_sections():
     assert "验证摘要" in rendered
     assert "真实建议跟踪" in rendered
     assert "实验提示" in rendered
-    assert "aggressive_leader_focus" in rendered
+    assert "激进龙头聚焦" in rendered
+    assert any("实验优选: 激进龙头聚焦（当前更优）" in line for line in lines[:6])
     assert "当前总仓位: 68.7%" in rendered
     assert "总仓位: 35%-50%" in rendered
     assert "优先动作: 中证2000ETF:卖出2900份，保留约2300份；军工ETF:先试仓5%-10%" in rendered
@@ -151,6 +153,7 @@ def test_cli_swing_summary_uses_plain_language_sections():
 def test_telegram_swing_text_shows_action_buckets_and_risk_lines():
     client = TelegramClient()
     text = client._build_swing_text(_make_swing_result())
+    lines = text.splitlines()
 
     assert "今日结论" in text
     assert "账户动作" in text
@@ -162,7 +165,8 @@ def test_telegram_swing_text_shows_action_buckets_and_risk_lines():
     assert "真实建议跟踪" in text
     assert "真实样本: 20日8笔 | 历史样本: 20日12笔 | 进攻权限: 允许（真实建议近期进攻统计仍有效，正式回测未见明显恶化）" in text
     assert "实验提示" in text
-    assert "aggressive_leader_focus" in text
+    assert "激进龙头聚焦" in text
+    assert any("实验优选: 激进龙头聚焦（当前更优）" in line for line in lines[:4])
     assert "风险清单" in text
 
 
@@ -186,7 +190,8 @@ def test_feishu_swing_card_shows_plain_language_sections():
     assert "真实建议跟踪" in joined
     assert "真实样本: 20日8笔 | 历史样本: 20日12笔 | 进攻权限: 允许（真实建议近期进攻统计仍有效，正式回测未见明显恶化）" in joined
     assert "实验提示" in joined
-    assert "aggressive_leader_focus" in joined
+    assert "激进龙头聚焦" in joined
+    assert "实验优选: 激进龙头聚焦（当前更优）" in contents[1]
     assert "风险清单" in joined
 
 

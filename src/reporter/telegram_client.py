@@ -2,6 +2,7 @@ import requests
 from typing import Any, Dict
 
 from src.utils.config_loader import ConfigLoader
+from src.utils.lab_hint_formatter import build_lab_hint_detail, build_lab_hint_header
 from src.utils.logger import logger
 
 
@@ -26,12 +27,7 @@ def _build_lab_hint(data: Dict[str, Any]) -> str:
     hint = data.get("lab_hint") or {}
     if not hint:
         return ""
-    return (
-        f"实验提示: {hint.get('preset', 'unknown')} | {hint.get('summary_text', '')}\n"
-        f"分数差: {float(hint.get('score_delta', 0.0) or 0.0):.2f}"
-        f" | 交易变化: {int(hint.get('trade_count_delta', 0) or 0)}"
-        f" | 候选交易: {int(hint.get('candidate_trade_count', 0) or 0)}笔"
-    )
+    return build_lab_hint_detail(hint)
 
 
 class TelegramClient:
@@ -146,15 +142,22 @@ class TelegramClient:
 
     def _build_swing_text(self, data: Dict[str, Any]) -> str:
         position_plan = data.get("position_plan") or {}
+        header_hint = build_lab_hint_header(data.get("lab_hint") or {})
         lines = [
             "🧭 Sentinel 中长期助手",
+        ]
+        if header_hint:
+            lines.append(header_hint)
+        lines.extend(
+            [
             f"时间: {data.get('data_timestamp', 'N/A')}",
             f"来源: {', '.join(data.get('source_labels', []))}" if data.get('source_labels') else "来源: N/A",
             "今日结论:",
             data.get('market_conclusion', '暂无结论'),
             "验证摘要:",
             data.get("validation_summary", "暂无验证摘要"),
-        ]
+            ]
+        )
         validation_hint = _build_validation_hint(data)
         if validation_hint:
             lines.append(validation_hint)

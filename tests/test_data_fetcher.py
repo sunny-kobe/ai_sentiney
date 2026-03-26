@@ -16,8 +16,13 @@ def mock_akshare(mocker):
     return ak
 
 @pytest.fixture
-def collector():
+def collector(tmp_path):
     instance = DataCollector()
+    instance.state_file = str(tmp_path / "circuit_breaker_state.json")
+    for cb in instance._circuit_breakers.values():
+        cb.failure_count = 0
+        cb.is_open = False
+        cb.last_failure_time = 0.0
     try:
         yield instance
     finally:

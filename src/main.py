@@ -11,6 +11,7 @@ from src.utils.logger import logger
 from src.service.analysis_service import AnalysisService
 from src.web.server import WebServer
 from src.utils.config_loader import ConfigLoader
+from src.utils.lab_hint_formatter import build_lab_hint_detail, build_lab_hint_header
 from src.web.api import get_router
 
 existing_pythonwarnings = os.environ.get("PYTHONWARNINGS", "")
@@ -50,6 +51,9 @@ def _print_text_summary(result: Dict[str, Any], mode: str):
     if mode == 'swing':
         lab_hint = result.get("lab_hint") or {}
         lines.append("=== 中长期投资助手 ===")
+        header_hint = build_lab_hint_header(lab_hint)
+        if header_hint:
+            lines.append(header_hint)
         if quality_status:
             lines.append(f"质量: {quality_status}")
         if data_timestamp:
@@ -60,15 +64,8 @@ def _print_text_summary(result: Dict[str, Any], mode: str):
             lines.append("验证摘要:")
             lines.append(f"  {result.get('validation_summary')}")
         if lab_hint:
-            lines.append("实验提示:")
-            lines.append(
-                f"  {lab_hint.get('preset', 'unknown')} | {lab_hint.get('summary_text', '')}"
-            )
-            lines.append(
-                f"  分数差:{float(lab_hint.get('score_delta', 0.0) or 0.0):.2f}"
-                f" | 交易变化:{int(lab_hint.get('trade_count_delta', 0) or 0)}"
-                f" | 候选交易:{int(lab_hint.get('candidate_trade_count', 0) or 0)}笔"
-            )
+            for detail_line in build_lab_hint_detail(lab_hint).splitlines():
+                lines.append(f"  {detail_line}")
         position_plan = result.get("position_plan") or {}
         lines.append("今日结论:")
         lines.append(f"  {result.get('market_conclusion', '暂无结论')}")
