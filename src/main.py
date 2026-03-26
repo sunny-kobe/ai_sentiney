@@ -216,6 +216,7 @@ def entry_point():
     parser.add_argument('--preset', type=str, default=None, help='Optional validation/experiment preset')
     parser.add_argument('--group-by', type=str, default=None, choices=['action', 'cluster', 'regime', 'confidence'], help='Optional grouped diagnostics dimension for validation/experiment commands')
     parser.add_argument('--override', action='append', default=None, help='Optional key=value override for lab experiments; can repeat')
+    parser.add_argument('--detail', type=str, default='compact', choices=['compact', 'full'], help='Detail level for lab JSON output')
 
     args = parser.parse_args()
 
@@ -241,11 +242,11 @@ def entry_point():
             group_by=args.group_by,
             overrides=args.override,
         )
-        payload = result.to_dict() if hasattr(result, "to_dict") else result
+        payload = result.to_dict(detail=args.detail) if hasattr(result, "to_dict") else result
         if args.output == 'json':
             print(json.dumps(payload, ensure_ascii=False))
         else:
-            print(payload.get("summary_text", "暂无实验结果"))
+            print(getattr(result, "summary_text", payload.get("summary_text", "暂无实验结果")))
     elif args.command in {'validate', 'experiment'}:
         result = service.build_validation_result(
             mode=args.mode,

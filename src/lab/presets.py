@@ -11,6 +11,27 @@ LAB_PRESETS: Dict[str, Dict[str, Any]] = {
         "parameter_overrides": {},
         "portfolio_overrides": {},
     },
+    "aggressive_trend_guard": {
+        "name": "aggressive_trend_guard",
+        "description": "Stay aggressive, but filter out names that lose 40-day relative strength or breach drawdown limits.",
+        "rule_overrides": {},
+        "parameter_overrides": {"lookback_window": "40", "drawdown_limit": "0.10"},
+        "portfolio_overrides": {"risk_profile": "aggressive"},
+    },
+    "aggressive_leader_focus": {
+        "name": "aggressive_leader_focus",
+        "description": "Keep only high-conviction leaders and allow at most one fresh watchlist add-on.",
+        "rule_overrides": {"confidence_min": "高"},
+        "parameter_overrides": {"lookback_window": "20"},
+        "portfolio_overrides": {"risk_profile": "aggressive", "watchlist_limit": "1"},
+    },
+    "aggressive_core_rotation": {
+        "name": "aggressive_core_rotation",
+        "description": "Anchor on broad beta core while rotating aggressive satellite exposure with tighter filters.",
+        "rule_overrides": {"confidence_min": "高"},
+        "parameter_overrides": {"lookback_window": "40", "drawdown_limit": "0.12"},
+        "portfolio_overrides": {"core_only": "broad_beta", "risk_profile": "aggressive", "watchlist_limit": "1"},
+    },
     "defensive_exit_fix": {
         "name": "defensive_exit_fix",
         "description": "Reduce slow exits by downgrading hold actions during defensive regimes.",

@@ -75,7 +75,52 @@ class LabResult:
     winner: str
     summary_text: str
 
-    def to_dict(self) -> Dict[str, Any]:
+    def _metric(self, report: Dict[str, Any], *path: str, default: Any = None) -> Any:
+        current: Any = report
+        for key in path:
+            if not isinstance(current, dict):
+                return default
+            current = current.get(key)
+            if current is None:
+                return default
+        return current
+
+    def _build_compact_payload(self) -> Dict[str, Any]:
+        baseline_trade_count = int(
+            self._metric(self.baseline, "compact", "backtest_trade_count", default=self._metric(self.baseline, "backtest", "trade_count", default=0)) or 0
+        )
+        candidate_trade_count = int(
+            self._metric(self.candidate, "compact", "backtest_trade_count", default=self._metric(self.candidate, "backtest", "trade_count", default=0)) or 0
+        )
+        summary = {
+            "mode": self.mode,
+            "preset": self.preset,
+            "winner": self.winner,
+            "summary_text": self.summary_text,
+            "baseline_score": float(self.diff.get("baseline_score", 0.0) or 0.0),
+            "candidate_score": float(self.diff.get("candidate_score", 0.0) or 0.0),
+            "baseline_trade_count": baseline_trade_count,
+            "candidate_trade_count": candidate_trade_count,
+            "total_return_delta": float(self.diff.get("total_return_delta", 0.0) or 0.0),
+            "max_drawdown_delta": float(self.diff.get("max_drawdown_delta", 0.0) or 0.0),
+            "trade_count_delta": int(self.diff.get("trade_count_delta", 0) or 0),
+        }
+        return {
+            "mode": self.mode,
+            "preset": self.preset,
+            "winner": self.winner,
+            "summary_text": self.summary_text,
+            "diff": dict(self.diff),
+            "summary": summary,
+            "baseline_compact": dict(self.baseline.get("compact") or {}),
+            "candidate_compact": dict(self.candidate.get("compact") or {}),
+            "applied_overrides": dict(self.candidate.get("applied_overrides") or {}),
+            "preset_detail": dict(self.candidate.get("preset") or {}),
+        }
+
+    def to_dict(self, detail: str = "compact") -> Dict[str, Any]:
+        if str(detail or "compact").strip().lower() != "full":
+            return self._build_compact_payload()
         return {
             "mode": self.mode,
             "preset": self.preset,

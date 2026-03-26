@@ -188,6 +188,9 @@ python -m src.main experiment --preset aggressive_midterm --mode swing --group-b
 
 # 策略实验台：对比 baseline vs candidate
 python -m src.main lab --preset aggressive_midterm
+python -m src.main lab --preset aggressive_trend_guard --output json
+python -m src.main lab --preset aggressive_leader_focus --output json
+python -m src.main lab --preset aggressive_core_rotation --output json --detail full
 python -m src.main lab --preset defensive_exit_fix --override confidence_min=高 --output json
 
 # 查看中期验证摘要
