@@ -1,6 +1,7 @@
 import asyncio
 import functools
 import re
+import requests
 import sys
 import threading
 import time
@@ -110,6 +111,15 @@ class DaemonThreadPoolExecutor(ThreadPoolExecutor):
 
 
 class DataCollector:
+    MORNING_GLOBAL_INDEX_TARGETS = [
+        {"name": "标普500", "aliases": ["标普500"], "yahoo_symbol": "^GSPC"},
+        {"name": "纳斯达克", "aliases": ["纳斯达克"], "yahoo_symbol": "^IXIC"},
+        {"name": "道琼斯", "aliases": ["道琼斯"], "yahoo_symbol": "^DJI"},
+        {"name": "恒生指数", "aliases": ["恒生"], "yahoo_symbol": "^HSI"},
+        {"name": "美元指数", "aliases": ["美元指数"], "yahoo_symbol": "DX-Y.NYB"},
+        {"name": "日经225", "aliases": ["日经225"], "yahoo_symbol": "^N225"},
+    ]
+
     def __init__(self):
         # GitHub Actions runners / Standard Cloud Instances (2-4 vCPUs)
         self.executor = DaemonThreadPoolExecutor(max_workers=16)
@@ -247,6 +257,42 @@ class DataCollector:
         return {
             "name": symbol,
             "current": current,
+            "change_pct": round(change_pct, 2),
+            "change_amount": round(change_amount, 2),
+        }
+
+    async def _fetch_yahoo_global_index_snapshot(self, name: str, symbol: str) -> Optional[Dict[str, Any]]:
+        def fetch_chart_payload() -> Dict[str, Any]:
+            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{requests.utils.quote(symbol, safe='')}"
+            response = requests.get(
+                url,
+                params={"interval": "1d", "range": "10d"},
+                timeout=6,
+                headers={"User-Agent": "Mozilla/5.0"},
+            )
+            response.raise_for_status()
+            return response.json()
+
+        payload = await self._run_blocking(fetch_chart_payload, timeout=6)
+        result = ((payload or {}).get("chart") or {}).get("result") or []
+        if not result:
+            return None
+
+        quote = (((result[0].get("indicators") or {}).get("quote") or [{}])[0]) or {}
+        closes = [float(value) for value in quote.get("close", []) if isinstance(value, (int, float))]
+        if len(closes) < 2:
+            return None
+
+        current = closes[-1]
+        previous_close = closes[-2]
+        if current <= 0 or previous_close <= 0:
+            return None
+
+        change_amount = current - previous_close
+        change_pct = (change_amount / previous_close) * 100
+        return {
+            "name": name,
+            "current": round(current, 2),
             "change_pct": round(change_pct, 2),
             "change_amount": round(change_amount, 2),
         }
@@ -644,51 +690,65 @@ class DataCollector:
     async def get_global_indices(self) -> List[Dict]:
         """
         获取隔夜全球指数（美股/恒生/美元指数等）。
-        Prefer fast snapshot table, then fall back to per-index history snapshots.
+        Prefer fast snapshot table, then fill missing targets from Yahoo, then fall back to hist snapshots.
         """
         logger.info("Fetching global indices...")
-        targets = {
-            "标普500": ["标普500"],
-            "纳斯达克": ["纳斯达克"],
-            "道琼斯": ["道琼斯"],
-            "恒生指数": ["恒生"],
-            "美元指数": ["美元指数"],
-            "日经225": ["日经225"],
-        }
+        results_by_name: Dict[str, Dict[str, Any]] = {}
         try:
             df = await self._run_blocking(ak.index_global_spot_em, timeout=6)
             if df is None or df.empty:
                 raise ValueError("empty global index snapshot")
 
-            results = []
-            for canonical_name, aliases in targets.items():
+            for target in self.MORNING_GLOBAL_INDEX_TARGETS:
+                canonical_name = target["name"]
+                aliases = target["aliases"]
                 row = df[df['名称'].astype(str).apply(lambda text: any(alias in text for alias in aliases))]
                 if not row.empty:
                     try:
-                        results.append({
+                        results_by_name[canonical_name] = {
                             "name": canonical_name,
                             "current": float(row.iloc[0].get('最新价', 0)),
                             "change_pct": float(row.iloc[0].get('涨跌幅', 0)),
                             "change_amount": float(row.iloc[0].get('涨跌额', 0)),
-                        })
+                        }
                     except (ValueError, KeyError):
                         continue
-            if results:
-                return results
         except Exception as e:
-            logger.warning(f"Fast global index snapshot unavailable, falling back to history snapshots: {e}")
+            logger.warning(f"Fast global index snapshot unavailable, filling from backup sources: {e}")
 
         try:
-            results = []
-            for symbol in targets.keys():
+            missing_targets = [
+                target for target in self.MORNING_GLOBAL_INDEX_TARGETS
+                if target["name"] not in results_by_name
+            ]
+
+            for target in missing_targets:
                 try:
-                    item = await self._fetch_global_index_hist_snapshot(symbol)
+                    item = await self._fetch_yahoo_global_index_snapshot(target["name"], target["yahoo_symbol"])
                 except Exception as inner_exc:
-                    logger.warning(f"Global index history snapshot failed for {symbol}: {inner_exc}")
+                    logger.warning(f"Yahoo global index snapshot failed for {target['name']}: {inner_exc}")
                     continue
                 if item:
-                    results.append(item)
-            return results
+                    results_by_name[target["name"]] = item
+
+            still_missing_targets = [
+                target for target in self.MORNING_GLOBAL_INDEX_TARGETS
+                if target["name"] not in results_by_name
+            ]
+            for target in still_missing_targets:
+                try:
+                    item = await self._fetch_global_index_hist_snapshot(target["name"])
+                except Exception as inner_exc:
+                    logger.warning(f"Global index history snapshot failed for {target['name']}: {inner_exc}")
+                    continue
+                if item:
+                    results_by_name[target["name"]] = item
+
+            return [
+                results_by_name[target["name"]]
+                for target in self.MORNING_GLOBAL_INDEX_TARGETS
+                if target["name"] in results_by_name
+            ]
         except Exception as e:
             logger.error(f"Failed to fetch global indices: {e}")
             return []

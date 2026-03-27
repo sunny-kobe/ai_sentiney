@@ -357,6 +357,93 @@ async def test_get_global_indices_hist_fallback_runs_with_single_flight(collecto
 
 
 @pytest.mark.asyncio
+async def test_get_global_indices_fills_missing_targets_from_yahoo_backup(collector, monkeypatch):
+    async def fake_run_blocking(func, *args, **kwargs):
+        if func is ak.index_global_spot_em:
+            return pd.DataFrame([
+                {"名称": "标普500", "最新价": 6477.16, "涨跌幅": -1.74, "涨跌额": -114.74},
+                {"名称": "道琼斯", "最新价": 45960.11, "涨跌幅": -1.01, "涨跌额": -469.18},
+            ])
+        raise AssertionError(f"unexpected run_blocking call: {func.__name__}")
+
+    async def fake_yahoo_snapshot(name, symbol):
+        data = {
+            "纳斯达克": {"name": "纳斯达克", "current": 21408.08, "change_pct": -2.38, "change_amount": -521.54},
+            "恒生指数": {"name": "恒生指数", "current": 24961.49, "change_pct": 0.67, "change_amount": 167.3},
+            "美元指数": {"name": "美元指数", "current": 99.85, "change_pct": -0.08, "change_amount": -0.08},
+            "日经225": {"name": "日经225", "current": 53410.61, "change_pct": 0.32, "change_amount": 171.02},
+        }
+        return data.get(name)
+
+    monkeypatch.setattr(collector, "_run_blocking", fake_run_blocking)
+    monkeypatch.setattr(collector, "_fetch_yahoo_global_index_snapshot", fake_yahoo_snapshot)
+
+    result = await collector.get_global_indices()
+
+    assert [item["name"] for item in result] == ["标普500", "纳斯达克", "道琼斯", "恒生指数", "美元指数", "日经225"]
+    assert len(result) == 6
+
+
+@pytest.mark.asyncio
+async def test_get_global_indices_can_fall_back_entirely_to_yahoo_backup(collector, monkeypatch):
+    async def fake_run_blocking(func, *args, **kwargs):
+        if func is ak.index_global_spot_em:
+            raise asyncio.TimeoutError()
+        raise AssertionError(f"unexpected run_blocking call: {func.__name__}")
+
+    async def fake_yahoo_snapshot(name, symbol):
+        return {
+            "name": name,
+            "current": 100.0,
+            "change_pct": 1.0,
+            "change_amount": 1.0,
+        }
+
+    monkeypatch.setattr(collector, "_run_blocking", fake_run_blocking)
+    monkeypatch.setattr(collector, "_fetch_yahoo_global_index_snapshot", fake_yahoo_snapshot)
+
+    result = await collector.get_global_indices()
+
+    assert len(result) == 6
+    assert {item["name"] for item in result} == {"标普500", "纳斯达克", "道琼斯", "恒生指数", "美元指数", "日经225"}
+
+
+@pytest.mark.asyncio
+async def test_collect_morning_data_marks_global_indices_fresh_when_backup_restores_coverage(collector, monkeypatch):
+    async def fake_global_indices():
+        return [
+            {"name": "标普500", "current": 6477.16, "change_pct": -1.74, "change_amount": -114.74},
+            {"name": "纳斯达克", "current": 21408.08, "change_pct": -2.38, "change_amount": -521.54},
+            {"name": "道琼斯", "current": 45960.11, "change_pct": -1.01, "change_amount": -469.18},
+            {"name": "恒生指数", "current": 24961.49, "change_pct": 0.67, "change_amount": 167.3},
+        ]
+
+    async def fake_commodities():
+        return [{"name": "布伦特原油", "current": 80.0, "change_pct": 0.3}]
+
+    async def fake_treasury():
+        return {"yield_10y": 4.42, "yield_2y": 3.96, "spread_10y_2y": 0.46}
+
+    async def fake_macro_news():
+        return {"telegraph": ["海外市场震荡"], "ai_tech": []}
+
+    async def fake_stock_context(code, name):
+        return {"code": code, "name": name, "last_close": 10.0, "ma20": 9.8, "bias_pct": 0.02, "ma20_status": "ABOVE"}
+
+    monkeypatch.setattr(collector, "get_global_indices", fake_global_indices)
+    monkeypatch.setattr(collector, "get_commodity_futures", fake_commodities)
+    monkeypatch.setattr(collector, "get_us_treasury_yields", fake_treasury)
+    monkeypatch.setattr(collector, "get_macro_news", fake_macro_news)
+    monkeypatch.setattr(collector, "_fetch_morning_stock_context", fake_stock_context)
+
+    result = await collector.collect_morning_data([{"code": "159819", "name": "人工智能ETF"}])
+
+    assert result["collection_status"]["blocks"]["global_indices"]["status"] == "fresh"
+    assert "partial global indices missing" not in result["data_issues"]
+    assert result["collection_status"]["overall_status"] == "fresh"
+
+
+@pytest.mark.asyncio
 async def test_collect_morning_data_marks_partial_global_indices_as_degraded(collector, monkeypatch):
     async def fake_global_indices():
         return [
