@@ -171,9 +171,15 @@ class TelegramClient:
                 f"建议总仓位: {position_plan.get('total_exposure', 'N/A')}",
                 f"现金目标: {position_plan.get('cash_target', 'N/A')}",
                 f"优先动作: {'；'.join(position_plan.get('execution_order', []) or []) or '暂无'}",
-                "持仓处理:",
             ]
         )
+        validation_budgets = position_plan.get("validation_budgets") or []
+        if validation_budgets:
+            lines.append("方向预算:")
+            for budget in validation_budgets:
+                lines.append(f"- {budget.get('label', '')}: {budget.get('status', '正常')} | 预算:{budget.get('budget_range', 'N/A')}")
+                lines.append(f"  原因: {budget.get('reason', '')}")
+        lines.append("持仓处理:")
         for action in data.get("actions", [])[:8]:
             lines.append(
                 f"- {action.get('name', '')} | {action.get('conclusion', action.get('action_label', '观察'))}"

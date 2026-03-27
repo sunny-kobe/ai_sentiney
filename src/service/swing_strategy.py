@@ -410,6 +410,76 @@ def _validation_cap_max(
     return 10 if cluster in RISK_CLUSTERS or cluster == "single_name" else 15
 
 
+def _cluster_budget_status(
+    *,
+    cluster: str,
+    cluster_stats: Optional[Mapping[str, Any]],
+    decision_evidence: Optional[Mapping[str, Any]],
+) -> tuple[str, str]:
+    evidence_root = dict(decision_evidence or {})
+    primary_window = evidence_root.get("primary_window")
+    if evidence_root.get("offensive_allowed") is False:
+        reason = str(evidence_root.get("offensive_reason", "验证暂不支持主动进攻") or "验证暂不支持主动进攻")
+        return "仅观察", f"当前全局进攻权限关闭：{reason}。"
+
+    if not _is_weak_validation_stats(cluster_stats):
+        window_text = f"{int(primary_window)}日验证稳定" if primary_window else "验证稳定"
+        return "正常", f"{window_text}，当前不额外压缩。"
+
+    avg_relative = cluster_stats.get("avg_relative_return") if cluster_stats else None
+    avg_drawdown = float((cluster_stats or {}).get("avg_max_drawdown", 0.0) or 0.0)
+    severe = (
+        (avg_relative is not None and float(avg_relative) <= -0.04)
+        or avg_drawdown <= -0.10
+    )
+    window_text = f"{int(primary_window)}日验证偏弱" if primary_window else "验证偏弱"
+    if severe:
+        return "严格限制", f"{window_text}且回撤过大，先压到最低风险预算。"
+    return "受限", f"{window_text}，先只保留试仓级预算。"
+
+
+def _build_validation_budgets(
+    actions: Sequence[Mapping[str, Any]],
+    *,
+    decision_evidence: Optional[Mapping[str, Any]],
+) -> List[Dict[str, Any]]:
+    grouped: Dict[str, List[Mapping[str, Any]]] = {}
+    for item in actions:
+        cluster = str(item.get("cluster", "") or "")
+        if not cluster:
+            continue
+        grouped.setdefault(cluster, []).append(item)
+
+    budgets: List[Dict[str, Any]] = []
+    for cluster, items in grouped.items():
+        cluster_label = _format_cluster_label(cluster)
+        summary = _summarize_bucket_ranges(items)
+        budget_range = _format_pct_range(summary["min"], summary["max"])
+        cluster_stats = ((decision_evidence or {}).get("cluster") or {}).get(cluster) or {}
+        status, reason = _cluster_budget_status(
+            cluster=cluster,
+            cluster_stats=cluster_stats,
+            decision_evidence=decision_evidence,
+        )
+        budgets.append(
+            {
+                "cluster": cluster,
+                "label": cluster_label,
+                "budget_range": budget_range,
+                "status": status,
+                "reason": reason,
+            }
+        )
+
+    budgets.sort(
+        key=lambda item: (
+            {"严格限制": 0, "仅观察": 1, "受限": 2, "正常": 3}.get(str(item.get("status", "")), 9),
+            str(item.get("label", "")),
+        )
+    )
+    return budgets
+
+
 def _apply_validation_position_caps(
     actions: Sequence[Mapping[str, Any]],
     position_plan: Mapping[str, Any],
@@ -462,6 +532,10 @@ def _apply_validation_position_caps(
     updated_plan["total_exposure"] = _format_pct_range(total_summary["min"], total_summary["max"])
     updated_plan["cash_target"] = _format_pct_range(cash_summary["min"], cash_summary["max"])
     updated_plan["buckets"] = buckets
+    updated_plan["validation_budgets"] = _build_validation_budgets(
+        updated_actions,
+        decision_evidence=decision_evidence,
+    )
     return {"actions": updated_actions, "position_plan": updated_plan}
 
 

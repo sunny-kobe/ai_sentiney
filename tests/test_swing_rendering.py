@@ -49,6 +49,10 @@ def _make_swing_result():
                 "卫星仓": [{"code": "563300", "name": "中证2000ETF", "target_weight": "0%-3%"}],
                 "现金": [],
             },
+            "validation_budgets": [
+                {"label": "大盘核心方向", "budget_range": "25%-35%", "status": "正常", "reason": "20日验证稳定，当前不额外压缩。"},
+                {"label": "中小盘方向", "budget_range": "0%-5%", "status": "受限", "reason": "20日验证偏弱，先只保留试仓级预算。"},
+            ],
         },
         "portfolio_actions": {
             "增配": [],
@@ -135,6 +139,7 @@ def test_cli_swing_summary_uses_plain_language_sections():
     lines = rendered.splitlines()
     assert "今日结论" in rendered
     assert "账户动作" in rendered
+    assert "方向预算" in rendered
     assert "持仓处理" in rendered
     assert "观察池机会" in rendered
     assert "风险清单" in rendered
@@ -148,6 +153,7 @@ def test_cli_swing_summary_uses_plain_language_sections():
     assert "优先动作: 中证2000ETF:卖出2900份，保留约2300份；军工ETF:先试仓5%-10%" in rendered
     assert "[510300] 沪深300ETF | 结论:持有 | 当前:10.7% | 目标:25%-35%" in rendered
     assert "验证: 20日验证里，大盘核心方向样本10笔，平均跑赢基准0.7%，回撤约2.6%。" in rendered
+    assert "大盘核心方向: 正常 | 预算:25%-35%" in rendered
     assert "[512660] 军工ETF | 动作:进入试仓区" in rendered
     assert "MACD" not in rendered
     assert "中期跟踪" not in rendered
@@ -160,6 +166,7 @@ def test_telegram_swing_text_shows_action_buckets_and_risk_lines():
 
     assert "今日结论" in text
     assert "账户动作" in text
+    assert "方向预算" in text
     assert "现金目标: 50%-65%" in text
     assert "当前总仓位: 68.7%" in text
     assert "观察池机会" in text
@@ -168,6 +175,7 @@ def test_telegram_swing_text_shows_action_buckets_and_risk_lines():
     assert "真实建议跟踪" in text
     assert "真实样本: 20日8笔 | 历史样本: 20日12笔 | 进攻权限: 允许（真实建议近期进攻统计仍有效，正式回测未见明显恶化）" in text
     assert "验证: 20日验证里，大盘核心方向样本10笔，平均跑赢基准0.7%，回撤约2.6%。" in text
+    assert "大盘核心方向: 正常 | 预算:25%-35%" in text
     assert "实验提示" in text
     assert "激进龙头聚焦" in text
     assert any("实验优选: 激进龙头聚焦（当前更优）" in line for line in lines[:4])
@@ -186,6 +194,7 @@ def test_feishu_swing_card_shows_plain_language_sections():
     joined = "\n".join(contents)
     assert "今日结论" in joined
     assert "账户动作" in joined
+    assert "方向预算" in joined
     assert "总仓位" in joined
     assert "当前总仓位" in joined
     assert "持仓处理" in joined
@@ -194,6 +203,7 @@ def test_feishu_swing_card_shows_plain_language_sections():
     assert "真实建议跟踪" in joined
     assert "真实样本: 20日8笔 | 历史样本: 20日12笔 | 进攻权限: 允许（真实建议近期进攻统计仍有效，正式回测未见明显恶化）" in joined
     assert "验证: 20日验证里，大盘核心方向样本10笔，平均跑赢基准0.7%，回撤约2.6%。" in joined
+    assert "大盘核心方向: 正常 | 预算:25%-35%" in joined
     assert "实验提示" in joined
     assert "激进龙头聚焦" in joined
     assert "实验优选: 激进龙头聚焦（当前更优）" in contents[1]

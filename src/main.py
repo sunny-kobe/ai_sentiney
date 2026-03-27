@@ -99,6 +99,14 @@ def _print_text_summary(result: Dict[str, Any], mode: str):
         lines.append(f"  现金目标: {position_plan.get('cash_target', 'N/A')}")
         execution_order = position_plan.get("execution_order") or []
         lines.append(f"  优先动作: {'；'.join(execution_order) if execution_order else '暂无'}")
+        validation_budgets = position_plan.get("validation_budgets") or []
+        if validation_budgets:
+            lines.append("方向预算:")
+            for budget in validation_budgets:
+                lines.append(
+                    f"  {budget.get('label', '')}: {budget.get('status', '正常')} | 预算:{budget.get('budget_range', 'N/A')}"
+                )
+                lines.append(f"    原因: {budget.get('reason', '')}")
         lines.append("持仓处理:")
         for action in result.get("actions", []):
             lines.append(

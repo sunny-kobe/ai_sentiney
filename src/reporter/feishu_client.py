@@ -786,6 +786,28 @@ class FeishuClient:
                     }
                 },
                 {"tag": "hr"},
+            ]
+        )
+        validation_budgets = position_plan.get("validation_budgets") or []
+        if validation_budgets:
+            elements.extend(
+                [
+                    {
+                        "tag": "div",
+                        "text": {
+                            "tag": "lark_md",
+                            "content": "**方向预算**\n"
+                            + "\n".join(
+                                f"- {budget.get('label', '')}: {budget.get('status', '正常')} | 预算:{budget.get('budget_range', 'N/A')}\n  {budget.get('reason', '')}"
+                                for budget in validation_budgets
+                            ),
+                        },
+                    },
+                    {"tag": "hr"},
+                ]
+            )
+        elements.extend(
+            [
                 {
                     "tag": "div",
                     "text": {
