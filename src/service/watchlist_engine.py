@@ -64,6 +64,10 @@ def _is_weak_validation_stats(stats: Mapping[str, Any]) -> bool:
 
 
 def _validation_note_for_item(item: Mapping[str, Any], decision_evidence: Mapping[str, Any]) -> str:
+    if decision_evidence and decision_evidence.get("offensive_allowed") is False:
+        reason = str(decision_evidence.get("offensive_reason", "验证暂不支持主动进攻") or "验证暂不支持主动进攻")
+        return f"当前全局进攻权限关闭：{reason}。"
+
     primary_window = decision_evidence.get("primary_window")
     cluster = str(item.get("cluster", "") or "")
     cluster_stats = ((decision_evidence.get("cluster") or {}).get(cluster)) or {}
@@ -109,7 +113,10 @@ def build_watchlist_candidates(
         validation_note = _validation_note_for_item(item, decision_evidence or {})
         if validation_note and action_label == "进入试仓区":
             action_label = "继续观察"
-            plan = "验证暂时不支持直接试仓，先继续观察，等该方向样本修复后再考虑。"
+            if (decision_evidence or {}).get("offensive_allowed") is False:
+                plan = "进攻权限恢复前先不试仓，继续观察，等验证重新转强后再考虑。"
+            else:
+                plan = "验证暂时不支持直接试仓，先继续观察，等该方向样本修复后再考虑。"
         else:
             plan = item.get("rebalance_instruction", "继续观察")
         candidates.append(

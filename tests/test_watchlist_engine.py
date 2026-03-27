@@ -103,3 +103,37 @@ def test_build_watchlist_candidates_blocks_trial_when_validation_evidence_is_wea
     assert "20日验证偏弱" in ai_candidate["validation_note"]
     assert "验证暂时不支持直接试仓" in ai_candidate["plan"]
     assert defense_candidate["action_label"] == "进入试仓区"
+
+
+def test_build_watchlist_candidates_blocks_trial_when_global_offensive_gate_is_closed():
+    candidates = build_watchlist_candidates(
+        [
+            {
+                "code": "512660",
+                "name": "军工ETF",
+                "signal": "OPPORTUNITY",
+                "confidence": "高",
+                "final_action": "增配",
+                "cluster": "sector_etf",
+                "setup_type": "trend_follow",
+                "evidence_text": "站上20日线并放量突破",
+                "invalid_condition": "跌回20日线下方",
+                "rebalance_instruction": "下一交易日分批加仓10%-20%",
+            },
+        ],
+        held_codes=set(),
+        watchlist_codes={"512660"},
+        strategy_preferences={"candidate_limit": 2, "max_watchlist_adds_per_day": 2},
+        market_regime="进攻",
+        decision_evidence={
+            "primary_window": 20,
+            "offensive_allowed": False,
+            "offensive_reason": "真实建议近期进攻统计失效",
+            "cluster": {},
+        },
+    )
+
+    candidate = candidates["all_candidates"][0]
+    assert candidate["action_label"] == "继续观察"
+    assert candidate["validation_note"] == "当前全局进攻权限关闭：真实建议近期进攻统计失效。"
+    assert "进攻权限恢复" in candidate["plan"]

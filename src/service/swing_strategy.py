@@ -385,9 +385,36 @@ def _cap_target_weight(weight: str, cap_max: int) -> str:
     return _format_pct_range(0, min(current_max, cap_max))
 
 
+def _validation_cap_max(
+    *,
+    action_label: str,
+    cluster: str,
+    cluster_stats: Optional[Mapping[str, Any]],
+    decision_evidence: Optional[Mapping[str, Any]],
+) -> Optional[int]:
+    evidence_root = dict(decision_evidence or {})
+    if action_label == "增配" and evidence_root.get("offensive_allowed") is False:
+        return 5
+
+    if not _is_weak_validation_stats(cluster_stats):
+        return None
+
+    avg_relative = cluster_stats.get("avg_relative_return") if cluster_stats else None
+    avg_drawdown = float((cluster_stats or {}).get("avg_max_drawdown", 0.0) or 0.0)
+    severe = (
+        (avg_relative is not None and float(avg_relative) <= -0.04)
+        or avg_drawdown <= -0.10
+    )
+    if severe:
+        return 5
+    return 10 if cluster in RISK_CLUSTERS or cluster == "single_name" else 15
+
+
 def _apply_validation_position_caps(
     actions: Sequence[Mapping[str, Any]],
     position_plan: Mapping[str, Any],
+    *,
+    decision_evidence: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     updated_actions: List[Dict[str, Any]] = []
     for item in actions:
@@ -395,8 +422,13 @@ def _apply_validation_position_caps(
         cluster_stats = ((updated.get("validation_evidence") or {}).get("cluster")) or {}
         action_label = str(updated.get("action_label", "") or "")
         cluster = str(updated.get("cluster", "") or "")
-        if action_label in {"增配", "持有"} and _is_weak_validation_stats(cluster_stats):
-            cap_max = 10 if cluster in RISK_CLUSTERS or cluster == "single_name" else 15
+        cap_max = _validation_cap_max(
+            action_label=action_label,
+            cluster=cluster,
+            cluster_stats=cluster_stats,
+            decision_evidence=decision_evidence,
+        )
+        if action_label in {"增配", "持有"} and cap_max is not None:
             updated["target_weight"] = _cap_target_weight(str(updated.get("target_weight", "0%")), cap_max)
         updated_actions.append(updated)
 
@@ -1399,6 +1431,7 @@ def build_swing_report(
     position_output = _apply_validation_position_caps(
         position_output["actions"],
         position_output["position_plan"],
+        decision_evidence=decision_evidence,
     )
     snapshot_output = build_current_position_snapshot(
         position_output["actions"],
