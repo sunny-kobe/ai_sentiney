@@ -825,12 +825,14 @@ class FeishuClient:
             )
 
         for action in data.get("actions", []):
+            validation_line = f"> 验证: {action.get('validation_note', '')}\n" if action.get("validation_note") else ""
             content = (
                 f"**{action.get('name', '')}** ({action.get('code', '')})\n"
                 f"> 结论: {action.get('conclusion', action.get('action_label', '观察'))}\n"
                 f"> 当前仓位: {action.get('current_weight', '0%')}\n"
                 f"> 目标仓位: {action.get('target_weight', 'N/A')}\n"
                 f"> 原因: {action.get('reason', '')}\n"
+                f"{validation_line}"
                 f"> 计划: {action.get('plan', '')}\n"
                 f"> 风险线: {action.get('risk_line', '')}"
             )

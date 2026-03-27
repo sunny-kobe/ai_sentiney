@@ -82,6 +82,18 @@ POSITION_TEMPLATES = {
 ACTION_WEIGHT_PRIORITY = {"增配": 5, "持有": 4, "观察": 2, "减配": 1, "回避": 0}
 SMALL_POSITION_RANGES = {"观察": (0, 5), "减配": (0, 3), "回避": (0, 0)}
 DEFAULT_RISK_PROFILE = "balanced"
+VALIDATION_MIN_SAMPLE = 5
+WEAK_VALIDATION_RELATIVE = -0.02
+WEAK_VALIDATION_DRAWDOWN = -0.08
+CLUSTER_LABELS = {
+    "ai": "人工智能方向",
+    "broad_beta": "大盘核心方向",
+    "small_cap": "中小盘方向",
+    "semiconductor": "半导体方向",
+    "precious_metals": "贵金属方向",
+    "sector_etf": "行业轮动方向",
+    "single_name": "个股方向",
+}
 
 
 def _format_pct_value(value: float) -> str:
@@ -109,6 +121,127 @@ def _normalize_risk_profile(value: Any) -> str:
     if profile in POSITION_TEMPLATES:
         return profile
     return DEFAULT_RISK_PROFILE
+
+
+def _format_ratio_pct(value: Optional[float], *, fallback_label: str = "平均收益") -> str:
+    if value is None:
+        return ""
+    numeric = float(value)
+    if fallback_label == "相对":
+        if numeric >= 0:
+            return f"平均跑赢基准{numeric * 100:.1f}%"
+        return f"平均落后基准{abs(numeric) * 100:.1f}%"
+    return f"{fallback_label}{numeric * 100:.1f}%"
+
+
+def _format_cluster_label(cluster: Any) -> str:
+    normalized = str(cluster or "").strip()
+    return CLUSTER_LABELS.get(normalized, normalized or "该方向")
+
+
+def _build_validation_note(
+    cluster: str,
+    validation_evidence: Mapping[str, Any],
+) -> str:
+    primary_window = validation_evidence.get("primary_window")
+    cluster_stats = validation_evidence.get("cluster") or {}
+    if not primary_window or int(cluster_stats.get("sample_count", 0) or 0) <= 0:
+        return ""
+
+    relative_text = _format_ratio_pct(cluster_stats.get("avg_relative_return"), fallback_label="相对")
+    if not relative_text:
+        relative_text = _format_ratio_pct(cluster_stats.get("avg_absolute_return"), fallback_label="平均收益")
+    drawdown = abs(float(cluster_stats.get("avg_max_drawdown", 0.0) or 0.0)) * 100
+    cluster_label = _format_cluster_label(cluster)
+    if _is_weak_validation_stats(cluster_stats):
+        return (
+            f"{cluster_label}的{int(primary_window)}日验证偏弱，样本"
+            f"{int(cluster_stats.get('sample_count', 0) or 0)}笔，{relative_text}，回撤约{drawdown:.1f}%。"
+        )
+    return (
+        f"{int(primary_window)}日验证里，{cluster_label}样本"
+        f"{int(cluster_stats.get('sample_count', 0) or 0)}笔，{relative_text}，回撤约{drawdown:.1f}%。"
+    )
+
+
+def _is_weak_validation_stats(stats: Optional[Mapping[str, Any]]) -> bool:
+    if not stats:
+        return False
+    sample_count = int(stats.get("sample_count", 0) or 0)
+    avg_relative = stats.get("avg_relative_return")
+    avg_drawdown = float(stats.get("avg_max_drawdown", 0.0) or 0.0)
+    return sample_count >= VALIDATION_MIN_SAMPLE and (
+        (avg_relative is not None and float(avg_relative) <= WEAK_VALIDATION_RELATIVE)
+        or avg_drawdown <= WEAK_VALIDATION_DRAWDOWN
+    )
+
+
+def _attach_validation_evidence(
+    decisions: Sequence[Mapping[str, Any]],
+    *,
+    decision_evidence: Optional[Mapping[str, Any]],
+    market_regime: str,
+) -> List[Dict[str, Any]]:
+    evidence_root = dict(decision_evidence or {})
+    enriched: List[Dict[str, Any]] = []
+    for item in decisions:
+        updated = dict(item)
+        cluster = str(updated.get("cluster", "") or "")
+        action_label = str(updated.get("action_label", "") or "")
+        evidence = {
+            "primary_window": evidence_root.get("primary_window"),
+            "action": dict(((evidence_root.get("action") or {}).get(action_label)) or {}),
+            "cluster": dict(((evidence_root.get("cluster") or {}).get(cluster)) or {}),
+            "regime": dict(((evidence_root.get("regime") or {}).get(market_regime)) or {}),
+        }
+        updated["validation_evidence"] = evidence
+        note = _build_validation_note(cluster, evidence)
+        if note:
+            updated["validation_note"] = note
+        enriched.append(updated)
+    return enriched
+
+
+def _apply_validation_evidence_overlay(
+    decisions: Sequence[Mapping[str, Any]],
+    *,
+    decision_evidence: Optional[Mapping[str, Any]],
+    market_regime: str,
+) -> List[Dict[str, Any]]:
+    evidence_root = dict(decision_evidence or {})
+    adjusted: List[Dict[str, Any]] = []
+    for item in decisions:
+        updated = dict(item)
+        action_label = str(updated.get("action_label", "观察") or "观察")
+        if action_label not in {"增配", "持有"}:
+            adjusted.append(updated)
+            continue
+
+        cluster = str(updated.get("cluster", "") or "")
+        cluster_stats = ((evidence_root.get("cluster") or {}).get(cluster)) or {}
+        regime_stats = ((evidence_root.get("regime") or {}).get(market_regime)) or {}
+        action_stats = ((evidence_root.get("action") or {}).get(action_label)) or {}
+
+        if _is_weak_validation_stats(cluster_stats) and not _is_weak_validation_stats(regime_stats):
+            downgraded = _downgrade_action(action_label)
+            if downgraded != action_label:
+                updated["action_label"] = downgraded
+                updated["conclusion"] = downgraded
+                updated["operation"] = downgraded
+                updated["plan"] = ACTION_PLANS[downgraded]
+            reason_suffix = "历史验证偏弱，先降一档处理。"
+            updated["reason"] = f"{updated.get('reason', '').strip()} {reason_suffix}".strip()
+        elif _is_weak_validation_stats(action_stats) and action_label == "增配":
+            downgraded = _downgrade_action(action_label)
+            if downgraded != action_label:
+                updated["action_label"] = downgraded
+                updated["conclusion"] = downgraded
+                updated["operation"] = downgraded
+                updated["plan"] = ACTION_PLANS[downgraded]
+                updated["reason"] = f"{updated.get('reason', '').strip()} 历史验证对主动进攻支持不足，先按持有处理。".strip()
+
+        adjusted.append(updated)
+    return adjusted
 
 
 def _resolve_risk_profile(strategy_preferences: Optional[Mapping[str, Any]]) -> str:
@@ -1132,6 +1265,7 @@ def build_swing_report(
     }
     held_codes = {str(code) for code in (ai_input.get("held_codes") or set())}
     watchlist_codes = {str(code) for code in (ai_input.get("watchlist_codes") or set())}
+    decision_evidence = ((ai_input.get("validation_report") or {}).get("decision_evidence") or {})
     decisions = []
     watchlist_holdings = []
     for holding in strategy_snapshot.get("holdings", []):
@@ -1182,6 +1316,11 @@ def build_swing_report(
         benchmark_context,
         risk_profile=risk_profile,
     )
+    decisions = _apply_validation_evidence_overlay(
+        decisions,
+        decision_evidence=decision_evidence,
+        market_regime=strategy_snapshot["market_regime"],
+    )
     for decision in decisions:
         if str(decision.get("action_label", "")) != "观察":
             continue
@@ -1197,6 +1336,11 @@ def build_swing_report(
             regime=strategy_snapshot["market_regime"],
             stock_map=stock_map,
         )
+    decisions = _attach_validation_evidence(
+        decisions,
+        decision_evidence=decision_evidence,
+        market_regime=strategy_snapshot["market_regime"],
+    )
 
     position_output = build_position_plan(decisions, strategy_snapshot["market_regime"], risk_profile=risk_profile)
     snapshot_output = build_current_position_snapshot(

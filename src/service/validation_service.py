@@ -369,6 +369,60 @@ class ValidationService:
             "offensive_reason": str(offensive_gate.get("reason", "样本不足")),
         }
 
+    def _build_decision_evidence_snapshot(
+        self,
+        *,
+        scorecard: Optional[Dict[str, Any]],
+        synthetic_records: List[Dict[str, Any]],
+        performance_context: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        primary_window, _ = self._primary_window_stats(scorecard, preferred_windows=(20, 10, 40))
+        if primary_window is None:
+            available_windows = [int(window) for window in ((scorecard or {}).get("windows") or [])]
+            primary_window = available_windows[0] if available_windows else None
+        offensive_gate = ((performance_context or {}).get("offensive") or {}).get("pullback_resume") or {}
+
+        action_map: Dict[str, Dict[str, Any]] = {}
+        if primary_window is not None:
+            by_action = ((scorecard or {}).get("stats") or {}).get("by_action", {})
+            for action_label, stats_by_window in by_action.items():
+                stats = dict((stats_by_window or {}).get(primary_window, {}) or {})
+                if int(stats.get("count", 0) or 0) <= 0:
+                    continue
+                action_map[str(action_label)] = {
+                    "sample_count": int(stats.get("count", 0) or 0),
+                    "avg_absolute_return": float(stats.get("avg_absolute_return", 0.0) or 0.0),
+                    "avg_relative_return": float(stats.get("avg_relative_return", 0.0) or 0.0),
+                    "avg_max_drawdown": float(stats.get("avg_max_drawdown", 0.0) or 0.0),
+                }
+
+        grouped_dimensions: Dict[str, Dict[str, Any]] = {}
+        for group_by in ("cluster", "regime"):
+            summary = self._build_grouped_diagnostics(
+                scorecard=scorecard,
+                synthetic_records=synthetic_records,
+                diagnosis_request=DiagnosisRequest(group_by=group_by, primary_window=primary_window),
+            ) or {}
+            grouped_dimensions[group_by] = {
+                str(group.get("key", "") or ""): {
+                    "sample_count": int(group.get("sample_count", 0) or 0),
+                    "avg_absolute_return": float(group.get("avg_absolute_return", 0.0) or 0.0),
+                    "avg_relative_return": float(group.get("avg_relative_return", 0.0) or 0.0),
+                    "avg_max_drawdown": float(group.get("avg_max_drawdown", 0.0) or 0.0),
+                }
+                for group in (summary.get("groups") or [])
+                if group.get("key")
+            }
+
+        return {
+            "primary_window": primary_window,
+            "offensive_allowed": bool(offensive_gate.get("allowed")),
+            "offensive_reason": str(offensive_gate.get("reason", "样本不足")),
+            "action": action_map,
+            "cluster": grouped_dimensions.get("cluster", {}),
+            "regime": grouped_dimensions.get("regime", {}),
+        }
+
     def _build_validation_report_from_synthetic_records(
         self,
         *,
@@ -393,6 +447,11 @@ class ValidationService:
                 "summary_text": self._build_validation_summary_text(None, None, None, None),
             }
             empty_report["compact"] = self._build_compact_validation_snapshot(empty_report)
+            empty_report["decision_evidence"] = self._build_decision_evidence_snapshot(
+                scorecard=None,
+                synthetic_records=[],
+                performance_context=empty_report.get("performance_context"),
+            )
             empty_report["diagnostics"] = self._build_grouped_diagnostics(
                 scorecard=None,
                 synthetic_records=[],
@@ -449,6 +508,11 @@ class ValidationService:
             "summary_text": self._build_validation_summary_text(None, scorecard, backtest_report, walkforward_report),
         }
         report["compact"] = self._build_compact_validation_snapshot(report)
+        report["decision_evidence"] = self._build_decision_evidence_snapshot(
+            scorecard=scorecard,
+            synthetic_records=synthetic_records,
+            performance_context=report.get("performance_context"),
+        )
         report["diagnostics"] = self._build_grouped_diagnostics(
             scorecard=scorecard,
             synthetic_records=synthetic_records,
@@ -806,7 +870,7 @@ class ValidationService:
         )
         synthetic_records = self._build_synthetic_swing_records(sorted_records)
         if not synthetic_records:
-            return {
+            report = {
                 "live": live_report,
                 "scorecard": None,
                 "backtest": {
@@ -825,6 +889,12 @@ class ValidationService:
                 ),
                 "summary_text": self._build_validation_summary_text(live_report, None, None, None),
             }
+            report["decision_evidence"] = self._build_decision_evidence_snapshot(
+                scorecard=None,
+                synthetic_records=[],
+                performance_context=report.get("performance_context"),
+            )
+            return report
 
         scorecard = build_swing_scorecard(
             synthetic_records,
@@ -872,7 +942,7 @@ class ValidationService:
             (live_report or {}).get("scorecard"),
         )
 
-        return {
+        report = {
             "live": live_report,
             "scorecard": scorecard,
             "backtest": backtest_report,
@@ -885,6 +955,12 @@ class ValidationService:
                 walkforward_report,
             ),
         }
+        report["decision_evidence"] = self._build_decision_evidence_snapshot(
+            scorecard=scorecard,
+            synthetic_records=synthetic_records,
+            performance_context=performance_context,
+        )
+        return report
 
     def build_validation_result(
         self,

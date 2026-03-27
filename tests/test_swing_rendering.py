@@ -71,6 +71,7 @@ def _make_swing_result():
                 "reason": "还站在20日线 4.01 上方，主趋势还在，承接还在配合。",
                 "plan": "先把现有仓位拿住，等下一次确认转强再决定要不要加。",
                 "risk_line": "收盘跌回20日线 4.01 下方，就先缩仓。",
+                "validation_note": "20日验证里，大盘核心方向样本10笔，平均跑赢基准0.7%，回撤约2.6%。",
                 "technical_evidence": "MACD多头，站上20日线",
             },
             {
@@ -87,6 +88,7 @@ def _make_swing_result():
                 "reason": "已经落到20日线 0.50 下方，已经开始转弱，承接偏弱。",
                 "plan": "先收缩一部分仓位，把组合波动降下来。",
                 "risk_line": "不能重新站上20日线 0.50 之前，先别加仓。",
+                "validation_note": "中小盘方向的20日验证偏弱，样本6笔，平均落后基准2.4%，回撤约8.9%。",
                 "technical_evidence": "MACD死叉，跌破20日线",
             },
         ],
@@ -145,6 +147,7 @@ def test_cli_swing_summary_uses_plain_language_sections():
     assert "总仓位: 35%-50%" in rendered
     assert "优先动作: 中证2000ETF:卖出2900份，保留约2300份；军工ETF:先试仓5%-10%" in rendered
     assert "[510300] 沪深300ETF | 结论:持有 | 当前:10.7% | 目标:25%-35%" in rendered
+    assert "验证: 20日验证里，大盘核心方向样本10笔，平均跑赢基准0.7%，回撤约2.6%。" in rendered
     assert "[512660] 军工ETF | 动作:进入试仓区" in rendered
     assert "MACD" not in rendered
     assert "中期跟踪" not in rendered
@@ -164,6 +167,7 @@ def test_telegram_swing_text_shows_action_buckets_and_risk_lines():
     assert "验证摘要" in text
     assert "真实建议跟踪" in text
     assert "真实样本: 20日8笔 | 历史样本: 20日12笔 | 进攻权限: 允许（真实建议近期进攻统计仍有效，正式回测未见明显恶化）" in text
+    assert "验证: 20日验证里，大盘核心方向样本10笔，平均跑赢基准0.7%，回撤约2.6%。" in text
     assert "实验提示" in text
     assert "激进龙头聚焦" in text
     assert any("实验优选: 激进龙头聚焦（当前更优）" in line for line in lines[:4])
@@ -189,6 +193,7 @@ def test_feishu_swing_card_shows_plain_language_sections():
     assert "验证摘要" in joined
     assert "真实建议跟踪" in joined
     assert "真实样本: 20日8笔 | 历史样本: 20日12笔 | 进攻权限: 允许（真实建议近期进攻统计仍有效，正式回测未见明显恶化）" in joined
+    assert "验证: 20日验证里，大盘核心方向样本10笔，平均跑赢基准0.7%，回撤约2.6%。" in joined
     assert "实验提示" in joined
     assert "激进龙头聚焦" in joined
     assert "实验优选: 激进龙头聚焦（当前更优）" in contents[1]

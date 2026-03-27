@@ -106,6 +106,8 @@ def _print_text_summary(result: Dict[str, Any], mode: str):
                 f" | 当前:{action.get('current_weight', '0%')} | 目标:{action.get('target_weight', 'N/A')}"
             )
             lines.append(f"    原因: {action.get('reason', '')}")
+            if action.get("validation_note"):
+                lines.append(f"    验证: {action.get('validation_note', '')}")
             lines.append(f"    计划: {action.get('plan', '')}")
             lines.append(f"    风险线: {action.get('risk_line', '')}")
         lines.append("观察池机会:")

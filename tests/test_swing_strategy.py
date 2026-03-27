@@ -358,6 +358,151 @@ def test_build_swing_report_uses_validation_feedback_to_block_weak_offensive_set
     assert report["validation_summary"] == "样本不足，当前进攻 setup 不做加仓放大。"
 
 
+def test_build_swing_report_downgrades_offensive_action_when_cluster_evidence_is_weak():
+    ai_input = {
+        "market_breadth": "3200家上涨，1700家下跌",
+        "indices": {"上证指数": {"change_pct": 0.8}, "创业板指": {"change_pct": 1.1}},
+        "macro_news": {"telegraph": ["风险偏好修复，成长方向回暖"]},
+        "stocks": [
+            _make_stock(
+                "159819",
+                "人工智能ETF",
+                signal="OPPORTUNITY",
+                confidence="高",
+                bias_pct=0.05,
+                pct_change=2.1,
+                current_price=1.08,
+                ma20=1.0,
+                tech_summary="重新站上20日线，量价配合",
+                macd_trend="GOLDEN_CROSS",
+                obv_trend="INFLOW",
+            )
+        ],
+        "held_codes": {"159819"},
+        "strategy_preferences": {"risk_profile": "aggressive"},
+        "performance_context": {"offensive": {"pullback_resume": {"allowed": True, "reason": "全局验证仍允许进攻"}}},
+        "validation_report": {
+            "summary_text": "整体有效，但人工智能方向最近胜率不稳。",
+            "decision_evidence": {
+                "primary_window": 20,
+                "offensive_allowed": True,
+                "offensive_reason": "全局验证仍允许进攻",
+                "action": {
+                    "增配": {
+                        "sample_count": 9,
+                        "avg_absolute_return": 0.016,
+                        "avg_relative_return": -0.011,
+                        "avg_max_drawdown": -0.052,
+                    }
+                },
+                "cluster": {
+                    "ai": {
+                        "sample_count": 7,
+                        "avg_absolute_return": -0.018,
+                        "avg_relative_return": -0.032,
+                        "avg_max_drawdown": -0.094,
+                    }
+                },
+                "regime": {
+                    "进攻": {
+                        "sample_count": 12,
+                        "avg_absolute_return": 0.013,
+                        "avg_relative_return": 0.008,
+                        "avg_max_drawdown": -0.041,
+                    }
+                },
+            },
+        },
+    }
+
+    report = build_swing_report(
+        ai_input,
+        _make_multi_history(
+            {
+                "159819": [1.00 + (idx * 0.012) for idx in range(41)],
+                "159338": [1.00 + (idx * 0.004) for idx in range(41)],
+            }
+        ),
+        analysis_date="2026-03-24",
+    )
+
+    action = report["actions"][0]
+    assert action["action_label"] == "持有"
+    assert "人工智能方向的20日验证偏弱" in action["validation_note"]
+    assert "历史验证偏弱" in action["reason"]
+
+
+def test_build_swing_report_attaches_validation_evidence_summary_to_actions():
+    ai_input = {
+        "market_breadth": "2600家上涨，2400家下跌",
+        "indices": {"上证指数": {"change_pct": 0.1}, "创业板指": {"change_pct": 0.0}},
+        "macro_news": {"telegraph": ["消息偏中性"]},
+        "stocks": [
+            _make_stock(
+                "510300",
+                "沪深300ETF",
+                signal="SAFE",
+                confidence="中",
+                bias_pct=0.02,
+                pct_change=0.4,
+                current_price=1.16,
+                ma20=1.14,
+                tech_summary="维持强势",
+                macd_trend="BULLISH",
+                obv_trend="INFLOW",
+            )
+        ],
+        "held_codes": {"510300"},
+        "validation_report": {
+            "summary_text": "大盘类方向验证仍稳定。",
+            "decision_evidence": {
+                "primary_window": 20,
+                "offensive_allowed": True,
+                "offensive_reason": "当前允许进攻",
+                "action": {
+                    "持有": {
+                        "sample_count": 11,
+                        "avg_absolute_return": 0.021,
+                        "avg_relative_return": 0.009,
+                        "avg_max_drawdown": -0.028,
+                    }
+                },
+                "cluster": {
+                    "broad_beta": {
+                        "sample_count": 10,
+                        "avg_absolute_return": 0.019,
+                        "avg_relative_return": 0.007,
+                        "avg_max_drawdown": -0.026,
+                    }
+                },
+                "regime": {
+                    "均衡": {
+                        "sample_count": 8,
+                        "avg_absolute_return": 0.013,
+                        "avg_relative_return": 0.004,
+                        "avg_max_drawdown": -0.021,
+                    }
+                },
+            },
+        },
+    }
+
+    report = build_swing_report(
+        ai_input,
+        _make_multi_history(
+            {
+                "510300": [1.00 + (idx * 0.004) for idx in range(41)],
+                "159338": [1.00 + (idx * 0.0035) for idx in range(41)],
+            }
+        ),
+        analysis_date="2026-03-24",
+    )
+
+    action = report["actions"][0]
+    assert action["validation_note"] == "20日验证里，大盘核心方向样本10笔，平均跑赢基准0.7%，回撤约2.6%。"
+    assert action["validation_evidence"]["cluster"]["sample_count"] == 10
+
+
 def test_build_swing_report_retreat_overlay_uses_breakdown_and_bad_news_confirmation():
     history = _make_multi_history(
         {
