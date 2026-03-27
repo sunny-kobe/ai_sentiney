@@ -131,7 +131,8 @@ class DataCollector:
         }
         self._load_circuit_breaker_state()
 
-    def _init_collection_status(self, block_names: List[str]) -> Dict[str, Any]:
+    def _init_collection_status(self, block_names: List[str], optional_blocks: Optional[List[str]] = None) -> Dict[str, Any]:
+        optional_set = set(optional_blocks or [])
         return {
             "overall_status": "fresh",
             "blocks": {
@@ -144,6 +145,7 @@ class DataCollector:
             },
             "issues": [],
             "source_labels": [],
+            "optional_blocks": sorted(optional_set),
         }
 
     def _mark_collection_block(
@@ -169,13 +171,85 @@ class DataCollector:
         if issue and issue not in collection_status["issues"]:
             collection_status["issues"].append(issue)
 
+    def _is_optional_block(self, collection_status: Dict[str, Any], block_name: str) -> bool:
+        return block_name in set(collection_status.get("optional_blocks", []))
+
     def _finalize_collection_status(self, collection_status: Dict[str, Any]) -> Dict[str, Any]:
-        block_statuses = [block.get("status", "missing") for block in collection_status["blocks"].values()]
+        optional_blocks = set(collection_status.get("optional_blocks", []))
+        block_statuses = [
+            block.get("status", "missing")
+            for name, block in collection_status["blocks"].items()
+            if name not in optional_blocks
+        ]
         if any(status in {"missing", "degraded"} for status in block_statuses):
             collection_status["overall_status"] = "degraded"
         else:
             collection_status["overall_status"] = "fresh"
         return collection_status
+
+    def _is_invalid_fallback_result(self, method_name: str, result: Any) -> bool:
+        if result is None:
+            return True
+        if isinstance(result, pd.DataFrame):
+            return result.empty
+        if isinstance(result, str):
+            text = result.strip()
+            if not text:
+                return True
+            if method_name == "fetch_market_breadth":
+                placeholder_values = {
+                    "n/a",
+                    "n/a (tencent)",
+                    "unknown",
+                    "market breadth: n/a",
+                }
+                if text.lower() in placeholder_values:
+                    return True
+            return False
+        if isinstance(result, dict):
+            return not result
+        if isinstance(result, list):
+            return len(result) == 0
+        return False
+
+    def _is_fund_like_security(self, stock: Dict[str, Any]) -> bool:
+        code = str(stock.get("code", "") or "")
+        name = str(stock.get("name", "") or "")
+        if any(keyword in name for keyword in ("ETF", "LOF", "基金")):
+            return True
+        return code.startswith(("1", "5"))
+
+    def _should_skip_stock_news(self, portfolio: List[Dict[str, Any]]) -> bool:
+        return bool(portfolio) and all(self._is_fund_like_security(stock) for stock in portfolio)
+
+    async def _fetch_global_index_hist_snapshot(self, symbol: str) -> Optional[Dict[str, Any]]:
+        df = await self._run_blocking(ak.index_global_hist_em, symbol=symbol, timeout=6)
+        if df is None or df.empty:
+            return None
+
+        latest = df.iloc[-1]
+        current = float(latest.get("最新价", 0) or 0)
+        if current <= 0:
+            return None
+
+        previous_close = None
+        if len(df) >= 2:
+            previous_close = float(df.iloc[-2].get("最新价", 0) or 0)
+        if not previous_close:
+            previous_close = float(latest.get("今开", 0) or 0)
+
+        change_amount = 0.0
+        change_pct = 0.0
+        if previous_close and previous_close > 0:
+            change_amount = current - previous_close
+            change_pct = (change_amount / previous_close) * 100
+
+        return {
+            "name": symbol,
+            "current": current,
+            "change_pct": round(change_pct, 2),
+            "change_amount": round(change_amount, 2),
+        }
 
     def close(self):
         """Release thread-pool resources so CLI runs can exit cleanly."""
@@ -308,9 +382,7 @@ class DataCollector:
                 result = await self._run_blocking(func, *args, **kwargs)
 
                 # Check for validity
-                if result is not None:
-                    if isinstance(result, pd.DataFrame) and result.empty:
-                        continue  # Try next source if Empty DataFrame
+                if not self._is_invalid_fallback_result(method_name, result):
                     # 成功！重置熔断器
                     self._record_success(source_name)
                     return result
@@ -454,7 +526,8 @@ class DataCollector:
                 "stock_quotes",
                 "stock_history",
                 "stock_news",
-            ]
+            ],
+            optional_blocks=["bulk_spot"] + (["stock_news"] if self._should_skip_stock_news(portfolio) else []),
         )
         
         global_tasks = [
@@ -476,7 +549,8 @@ class DataCollector:
                 "missing",
                 detail="bulk spot fetch failed; relying on single-quote fallback",
             )
-            self._append_collection_issue(collection_status, "bulk spot unavailable; switched to single-quote fallback")
+            if not self._is_optional_block(collection_status, "bulk_spot"):
+                self._append_collection_issue(collection_status, "bulk spot unavailable; switched to single-quote fallback")
         else:
             self._mark_collection_block(collection_status, "bulk_spot", "fresh", source="spot")
         
@@ -545,8 +619,10 @@ class DataCollector:
         if valid_stocks and any(status == "fresh" for status in news_statuses):
             self._mark_collection_block(collection_status, "stock_news", "fresh", source="stock_news")
         else:
-            self._mark_collection_block(collection_status, "stock_news", "missing", detail="stock news unavailable")
-            self._append_collection_issue(collection_status, "stock news unavailable")
+            detail = "stock news skipped for ETF-heavy portfolio" if self._is_optional_block(collection_status, "stock_news") else "stock news unavailable"
+            self._mark_collection_block(collection_status, "stock_news", "missing", detail=detail)
+            if not self._is_optional_block(collection_status, "stock_news"):
+                self._append_collection_issue(collection_status, "stock news unavailable")
 
         self._finalize_collection_status(collection_status)
 
@@ -568,29 +644,50 @@ class DataCollector:
     async def get_global_indices(self) -> List[Dict]:
         """
         获取隔夜全球指数（美股/恒生/美元指数等）。
-        Uses ak.index_global_spot_em()
+        Prefer fast snapshot table, then fall back to per-index history snapshots.
         """
         logger.info("Fetching global indices...")
+        targets = {
+            "标普500": ["标普500"],
+            "纳斯达克": ["纳斯达克"],
+            "道琼斯": ["道琼斯"],
+            "恒生指数": ["恒生"],
+            "美元指数": ["美元指数"],
+            "日经225": ["日经225"],
+        }
         try:
-            df = await self._run_blocking(ak.index_global_spot_em, timeout=20)
+            df = await self._run_blocking(ak.index_global_spot_em, timeout=6)
             if df is None or df.empty:
-                return []
+                raise ValueError("empty global index snapshot")
 
-            targets = ['标普500', '纳斯达克', '道琼斯', '恒生指数', '美元指数',
-                        '纳斯达克100', '日经225']
             results = []
-            for name in targets:
-                row = df[df['名称'].str.contains(name, na=False)]
+            for canonical_name, aliases in targets.items():
+                row = df[df['名称'].astype(str).apply(lambda text: any(alias in text for alias in aliases))]
                 if not row.empty:
                     try:
                         results.append({
-                            "name": name,
+                            "name": canonical_name,
                             "current": float(row.iloc[0].get('最新价', 0)),
                             "change_pct": float(row.iloc[0].get('涨跌幅', 0)),
                             "change_amount": float(row.iloc[0].get('涨跌额', 0)),
                         })
                     except (ValueError, KeyError):
                         continue
+            if results:
+                return results
+        except Exception as e:
+            logger.warning(f"Fast global index snapshot unavailable, falling back to history snapshots: {e}")
+
+        try:
+            results = []
+            for symbol in targets.keys():
+                try:
+                    item = await self._fetch_global_index_hist_snapshot(symbol)
+                except Exception as inner_exc:
+                    logger.warning(f"Global index history snapshot failed for {symbol}: {inner_exc}")
+                    continue
+                if item:
+                    results.append(item)
             return results
         except Exception as e:
             logger.error(f"Failed to fetch global indices: {e}")
@@ -754,8 +851,11 @@ class DataCollector:
             if not isinstance(res, Exception) and isinstance(res, dict) and "error" not in res
         ]
 
-        if global_indices:
+        if len(global_indices) >= 4:
             self._mark_collection_block(collection_status, "global_indices", "fresh", source="global_indices")
+        elif global_indices:
+            self._mark_collection_block(collection_status, "global_indices", "degraded", source="global_indices", detail="partial global indices available")
+            self._append_collection_issue(collection_status, "partial global indices missing")
         else:
             self._mark_collection_block(collection_status, "global_indices", "missing", detail="global indices unavailable")
             self._append_collection_issue(collection_status, "global indices unavailable")

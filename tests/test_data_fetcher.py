@@ -44,6 +44,36 @@ async def test_get_market_breadth_success(collector):
     assert breadth == "涨: 1 / 跌: 1 (平: 1)"
 
 @pytest.mark.asyncio
+async def test_fetch_with_fallback_skips_placeholder_market_breadth_values(collector):
+    collector.sources = [MagicMock(), MagicMock(), MagicMock()]
+    collector.sources[0].get_source_name.return_value = "Tencent"
+    collector.sources[0].fetch_market_breadth.return_value = "N/A (Tencent)"
+    collector.sources[1].get_source_name.return_value = "Efinance"
+    collector.sources[1].fetch_market_breadth.return_value = "涨: 3000 / 跌: 1800 (平: 200)"
+    collector.sources[2].get_source_name.return_value = "AkShare"
+    collector.sources[2].fetch_market_breadth.return_value = None
+
+    breadth = await collector._fetch_with_fallback("fetch_market_breadth")
+
+    assert breadth == "涨: 3000 / 跌: 1800 (平: 200)"
+
+
+@pytest.mark.asyncio
+async def test_fetch_with_fallback_skips_empty_news_values(collector):
+    collector.sources = [MagicMock(), MagicMock(), MagicMock()]
+    collector.sources[0].get_source_name.return_value = "Tencent"
+    collector.sources[0].fetch_news.return_value = ""
+    collector.sources[1].get_source_name.return_value = "Efinance"
+    collector.sources[1].fetch_news.return_value = "   "
+    collector.sources[2].get_source_name.return_value = "AkShare"
+    collector.sources[2].fetch_news.return_value = "新闻1; 新闻2"
+
+    news = await collector._fetch_with_fallback("fetch_news", code="159819", count=2)
+
+    assert news == "新闻1; 新闻2"
+
+
+@pytest.mark.asyncio
 async def test_get_market_breadth_failure(collector):
     """Test market breadth fetch failure handling after all sources fail."""
     collector.sources = [MagicMock(), MagicMock(), MagicMock()]
@@ -167,7 +197,49 @@ async def test_collect_all_degrades_when_bulk_spot_fails_but_single_quote_succee
     assert result["collection_status"]["blocks"]["bulk_spot"]["status"] == "missing"
     assert result["collection_status"]["blocks"]["stock_quotes"]["status"] == "fresh"
     assert result["collection_status"]["overall_status"] == "degraded"
-    assert any("bulk spot" in issue for issue in result["data_issues"])
+    assert "bulk spot unavailable; switched to single-quote fallback" not in result["data_issues"]
+    assert "stock news unavailable" in result["data_issues"]
+
+
+@pytest.mark.asyncio
+async def test_collect_all_keeps_etf_portfolio_fresh_when_only_optional_blocks_are_missing(collector, monkeypatch):
+    async def fake_fetch_with_fallback(method_name, *args, **kwargs):
+        if method_name == "fetch_spot_data":
+            return None
+        if method_name == "fetch_single_quote":
+            return {
+                "code": kwargs["code"],
+                "name": "人工智能ETF",
+                "current_price": 1.5,
+                "pct_change": 1.2,
+                "volume": 1000.0,
+                "turnover_rate": 1.2,
+            }
+        if method_name == "fetch_prices":
+            return pd.DataFrame({
+                "date": pd.date_range("2026-02-01", periods=30, freq="D"),
+                "close": [1.0] * 30,
+                "open": [1.0] * 30,
+                "high": [1.01] * 30,
+                "low": [0.99] * 30,
+                "volume": [1000.0] * 30,
+            })
+        if method_name == "fetch_news":
+            return ""
+        return None
+
+    monkeypatch.setattr(collector, "_fetch_with_fallback", fake_fetch_with_fallback)
+    monkeypatch.setattr(collector, "get_market_breadth", lambda: asyncio.sleep(0, result="涨: 3000 / 跌: 1800 (平: 200)"))
+    monkeypatch.setattr(collector, "get_north_funds", lambda: asyncio.sleep(0, result=12.34))
+    monkeypatch.setattr(collector, "get_indices", lambda: asyncio.sleep(0, result={"上证指数": {"change_pct": 0.5}}))
+    monkeypatch.setattr(collector, "get_macro_news", lambda: asyncio.sleep(0, result={"telegraph": ["流动性平稳"], "ai_tech": []}))
+
+    result = await collector.collect_all([{"code": "159819", "name": "人工智能ETF"}])
+
+    assert result["collection_status"]["blocks"]["bulk_spot"]["status"] == "missing"
+    assert result["collection_status"]["blocks"]["stock_news"]["status"] == "missing"
+    assert result["collection_status"]["overall_status"] == "fresh"
+    assert result["data_issues"] == []
 
 
 @pytest.mark.asyncio
@@ -218,6 +290,103 @@ async def test_collect_all_marks_supporting_data_failures_as_degraded(collector,
     assert result["collection_status"]["blocks"]["macro_news"]["status"] == "missing"
     assert result["collection_status"]["overall_status"] == "degraded"
     assert result["data_issues"]
+
+
+@pytest.mark.asyncio
+async def test_get_global_indices_falls_back_to_hist_snapshots_when_spot_times_out(collector, monkeypatch):
+    calls = []
+
+    async def fake_run_blocking(func, *args, **kwargs):
+        calls.append((func.__name__, args, kwargs))
+        if func is ak.index_global_spot_em:
+            raise asyncio.TimeoutError()
+        if func is ak.index_global_hist_em:
+            symbol = kwargs["symbol"]
+            data = {
+                "标普500": {"日期": pd.Timestamp("2026-03-26").date(), "最新价": 6477.16, "今开": 6555.86},
+                "纳斯达克": {"日期": pd.Timestamp("2026-03-26").date(), "最新价": 21408.08, "今开": 21693.17},
+                "道琼斯": {"日期": pd.Timestamp("2026-03-26").date(), "最新价": 45960.11, "今开": 46344.64},
+                "恒生指数": {"日期": pd.Timestamp("2026-03-27").date(), "最新价": 24961.49, "今开": 24768.66},
+                "美元指数": {"日期": pd.Timestamp("2026-03-27").date(), "最新价": 99.85, "今开": 99.93},
+                "日经225": {"日期": pd.Timestamp("2026-03-27").date(), "最新价": 53410.61, "今开": 53239.59},
+            }[symbol]
+            return pd.DataFrame([data])
+        raise AssertionError(f"unexpected call: {func.__name__}")
+
+    monkeypatch.setattr(collector, "_run_blocking", fake_run_blocking)
+
+    result = await collector.get_global_indices()
+
+    assert len(result) == 6
+    assert {item["name"] for item in result} == {"标普500", "纳斯达克", "道琼斯", "恒生指数", "美元指数", "日经225"}
+    assert any(name == "index_global_spot_em" for name, _, _ in calls)
+    hist_calls = [kwargs["symbol"] for name, _, kwargs in calls if name == "index_global_hist_em"]
+    assert hist_calls == ["标普500", "纳斯达克", "道琼斯", "恒生指数", "美元指数", "日经225"]
+
+
+@pytest.mark.asyncio
+async def test_get_global_indices_hist_fallback_runs_with_single_flight(collector, monkeypatch):
+    active = 0
+    max_active = 0
+
+    async def fake_run_blocking(func, *args, **kwargs):
+        if func is ak.index_global_spot_em:
+            raise asyncio.TimeoutError()
+        raise AssertionError(f"unexpected run_blocking call: {func.__name__}")
+
+    async def fake_hist_snapshot(symbol):
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0)
+        active -= 1
+        return {
+            "name": symbol,
+            "current": 1.0,
+            "change_pct": 0.1,
+            "change_amount": 0.01,
+        }
+
+    monkeypatch.setattr(collector, "_run_blocking", fake_run_blocking)
+    monkeypatch.setattr(collector, "_fetch_global_index_hist_snapshot", fake_hist_snapshot)
+
+    result = await collector.get_global_indices()
+
+    assert len(result) == 6
+    assert max_active == 1
+
+
+@pytest.mark.asyncio
+async def test_collect_morning_data_marks_partial_global_indices_as_degraded(collector, monkeypatch):
+    async def fake_global_indices():
+        return [
+            {"name": "纳斯达克", "current": 21408.08, "change_pct": -2.38, "change_amount": -521.54},
+            {"name": "道琼斯", "current": 45960.11, "change_pct": -1.01, "change_amount": -469.18},
+        ]
+
+    async def fake_commodities():
+        return [{"name": "布伦特原油", "current": 80.0, "change_pct": 0.3}]
+
+    async def fake_treasury():
+        return {"yield_10y": 4.42, "yield_2y": 3.96, "spread_10y_2y": 0.46}
+
+    async def fake_macro_news():
+        return {"telegraph": ["海外市场震荡"], "ai_tech": []}
+
+    async def fake_stock_context(code, name):
+        return {"code": code, "name": name, "last_close": 10.0, "ma20": 9.8, "bias_pct": 0.02, "ma20_status": "ABOVE"}
+
+    monkeypatch.setattr(collector, "get_global_indices", fake_global_indices)
+    monkeypatch.setattr(collector, "get_commodity_futures", fake_commodities)
+    monkeypatch.setattr(collector, "get_us_treasury_yields", fake_treasury)
+    monkeypatch.setattr(collector, "get_macro_news", fake_macro_news)
+    monkeypatch.setattr(collector, "_fetch_morning_stock_context", fake_stock_context)
+
+    result = await collector.collect_morning_data([{"code": "159819", "name": "人工智能ETF"}])
+
+    assert result["collection_status"]["blocks"]["global_indices"]["status"] == "degraded"
+    assert "partial global indices missing" in result["data_issues"]
+    assert result["collection_status"]["overall_status"] == "degraded"
 
 
 @pytest.mark.asyncio
