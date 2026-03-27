@@ -216,10 +216,18 @@ class DataCollector:
                 placeholder_values = {
                     "n/a",
                     "n/a (tencent)",
+                    "n/a (efinance)",
                     "unknown",
                     "market breadth: n/a",
                 }
                 if text.lower() in placeholder_values:
+                    return True
+                normalized = text.lower()
+                looks_like_breadth = (
+                    ("涨" in text and "跌" in text)
+                    or ("up" in normalized and "down" in normalized)
+                )
+                if not looks_like_breadth:
                     return True
             return False
         if isinstance(result, dict):
@@ -227,6 +235,45 @@ class DataCollector:
         if isinstance(result, list):
             return len(result) == 0
         return False
+
+    def _parse_market_breadth_count(self, value: Any) -> Optional[int]:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        digits = re.sub(r"[^\d]", "", text)
+        if not digits:
+            return None
+        return int(digits)
+
+    def _format_market_breadth(self, up: int, down: int, flat: int) -> str:
+        return f"涨: {up} / 跌: {down} (平: {flat})"
+
+    def _extract_market_breadth_from_activity_df(self, df: Optional[pd.DataFrame]) -> Optional[str]:
+        if df is None or df.empty or "item" not in df.columns or "value" not in df.columns:
+            return None
+
+        lookup: Dict[str, int] = {}
+        for _, row in df.iterrows():
+            item = re.sub(r"\s+", "", str(row.get("item", "") or ""))
+            value = self._parse_market_breadth_count(row.get("value"))
+            if value is None:
+                continue
+            lookup[item] = value
+
+        up = next((lookup[key] for key in ("上涨家数", "上涨") if key in lookup), None)
+        down = next((lookup[key] for key in ("下跌家数", "下跌") if key in lookup), None)
+        flat = next((lookup[key] for key in ("平盘家数", "平盘") if key in lookup), 0)
+        if up is None or down is None:
+            return None
+        return self._format_market_breadth(up, down, flat)
+
+    async def _fetch_market_breadth_backup(self) -> Optional[str]:
+        try:
+            df = await self._run_blocking(ak.stock_market_activity_legu, timeout=4)
+        except Exception as e:
+            logger.warning(f"Legu market breadth backup failed: {e}")
+            return None
+        return self._extract_market_breadth_from_activity_df(df)
 
     def _is_fund_like_security(self, stock: Dict[str, Any]) -> bool:
         code = str(stock.get("code", "") or "")
@@ -502,7 +549,14 @@ class DataCollector:
         # The original logic calculated it from spot data.
         # Let's stick to using fetch_market_breadth from interfaces.
         res = await self._fetch_with_fallback('fetch_market_breadth')
-        return res if res else "Unknown"
+        if res:
+            return res
+
+        backup = await self._fetch_market_breadth_backup()
+        if backup:
+            logger.info("Market breadth restored from legu backup.")
+            return backup
+        return "Unknown"
 
     async def get_north_funds(self) -> float:
         """

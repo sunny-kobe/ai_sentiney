@@ -59,6 +59,21 @@ async def test_fetch_with_fallback_skips_placeholder_market_breadth_values(colle
 
 
 @pytest.mark.asyncio
+async def test_fetch_with_fallback_skips_non_breadth_market_summary_strings(collector):
+    collector.sources = [MagicMock(), MagicMock(), MagicMock()]
+    collector.sources[0].get_source_name.return_value = "Tencent"
+    collector.sources[0].fetch_market_breadth.return_value = "N/A (Tencent)"
+    collector.sources[1].get_source_name.return_value = "Efinance"
+    collector.sources[1].fetch_market_breadth.return_value = "上证指数: 3321.98 | 深证成指: 10642.11 | 创业板指: 2148.39"
+    collector.sources[2].get_source_name.return_value = "AkShare"
+    collector.sources[2].fetch_market_breadth.return_value = "Up: 3000, Down: 1800, Flat: 200"
+
+    breadth = await collector._fetch_with_fallback("fetch_market_breadth")
+
+    assert breadth == "Up: 3000, Down: 1800, Flat: 200"
+
+
+@pytest.mark.asyncio
 async def test_fetch_with_fallback_skips_empty_news_values(collector):
     collector.sources = [MagicMock(), MagicMock(), MagicMock()]
     collector.sources[0].get_source_name.return_value = "Tencent"
@@ -74,15 +89,41 @@ async def test_fetch_with_fallback_skips_empty_news_values(collector):
 
 
 @pytest.mark.asyncio
-async def test_get_market_breadth_failure(collector):
+async def test_get_market_breadth_failure(collector, monkeypatch):
     """Test market breadth fetch failure handling after all sources fail."""
     collector.sources = [MagicMock(), MagicMock(), MagicMock()]
     for source, name in zip(collector.sources, ["Tencent", "Efinance", "AkShare"]):
         source.get_source_name.return_value = name
         source.fetch_market_breadth.side_effect = Exception("Network Error")
+    monkeypatch.setattr(collector, "_fetch_market_breadth_backup", lambda: asyncio.sleep(0, result=None))
 
     breadth = await collector.get_market_breadth()
     assert breadth == "Unknown"
+
+
+@pytest.mark.asyncio
+async def test_get_market_breadth_uses_legu_backup_when_primary_sources_fail(collector, monkeypatch):
+    async def fake_fetch_with_fallback(method_name, *args, **kwargs):
+        assert method_name == "fetch_market_breadth"
+        return None
+
+    async def fake_run_blocking(func, *args, **kwargs):
+        if func is ak.stock_market_activity_legu:
+            return pd.DataFrame(
+                [
+                    {"item": "上涨家数", "value": "3123"},
+                    {"item": "下跌家数", "value": "1566"},
+                    {"item": "平盘家数", "value": "201"},
+                ]
+            )
+        raise AssertionError(f"unexpected call: {func.__name__}")
+
+    monkeypatch.setattr(collector, "_fetch_with_fallback", fake_fetch_with_fallback)
+    monkeypatch.setattr(collector, "_run_blocking", fake_run_blocking)
+
+    breadth = await collector.get_market_breadth()
+
+    assert breadth == "涨: 3123 / 跌: 1566 (平: 201)"
 
 @pytest.mark.asyncio
 async def test_get_north_funds(collector, mock_akshare):

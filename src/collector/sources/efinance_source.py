@@ -9,28 +9,9 @@ class EfinanceSource(DataSource):
         return "Efinance"
 
     def fetch_market_breadth(self) -> str:
-        # Efinance doesn't have a direct "breadth" summary API like AkShare's summary
-        # But we can simulate it or return a simplified string.
-        # For now, we will leave this placeholder or implement a lightweight check
-        try:
-            # Getting real-time quotes for major indices to show market status
-            indices = {
-                "上证指数": "1.000001",
-                "深证成指": "0.399001",
-                "创业板指": "0.399006"
-            }
-            summary_parts = []
-            for name, code in indices.items():
-                # Efinance fetch quote
-                df = ef.stock.get_quote_history(code) 
-                if df is not None and not df.empty:
-                    latest = df.iloc[-1]
-                    summary_parts.append(f"{name}: {latest['收盘']}")
-            
-            return " | ".join(summary_parts)
-        except Exception as e:
-            logger.warning(f"Efinance breadth fetch failed: {e}")
-            return "Market Breadth: N/A"
+        # Efinance lacks a reliable lightweight breadth endpoint.
+        # Return a placeholder so fallback logic can continue to better sources.
+        return "N/A (Efinance)"
 
     def fetch_prices(self, code: str, period: str = 'daily', count: int = 20) -> Optional[pd.DataFrame]:
         try:
