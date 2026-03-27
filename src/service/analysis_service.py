@@ -179,6 +179,9 @@ class AnalysisService:
                 "stocks": processed_stocks,
                 "portfolio_state": self.config.get('portfolio_state', {}),
                 "strategy_preferences": self._get_swing_strategy_preferences(),
+                "collection_status": raw_data.get("collection_status", {}),
+                "data_issues": raw_data.get("data_issues", []),
+                "source_labels": raw_data.get("source_labels", []),
             }
         finally:
             collector.close()
@@ -192,6 +195,9 @@ class AnalysisService:
             processor = DataProcessor()
             processed_data = processor.process_morning_data(raw_data, portfolio)
             processed_data["context_date"] = datetime.now().strftime('%Y-%m-%d')
+            processed_data["collection_status"] = raw_data.get("collection_status", {})
+            processed_data["data_issues"] = raw_data.get("data_issues", [])
+            processed_data["source_labels"] = raw_data.get("source_labels", [])
 
             logger.info(f"Morning data collected. Global indices: {len(processed_data.get('global_indices', []))}, "
                          f"Commodities: {len(processed_data.get('commodities', []))}, "
@@ -287,6 +293,8 @@ class AnalysisService:
             analysis_result["structured_report"] = structured_report
             analysis_result["data_timestamp"] = structured_report.get("data_timestamp")
             analysis_result["source_labels"] = structured_report.get("source_labels", [])
+        analysis_result.setdefault("data_issues", ai_input.get("data_issues", []))
+        analysis_result.setdefault("collection_status", ai_input.get("collection_status", {}))
 
         return analysis_result
 
@@ -330,6 +338,10 @@ class AnalysisService:
                     if not action.get('ma20_status'):
                         action['ma20_status'] = s.get('ma20_status', 'NEAR')
                     break
+
+        analysis_result.setdefault("data_issues", ai_input.get("data_issues", []))
+        analysis_result.setdefault("source_labels", ai_input.get("source_labels", []))
+        analysis_result.setdefault("collection_status", ai_input.get("collection_status", {}))
 
         return analysis_result
 
@@ -430,6 +442,12 @@ class AnalysisService:
             )
             if quality_input["status"] == "blocked" and not dry_run:
                 return self._build_blocked_report(mode, ai_input["structured_report"], quality_input["issues"])
+        collection_quality_status = (
+            "degraded"
+            if (ai_input.get("collection_status") or {}).get("overall_status") == "degraded"
+            else "normal"
+        )
+        collection_quality_issues = list(ai_input.get("data_issues", []) or [])
 
         # --- Step 2: AI Analysis ---
         analysis_result = {}
@@ -458,11 +476,12 @@ class AnalysisService:
                     analysis_result["validation_compact"] = validation_report.get("compact")
                 analysis_result["lab_hint"] = self._build_swing_lab_hint()
                 analysis_result.setdefault("summary", analysis_result.get("market_conclusion", ""))
-                analysis_result.setdefault("quality_status", "normal")
-                analysis_result.setdefault("quality_issues", [])
+                analysis_result.setdefault("quality_status", collection_quality_status)
+                analysis_result.setdefault("quality_issues", collection_quality_issues)
                 analysis_result.setdefault("data_timestamp", analysis_date)
                 analysis_result.setdefault("source_labels", ["rule_engine", "history"])
                 analysis_result.setdefault("data_issues", ai_input.get("data_issues", []))
+                analysis_result.setdefault("collection_status", ai_input.get("collection_status", {}))
             elif mode in ("midday", "preclose", "close") and quality_input["status"] == "degraded":
                 analysis_result = self._build_degraded_report(mode, ai_input["structured_report"], quality_input["issues"])
             elif mode in ("midday", "preclose", "close"):
@@ -497,11 +516,13 @@ class AnalysisService:
                     "market_sentiment": "DryRun",
                     "summary": "This is a dry run.",
                     "actions": [],
-                    "quality_status": quality_input["status"],
-                    "quality_issues": quality_input["issues"],
+                    "quality_status": collection_quality_status if mode in ("morning", "swing") else quality_input["status"],
+                    "quality_issues": collection_quality_issues if mode in ("morning", "swing") else quality_input["issues"],
                     "structured_report": ai_input.get("structured_report"),
                     "data_timestamp": ai_input.get("structured_report", {}).get("data_timestamp"),
                     "source_labels": ai_input.get("structured_report", {}).get("source_labels", []),
+                    "data_issues": ai_input.get("data_issues", []),
+                    "collection_status": ai_input.get("collection_status", {}),
                 }
             else:
                 analyst = GeminiClient()
@@ -534,6 +555,9 @@ class AnalysisService:
             elif mode in ("midday", "preclose", "close"):
                 analysis_result.setdefault("quality_status", quality_input["status"])
                 analysis_result.setdefault("quality_issues", quality_input["issues"])
+            else:
+                analysis_result.setdefault("quality_status", collection_quality_status)
+                analysis_result.setdefault("quality_issues", collection_quality_issues)
             
             logger.info(f"{mode.capitalize()} Analysis Completed.")
             

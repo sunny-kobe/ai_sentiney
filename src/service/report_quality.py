@@ -15,6 +15,7 @@ def evaluate_input_quality(ai_input: Dict[str, Any], mode: str, now: Optional[st
     status = "normal"
     current_day = _normalize_now(now)
     context_date = ai_input.get("context_date")
+    collection_status = ai_input.get("collection_status") or {}
 
     if mode in ("midday", "preclose", "close"):
         stocks = ai_input.get("stocks", [])
@@ -32,6 +33,10 @@ def evaluate_input_quality(ai_input: Dict[str, Any], mode: str, now: Optional[st
         if not macro_news and not stock_news:
             issues.append("missing_evidence")
             status = "degraded"
+
+    if status != "blocked" and collection_status.get("overall_status") == "degraded":
+        issues.append("degraded_collection")
+        status = "degraded"
 
     return {
         "status": status,

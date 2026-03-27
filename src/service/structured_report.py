@@ -42,6 +42,8 @@ def build_structured_report(ai_input: Dict[str, Any], mode: str, quality_status:
         market_source_labels.append("indices")
     if ai_input.get("macro_news", {}).get("telegraph"):
         market_source_labels.append("macro_news")
+    for label in ai_input.get("source_labels", []) or []:
+        market_source_labels.append(label)
 
     stocks = []
     top_level_sources = list(market_source_labels)
@@ -77,6 +79,8 @@ def build_structured_report(ai_input: Dict[str, Any], mode: str, quality_status:
         "quality_status": quality_status,
         "data_timestamp": data_timestamp,
         "source_labels": _dedupe(top_level_sources),
+        "data_issues": list(ai_input.get("data_issues", []) or []),
+        "collection_status": ai_input.get("collection_status", {}),
         "market": {
             "market_breadth": ai_input.get("market_breadth", "N/A"),
             "indices_info": indices_info,

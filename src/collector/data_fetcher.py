@@ -131,6 +131,52 @@ class DataCollector:
         }
         self._load_circuit_breaker_state()
 
+    def _init_collection_status(self, block_names: List[str]) -> Dict[str, Any]:
+        return {
+            "overall_status": "fresh",
+            "blocks": {
+                name: {
+                    "status": "missing",
+                    "source": None,
+                    "detail": "",
+                }
+                for name in block_names
+            },
+            "issues": [],
+            "source_labels": [],
+        }
+
+    def _mark_collection_block(
+        self,
+        collection_status: Dict[str, Any],
+        block_name: str,
+        status: str,
+        *,
+        source: Optional[str] = None,
+        detail: str = "",
+    ) -> None:
+        block = collection_status["blocks"].setdefault(
+            block_name,
+            {"status": "missing", "source": None, "detail": ""},
+        )
+        block["status"] = status
+        block["source"] = source
+        block["detail"] = detail
+        if source and source not in collection_status["source_labels"]:
+            collection_status["source_labels"].append(source)
+
+    def _append_collection_issue(self, collection_status: Dict[str, Any], issue: str) -> None:
+        if issue and issue not in collection_status["issues"]:
+            collection_status["issues"].append(issue)
+
+    def _finalize_collection_status(self, collection_status: Dict[str, Any]) -> Dict[str, Any]:
+        block_statuses = [block.get("status", "missing") for block in collection_status["blocks"].values()]
+        if any(status in {"missing", "degraded"} for status in block_statuses):
+            collection_status["overall_status"] = "degraded"
+        else:
+            collection_status["overall_status"] = "fresh"
+        return collection_status
+
     def close(self):
         """Release thread-pool resources so CLI runs can exit cleanly."""
         self.executor.shutdown(wait=False, cancel_futures=True)
@@ -398,6 +444,18 @@ class DataCollector:
         Main entry point. Orchestrates parallel data fetching.
         """
         logger.info("Starting Batch Data Collection (Dual Source)...")
+        collection_status = self._init_collection_status(
+            [
+                "bulk_spot",
+                "market_breadth",
+                "north_funds",
+                "indices",
+                "macro_news",
+                "stock_quotes",
+                "stock_history",
+                "stock_news",
+            ]
+        )
         
         global_tasks = [
             self.get_market_breadth(),
@@ -408,10 +466,19 @@ class DataCollector:
         
         # 2. Fetch Spot Data via Fallback
         # This will try Efinance first, then AkShare
-        df_all_spot = await self._fetch_with_fallback('fetch_spot_data')
+        df_all_spot = await self._fetch_with_fallback('fetch_spot_data', timeout=3)
         if df_all_spot is None:
             df_all_spot = pd.DataFrame()
             logger.warning("All sources failed to fetch bulk spot data. Will rely on individual fetch.")
+            self._mark_collection_block(
+                collection_status,
+                "bulk_spot",
+                "missing",
+                detail="bulk spot fetch failed; relying on single-quote fallback",
+            )
+            self._append_collection_issue(collection_status, "bulk spot unavailable; switched to single-quote fallback")
+        else:
+            self._mark_collection_block(collection_status, "bulk_spot", "fresh", source="spot")
         
         stock_tasks = []
         for stock in portfolio:
@@ -431,17 +498,67 @@ class DataCollector:
         north_funds = global_results[1] if global_results and not isinstance(global_results[1], Exception) else 0.0
         indices = global_results[2] if global_results and not isinstance(global_results[2], Exception) else {}
         macro_news = global_results[3] if global_results and not isinstance(global_results[3], Exception) else {"telegraph": [], "ai_tech": []}
+
+        if market_breadth and market_breadth not in {"Unknown", "Error", "N/A (Tencent)"}:
+            self._mark_collection_block(collection_status, "market_breadth", "fresh", source="market_breadth")
+        else:
+            self._mark_collection_block(collection_status, "market_breadth", "missing", detail="market breadth unavailable")
+            self._append_collection_issue(collection_status, "market breadth unavailable")
+
+        if indices:
+            self._mark_collection_block(collection_status, "indices", "fresh", source="indices")
+        else:
+            self._mark_collection_block(collection_status, "indices", "missing", detail="indices unavailable")
+            self._append_collection_issue(collection_status, "indices unavailable")
+
+        if macro_news.get("telegraph"):
+            self._mark_collection_block(collection_status, "macro_news", "fresh", source="macro_news")
+        else:
+            self._mark_collection_block(collection_status, "macro_news", "missing", detail="macro news unavailable")
+            self._append_collection_issue(collection_status, "macro news unavailable")
+
+        self._mark_collection_block(collection_status, "north_funds", "fresh", source="north_funds")
         
         valid_stocks = []
         if stock_results:
             valid_stocks = [res for res in stock_results if not isinstance(res, Exception) and isinstance(res, dict) and "error" not in res]
+
+        quote_statuses = [stock.get("quote_status", "missing") for stock in valid_stocks]
+        history_statuses = [stock.get("history_status", "missing") for stock in valid_stocks]
+        news_statuses = [stock.get("news_status", "missing") for stock in valid_stocks]
+
+        if valid_stocks and any(status == "fresh" for status in quote_statuses):
+            self._mark_collection_block(collection_status, "stock_quotes", "fresh", source="stock_quotes")
+        else:
+            self._mark_collection_block(collection_status, "stock_quotes", "missing", detail="no real-time quotes collected")
+            self._append_collection_issue(collection_status, "real-time stock quotes unavailable")
+
+        if valid_stocks and all(status == "fresh" for status in history_statuses):
+            self._mark_collection_block(collection_status, "stock_history", "fresh", source="stock_history")
+        elif valid_stocks and any(status == "fresh" for status in history_statuses):
+            self._mark_collection_block(collection_status, "stock_history", "degraded", detail="some stock history missing")
+            self._append_collection_issue(collection_status, "partial stock history missing")
+        else:
+            self._mark_collection_block(collection_status, "stock_history", "missing", detail="stock history unavailable")
+            self._append_collection_issue(collection_status, "stock history unavailable")
+
+        if valid_stocks and any(status == "fresh" for status in news_statuses):
+            self._mark_collection_block(collection_status, "stock_news", "fresh", source="stock_news")
+        else:
+            self._mark_collection_block(collection_status, "stock_news", "missing", detail="stock news unavailable")
+            self._append_collection_issue(collection_status, "stock news unavailable")
+
+        self._finalize_collection_status(collection_status)
 
         return {
             "market_breadth": market_breadth,
             "north_funds": north_funds,
             "indices": indices,
             "macro_news": macro_news,
-            "stocks": valid_stocks
+            "stocks": valid_stocks,
+            "collection_status": collection_status,
+            "data_issues": collection_status["issues"],
+            "source_labels": collection_status["source_labels"],
         }
 
     # ============================================================
@@ -594,6 +711,9 @@ class DataCollector:
         早报模式的主入口。并行采集外盘数据 + 昨日持仓上下文。
         """
         logger.info("Starting Morning Pre-Market Data Collection...")
+        collection_status = self._init_collection_status(
+            ["global_indices", "commodities", "us_treasury", "macro_news", "stocks"]
+        )
 
         # Global overnight data tasks
         global_tasks = [
@@ -634,12 +754,47 @@ class DataCollector:
             if not isinstance(res, Exception) and isinstance(res, dict) and "error" not in res
         ]
 
+        if global_indices:
+            self._mark_collection_block(collection_status, "global_indices", "fresh", source="global_indices")
+        else:
+            self._mark_collection_block(collection_status, "global_indices", "missing", detail="global indices unavailable")
+            self._append_collection_issue(collection_status, "global indices unavailable")
+
+        if commodities:
+            self._mark_collection_block(collection_status, "commodities", "fresh", source="commodities")
+        else:
+            self._mark_collection_block(collection_status, "commodities", "missing", detail="commodities unavailable")
+            self._append_collection_issue(collection_status, "commodities unavailable")
+
+        if us_treasury:
+            self._mark_collection_block(collection_status, "us_treasury", "fresh", source="us_treasury")
+        else:
+            self._mark_collection_block(collection_status, "us_treasury", "missing", detail="US treasury unavailable")
+            self._append_collection_issue(collection_status, "US treasury unavailable")
+
+        if macro_news.get("telegraph"):
+            self._mark_collection_block(collection_status, "macro_news", "fresh", source="macro_news")
+        else:
+            self._mark_collection_block(collection_status, "macro_news", "missing", detail="macro news unavailable")
+            self._append_collection_issue(collection_status, "macro news unavailable")
+
+        if valid_stocks:
+            self._mark_collection_block(collection_status, "stocks", "fresh", source="stocks")
+        else:
+            self._mark_collection_block(collection_status, "stocks", "missing", detail="morning stock context unavailable")
+            self._append_collection_issue(collection_status, "morning stock context unavailable")
+
+        self._finalize_collection_status(collection_status)
+
         return {
             "global_indices": global_indices,
             "commodities": commodities,
             "us_treasury": us_treasury,
             "macro_news": macro_news,
             "stocks": valid_stocks,
+            "collection_status": collection_status,
+            "data_issues": collection_status["issues"],
+            "source_labels": collection_status["source_labels"],
         }
 
     async def _fetch_individual_stock_extras(self, code: str, stock_name: str, df_all_spot: pd.DataFrame) -> Dict:
@@ -653,6 +808,9 @@ class DataCollector:
             volume = 0.0
             turnover_rate = 0.0
             name = stock_name
+            quote_status = "missing"
+            history_status = "missing"
+            news_status = "missing"
 
             if not df_all_spot.empty:
                 spot_row = df_all_spot[df_all_spot['code'] == code]
@@ -662,27 +820,31 @@ class DataCollector:
                         pct_change = float(spot_row.iloc[0]['pct_change'])
                         volume = float(spot_row.iloc[0].get('volume', 0))
                         turnover_rate = float(spot_row.iloc[0].get('turnover_rate', 0))
+                        quote_status = "fresh"
                     except (ValueError, KeyError, IndexError):
                         pass
 
             # 2. Try Individual Real-Time Quote (Fallback for Spot)
             # This is critical if bulk spot fetch failed (e.g. Efinance timeout)
             if current_price == 0.0:
-                quote = await self._fetch_with_fallback('fetch_single_quote', code=code)
+                quote = await self._fetch_with_fallback('fetch_single_quote', code=code, timeout=3)
                 if quote:
                     try:
                         current_price = float(quote['current_price'])
                         pct_change = float(quote['pct_change'])
                         volume = float(quote.get('volume', 0))
                         turnover_rate = float(quote.get('turnover_rate', 0))
+                        quote_status = "fresh"
                     except Exception as e:
                         logger.warning(f"Failed to parse quote for {code}: {e}")
 
             # 3. Fetch Prices (History) via Fallback
-            df_hist = await self._fetch_with_fallback('fetch_prices', code=code, count=self.history_days)
+            df_hist = await self._fetch_with_fallback('fetch_prices', code=code, count=self.history_days, timeout=8)
             if df_hist is None:
                 df_hist = pd.DataFrame()
                 logger.warning(f"History fetch failed for {code}")
+            else:
+                history_status = "fresh"
 
             # Calculate 5-day average volume from history for volume ratio
             # 🔧 修复: 排除今日数据，确保5日均量计算准确
@@ -740,9 +902,11 @@ class DataCollector:
                 df_hist = df_hist.tail(self.history_days)
             
             # 3. Fetch News via Fallback
-            news_str = await self._fetch_with_fallback('fetch_news', code=code, count=5)
+            news_str = await self._fetch_with_fallback('fetch_news', code=code, count=5, timeout=3)
             # news_str returns string separated by ;
             news_list = news_str.split("; ") if news_str else []
+            if news_list:
+                news_status = "fresh"
 
             return {
                 "code": code,
@@ -753,7 +917,10 @@ class DataCollector:
                 "turnover_rate": turnover_rate,
                 "avg_volume_5d": avg_volume_5d,
                 "history": df_hist,
-                "news": news_list
+                "news": news_list,
+                "quote_status": quote_status,
+                "history_status": history_status,
+                "news_status": news_status,
             }
             
         except Exception as e:

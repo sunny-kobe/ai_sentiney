@@ -60,6 +60,84 @@ def test_run_analysis_degrades_to_structured_report_without_ai(monkeypatch):
     assert result["actions"][0]["operation"] == "持有观察"
 
 
+def test_run_analysis_degrades_when_collection_state_is_degraded(monkeypatch):
+    service = AnalysisService()
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    async def fake_collect(_portfolio):
+        return {
+            "context_date": today,
+            "market_breadth": "Unknown",
+            "indices": {"上证指数": {"change_pct": 0.5}},
+            "macro_news": {"telegraph": ["流动性平稳"]},
+            "stocks": [
+                {
+                    "code": "600519",
+                    "name": "贵州茅台",
+                    "signal": "SAFE",
+                    "confidence": "高",
+                    "tech_summary": "[日线_MACD_多头_无背驰_0]",
+                    "current_price": 1500.0,
+                    "pct_change": 1.0,
+                    "news": [],
+                }
+            ],
+            "collection_status": {
+                "overall_status": "degraded",
+                "blocks": {
+                    "market_breadth": {"status": "missing", "source": None, "detail": "market breadth unavailable"},
+                    "macro_news": {"status": "fresh", "source": "macro_news", "detail": ""},
+                },
+                "issues": ["market breadth unavailable"],
+                "source_labels": ["macro_news"],
+            },
+            "data_issues": ["market breadth unavailable"],
+            "source_labels": ["macro_news"],
+        }
+
+    monkeypatch.setattr("src.service.analysis_service.should_run_market_report", lambda **kwargs: {"should_run": True})
+    monkeypatch.setattr(service, "collect_and_process_data", fake_collect)
+    monkeypatch.setattr("src.service.analysis_service.GeminiClient", lambda: (_ for _ in ()).throw(AssertionError("Gemini should not be called")))
+
+    result = asyncio.run(service.run_analysis(mode="midday"))
+
+    assert result["quality_status"] == "degraded"
+    assert "degraded_collection" in result["quality_issues"]
+    assert "market breadth unavailable" in result["structured_report"]["data_issues"]
+
+
+def test_run_analysis_morning_dry_run_surfaces_collection_degradation(monkeypatch):
+    service = AnalysisService()
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    async def fake_collect(_portfolio):
+        return {
+            "context_date": today,
+            "global_indices": [],
+            "commodities": [],
+            "us_treasury": {},
+            "macro_news": {"telegraph": []},
+            "stocks": [{"code": "600519", "name": "贵州茅台"}],
+            "collection_status": {
+                "overall_status": "degraded",
+                "blocks": {"global_indices": {"status": "missing", "source": None, "detail": "global indices unavailable"}},
+                "issues": ["global indices unavailable"],
+                "source_labels": [],
+            },
+            "data_issues": ["global indices unavailable"],
+            "source_labels": [],
+        }
+
+    monkeypatch.setattr("src.service.analysis_service.should_run_market_report", lambda **kwargs: {"should_run": True})
+    monkeypatch.setattr(service, "collect_and_process_morning_data", fake_collect)
+
+    result = asyncio.run(service.run_analysis(mode="morning", dry_run=True))
+
+    assert result["quality_status"] == "degraded"
+    assert result["data_issues"] == ["global indices unavailable"]
+    assert result["collection_status"]["overall_status"] == "degraded"
+
+
 def test_run_analysis_midday_uses_rule_engine_without_gemini(monkeypatch):
     service = AnalysisService()
     captured = {}

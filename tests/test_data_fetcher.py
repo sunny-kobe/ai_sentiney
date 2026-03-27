@@ -1,3 +1,4 @@
+import asyncio
 import pytest
 import pandas as pd
 from unittest.mock import MagicMock
@@ -99,6 +100,10 @@ async def test_collect_all_integration(collector, mock_akshare, monkeypatch):
         return None
 
     monkeypatch.setattr(collector, "_fetch_with_fallback", fake_fetch_with_fallback)
+    monkeypatch.setattr(collector, "get_market_breadth", lambda: asyncio.sleep(0, result="涨: 1 / 跌: 1 (平: 1)"))
+    monkeypatch.setattr(collector, "get_north_funds", lambda: asyncio.sleep(0, result=12.34))
+    monkeypatch.setattr(collector, "get_indices", lambda: asyncio.sleep(0, result={"上证指数": {"change_pct": 0.5}}))
+    monkeypatch.setattr(collector, "get_macro_news", lambda: asyncio.sleep(0, result={"telegraph": ["流动性平稳"], "ai_tech": []}))
 
     portfolio = [{'code': '600519', 'name': '茅台'}]
 
@@ -108,6 +113,142 @@ async def test_collect_all_integration(collector, mock_akshare, monkeypatch):
     assert len(result['stocks']) == 1
     assert result['stocks'][0]['code'] == '600519'
     assert result['stocks'][0]['current_price'] == 1800.0
+    assert result["collection_status"]["overall_status"] == "fresh"
+    assert result["data_issues"] == []
+
+
+@pytest.mark.asyncio
+async def test_collect_all_degrades_when_bulk_spot_fails_but_single_quote_succeeds(collector, monkeypatch):
+    async def fake_fetch_with_fallback(method_name, *args, **kwargs):
+        if method_name == "fetch_spot_data":
+            return None
+        if method_name == "fetch_single_quote":
+            return {
+                "code": kwargs["code"],
+                "name": "茅台",
+                "current_price": 1800.0,
+                "pct_change": 1.0,
+                "volume": 1000.0,
+                "turnover_rate": 1.2,
+            }
+        if method_name == "fetch_prices":
+            return pd.DataFrame({
+                "date": pd.date_range("2026-02-01", periods=30, freq="D"),
+                "close": [100.0] * 30,
+                "open": [100.0] * 30,
+                "high": [101.0] * 30,
+                "low": [99.0] * 30,
+                "volume": [1000.0] * 30,
+            })
+        if method_name == "fetch_news":
+            return ""
+        if method_name == "fetch_market_breadth":
+            return "涨: 1 / 跌: 1 (平: 1)"
+        return None
+
+    async def fake_north_funds():
+        return 0.0
+
+    async def fake_indices():
+        return {"上证指数": {"change_pct": 0.5}}
+
+    async def fake_macro_news():
+        return {"telegraph": ["流动性平稳"], "ai_tech": []}
+
+    monkeypatch.setattr(collector, "_fetch_with_fallback", fake_fetch_with_fallback)
+    monkeypatch.setattr(collector, "get_north_funds", fake_north_funds)
+    monkeypatch.setattr(collector, "get_indices", fake_indices)
+    monkeypatch.setattr(collector, "get_macro_news", fake_macro_news)
+
+    result = await collector.collect_all([{"code": "600519", "name": "贵州茅台"}])
+
+    assert len(result["stocks"]) == 1
+    assert result["stocks"][0]["current_price"] == 1800.0
+    assert result["collection_status"]["blocks"]["bulk_spot"]["status"] == "missing"
+    assert result["collection_status"]["blocks"]["stock_quotes"]["status"] == "fresh"
+    assert result["collection_status"]["overall_status"] == "degraded"
+    assert any("bulk spot" in issue for issue in result["data_issues"])
+
+
+@pytest.mark.asyncio
+async def test_collect_all_marks_supporting_data_failures_as_degraded(collector, monkeypatch):
+    async def fake_fetch_with_fallback(method_name, *args, **kwargs):
+        if method_name == "fetch_spot_data":
+            return pd.DataFrame({
+                "code": ["600519"],
+                "name": ["茅台"],
+                "current_price": [1800.0],
+                "pct_change": [1.0],
+            })
+        if method_name == "fetch_prices":
+            return pd.DataFrame({
+                "date": pd.date_range("2026-02-01", periods=30, freq="D"),
+                "close": [100.0] * 30,
+                "open": [100.0] * 30,
+                "high": [101.0] * 30,
+                "low": [99.0] * 30,
+                "volume": [1000.0] * 30,
+            })
+        if method_name == "fetch_news":
+            return ""
+        return None
+
+    async def fake_market_breadth():
+        return "Unknown"
+
+    async def fake_north_funds():
+        return 0.0
+
+    async def fake_indices():
+        return {}
+
+    async def fake_macro_news():
+        return {"telegraph": [], "ai_tech": []}
+
+    monkeypatch.setattr(collector, "_fetch_with_fallback", fake_fetch_with_fallback)
+    monkeypatch.setattr(collector, "get_market_breadth", fake_market_breadth)
+    monkeypatch.setattr(collector, "get_north_funds", fake_north_funds)
+    monkeypatch.setattr(collector, "get_indices", fake_indices)
+    monkeypatch.setattr(collector, "get_macro_news", fake_macro_news)
+
+    result = await collector.collect_all([{"code": "600519", "name": "贵州茅台"}])
+
+    assert len(result["stocks"]) == 1
+    assert result["collection_status"]["blocks"]["market_breadth"]["status"] == "missing"
+    assert result["collection_status"]["blocks"]["macro_news"]["status"] == "missing"
+    assert result["collection_status"]["overall_status"] == "degraded"
+    assert result["data_issues"]
+
+
+@pytest.mark.asyncio
+async def test_collect_morning_data_returns_collection_status(collector, monkeypatch):
+    async def fake_global_indices():
+        return []
+
+    async def fake_commodities():
+        return []
+
+    async def fake_treasury():
+        return {}
+
+    async def fake_macro_news():
+        return {"telegraph": [], "ai_tech": []}
+
+    async def fake_stock_context(code, name):
+        return {"code": code, "name": name, "last_close": 10.0, "ma20": 9.8, "bias_pct": 0.02, "ma20_status": "ABOVE"}
+
+    monkeypatch.setattr(collector, "get_global_indices", fake_global_indices)
+    monkeypatch.setattr(collector, "get_commodity_futures", fake_commodities)
+    monkeypatch.setattr(collector, "get_us_treasury_yields", fake_treasury)
+    monkeypatch.setattr(collector, "get_macro_news", fake_macro_news)
+    monkeypatch.setattr(collector, "_fetch_morning_stock_context", fake_stock_context)
+
+    result = await collector.collect_morning_data([{"code": "600519", "name": "贵州茅台"}])
+
+    assert result["collection_status"]["blocks"]["global_indices"]["status"] == "missing"
+    assert result["collection_status"]["blocks"]["stocks"]["status"] == "fresh"
+    assert result["collection_status"]["overall_status"] == "degraded"
+    assert result["data_issues"]
 
 
 def test_data_collector_uses_daemon_executor_threads(collector):

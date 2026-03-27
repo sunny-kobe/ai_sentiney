@@ -194,6 +194,58 @@ def test_run_analysis_swing_mode_injects_lab_hint(monkeypatch, tmp_path):
     assert result["lab_hint"]["score_delta"] == 3.2
 
 
+def test_run_analysis_swing_mode_surfaces_collection_degradation(monkeypatch, tmp_path):
+    service = AnalysisService()
+    service.data_path = tmp_path / "latest_context.json"
+
+    async def fake_collect(_portfolio):
+        return {
+            **_make_swing_input(),
+            "collection_status": {
+                "overall_status": "degraded",
+                "blocks": {"bulk_spot": {"status": "missing", "source": None, "detail": "bulk spot unavailable"}},
+                "issues": ["bulk spot unavailable; switched to single-quote fallback"],
+                "source_labels": [],
+            },
+            "data_issues": ["bulk spot unavailable; switched to single-quote fallback"],
+            "source_labels": [],
+        }
+
+    monkeypatch.setattr("src.service.analysis_service.should_run_market_report", lambda **kwargs: {"should_run": True})
+    monkeypatch.setattr(service, "collect_and_process_data", fake_collect)
+    monkeypatch.setattr(service, "_get_swing_history_records", lambda days=90: [])
+    monkeypatch.setattr(
+        service,
+        "_compute_swing_validation_report",
+        lambda historical_records: {
+            "scorecard": None,
+            "backtest": {"summary_text": "样本不足，暂无正式回测"},
+            "performance_context": {"offensive": {"pullback_resume": {"allowed": False, "reason": "样本不足"}}},
+            "summary_text": "样本不足，暂无正式回测",
+        },
+    )
+    monkeypatch.setattr(
+        "src.service.analysis_service.build_swing_report",
+        lambda ai_input, historical_records, analysis_date: {
+            "mode": "swing",
+            "market_regime": "均衡",
+            "market_conclusion": "当前偏均衡。",
+            "position_plan": {"total_exposure": "75%-90%"},
+            "portfolio_actions": {"增配": [], "持有": [], "减配": [], "回避": [], "观察": []},
+            "actions": [],
+            "technical_evidence": [],
+        },
+    )
+    monkeypatch.setattr(service, "_build_swing_lab_hint", lambda: None)
+    monkeypatch.setattr(service.db, "save_record", lambda **_kwargs: None)
+
+    result = asyncio.run(service.run_analysis(mode="swing"))
+
+    assert result["quality_status"] == "degraded"
+    assert result["data_issues"] == ["bulk spot unavailable; switched to single-quote fallback"]
+    assert result["collection_status"]["overall_status"] == "degraded"
+
+
 def test_run_analysis_swing_mode_loads_close_history_for_scorecard(monkeypatch, tmp_path):
     service = AnalysisService()
     service.data_path = tmp_path / "latest_context.json"
