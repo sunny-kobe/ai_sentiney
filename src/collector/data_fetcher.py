@@ -119,6 +119,12 @@ class DataCollector:
         {"name": "美元指数", "aliases": ["美元指数"], "yahoo_symbol": "DX-Y.NYB"},
         {"name": "日经225", "aliases": ["日经225"], "yahoo_symbol": "^N225"},
     ]
+    MACRO_NEWS_BACKUP_SOURCES = [
+        ("cls", ak.stock_info_global_cls, {"symbol": "全部"}),
+        ("sina", ak.stock_info_global_sina, {}),
+        ("futu", ak.stock_info_global_futu, {}),
+        ("ths", ak.stock_info_global_ths, {}),
+    ]
 
     def __init__(self):
         # GitHub Actions runners / Standard Cloud Instances (2-4 vCPUs)
@@ -296,6 +302,45 @@ class DataCollector:
             "change_pct": round(change_pct, 2),
             "change_amount": round(change_amount, 2),
         }
+
+    def _normalize_macro_news_rows(self, df: Optional[pd.DataFrame], source_name: str, limit: int = 10) -> List[str]:
+        if df is None or df.empty:
+            return []
+
+        headlines: List[str] = []
+        for _, row in df.iterrows():
+            candidates: List[str] = []
+            if source_name == "cls":
+                candidates = [str(row.get("标题", "") or "")]
+            elif source_name == "sina":
+                candidates = [str(row.get("内容", "") or "")]
+            elif source_name in {"futu", "ths"}:
+                candidates = [
+                    str(row.get("标题", "") or ""),
+                    str(row.get("内容", "") or ""),
+                ]
+
+            for candidate in candidates:
+                text = re.sub(r"\s+", " ", candidate).strip()
+                if text and text not in headlines:
+                    headlines.append(text)
+                    break
+            if len(headlines) >= limit:
+                break
+
+        return headlines
+
+    async def _fetch_macro_news_backup(self) -> List[str]:
+        for source_name, func, kwargs in self.MACRO_NEWS_BACKUP_SOURCES:
+            try:
+                df = await self._run_blocking(func, timeout=4, **kwargs)
+                headlines = self._normalize_macro_news_rows(df, source_name)
+                if headlines:
+                    return headlines
+            except Exception as exc:
+                logger.warning(f"Backup macro news source {source_name} failed: {exc}")
+                continue
+        return []
 
     def close(self):
         """Release thread-pool resources so CLI runs can exit cleanly."""
@@ -532,21 +577,20 @@ class DataCollector:
         
         try:
             today_str = datetime.now().strftime('%Y%m%d')
-            df_news = await self._run_blocking(ak.news_cctv, date=today_str)
+            df_news = await self._run_blocking(ak.news_cctv, date=today_str, timeout=4)
             
             if df_news is None or df_news.empty:
                  yesterday_str = (datetime.now() - timedelta(days=1)).strftime('%Y%m%d')
-                 df_news = await self._run_blocking(ak.news_cctv, date=yesterday_str)
+                 df_news = await self._run_blocking(ak.news_cctv, date=yesterday_str, timeout=4)
 
             if df_news is not None and not df_news.empty:
                 result["telegraph"] = df_news.head(10)['title'].tolist()
             else:
-                df_global = await self._run_blocking(ak.stock_info_global_em)
-                if df_global is not None and not df_global.empty:
-                    result["telegraph"] = df_global.head(10)['标题'].tolist()
+                result["telegraph"] = await self._fetch_macro_news_backup()
 
         except Exception as e:
             logger.warning(f"Failed to fetch macro news: {e}")
+            result["telegraph"] = await self._fetch_macro_news_backup()
         
         ai_keywords = ['人工智能', 'AI', '芯片', '半导体', '算力', '大模型', 'GPU', '英伟达', '华为', '科技', '机器']
         if result["telegraph"]:

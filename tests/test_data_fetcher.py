@@ -99,6 +99,60 @@ async def test_get_north_funds(collector, mock_akshare):
     funds = await collector.get_north_funds()
     assert funds == 12.34
 
+
+@pytest.mark.asyncio
+async def test_get_macro_news_falls_back_to_public_feeds_when_cctv_times_out(collector, monkeypatch):
+    async def fake_run_blocking(func, *args, **kwargs):
+        if func is ak.news_cctv:
+            raise asyncio.TimeoutError()
+        if func is ak.stock_info_global_cls:
+            return pd.DataFrame([
+                {"标题": "AI算力需求继续提升", "内容": "市场关注算力链条", "发布日期": pd.Timestamp("2026-03-27").date(), "发布时间": "09:00:00"},
+                {"标题": "海外流动性预期回暖", "内容": "风险偏好改善", "发布日期": pd.Timestamp("2026-03-27").date(), "发布时间": "09:05:00"},
+            ])
+        raise AssertionError(f"unexpected call: {func.__name__}")
+
+    monkeypatch.setattr(collector, "_run_blocking", fake_run_blocking)
+
+    result = await collector.get_macro_news()
+
+    assert result["telegraph"] == ["AI算力需求继续提升", "海外流动性预期回暖"]
+    assert result["ai_tech"] == ["AI算力需求继续提升"]
+
+
+@pytest.mark.asyncio
+async def test_collect_morning_data_keeps_macro_news_fresh_when_backup_feed_succeeds(collector, monkeypatch):
+    async def fake_global_indices():
+        return [
+            {"name": "标普500", "current": 6477.16, "change_pct": -1.74, "change_amount": -114.74},
+            {"name": "纳斯达克", "current": 21408.08, "change_pct": -2.38, "change_amount": -521.54},
+            {"name": "道琼斯", "current": 45960.11, "change_pct": -1.01, "change_amount": -469.18},
+            {"name": "恒生指数", "current": 24961.49, "change_pct": 0.67, "change_amount": 167.3},
+        ]
+
+    async def fake_commodities():
+        return [{"name": "布伦特原油", "current": 80.0, "change_pct": 0.3}]
+
+    async def fake_treasury():
+        return {"yield_10y": 4.42, "yield_2y": 3.96, "spread_10y_2y": 0.46}
+
+    async def fake_macro_news():
+        return {"telegraph": ["AI算力需求继续提升", "海外流动性预期回暖"], "ai_tech": ["AI算力需求继续提升"]}
+
+    async def fake_stock_context(code, name):
+        return {"code": code, "name": name, "last_close": 10.0, "ma20": 9.8, "bias_pct": 0.02, "ma20_status": "ABOVE"}
+
+    monkeypatch.setattr(collector, "get_global_indices", fake_global_indices)
+    monkeypatch.setattr(collector, "get_commodity_futures", fake_commodities)
+    monkeypatch.setattr(collector, "get_us_treasury_yields", fake_treasury)
+    monkeypatch.setattr(collector, "get_macro_news", fake_macro_news)
+    monkeypatch.setattr(collector, "_fetch_morning_stock_context", fake_stock_context)
+
+    result = await collector.collect_morning_data([{"code": "159819", "name": "人工智能ETF"}])
+
+    assert result["collection_status"]["blocks"]["macro_news"]["status"] == "fresh"
+    assert "macro news unavailable" not in result["data_issues"]
+
 @pytest.mark.asyncio
 async def test_collect_all_integration(collector, mock_akshare, monkeypatch):
     """Test the main collect_all orchestration."""
