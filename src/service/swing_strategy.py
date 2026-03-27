@@ -380,6 +380,59 @@ def _summarize_bucket_ranges(items: Sequence[Mapping[str, Any]]) -> Dict[str, in
     return {"min": total_min, "max": total_max}
 
 
+def _cap_target_weight(weight: str, cap_max: int) -> str:
+    _, current_max = _parse_pct_range(weight)
+    return _format_pct_range(0, min(current_max, cap_max))
+
+
+def _apply_validation_position_caps(
+    actions: Sequence[Mapping[str, Any]],
+    position_plan: Mapping[str, Any],
+) -> Dict[str, Any]:
+    updated_actions: List[Dict[str, Any]] = []
+    for item in actions:
+        updated = dict(item)
+        cluster_stats = ((updated.get("validation_evidence") or {}).get("cluster")) or {}
+        action_label = str(updated.get("action_label", "") or "")
+        cluster = str(updated.get("cluster", "") or "")
+        if action_label in {"增配", "持有"} and _is_weak_validation_stats(cluster_stats):
+            cap_max = 10 if cluster in RISK_CLUSTERS or cluster == "single_name" else 15
+            updated["target_weight"] = _cap_target_weight(str(updated.get("target_weight", "0%")), cap_max)
+        updated_actions.append(updated)
+
+    buckets = {"核心仓": [], "卫星仓": [], "现金": []}
+    for item in updated_actions:
+        bucket = item.get("position_bucket")
+        if bucket not in {"核心仓", "卫星仓"}:
+            continue
+        buckets[bucket].append(
+            {
+                "code": item.get("code"),
+                "name": item.get("name"),
+                "target_weight": item.get("target_weight", "0%"),
+            }
+        )
+
+    core_summary = _summarize_bucket_ranges(buckets["核心仓"])
+    satellite_summary = _summarize_bucket_ranges(buckets["卫星仓"])
+    total_summary = {
+        "min": core_summary["min"] + satellite_summary["min"],
+        "max": core_summary["max"] + satellite_summary["max"],
+    }
+    cash_summary = {
+        "min": max(0, 100 - total_summary["max"]),
+        "max": max(0, 100 - total_summary["min"]),
+    }
+
+    updated_plan = dict(position_plan)
+    updated_plan["core_target"] = _format_pct_range(core_summary["min"], core_summary["max"])
+    updated_plan["satellite_target"] = _format_pct_range(satellite_summary["min"], satellite_summary["max"])
+    updated_plan["total_exposure"] = _format_pct_range(total_summary["min"], total_summary["max"])
+    updated_plan["cash_target"] = _format_pct_range(cash_summary["min"], cash_summary["max"])
+    updated_plan["buckets"] = buckets
+    return {"actions": updated_actions, "position_plan": updated_plan}
+
+
 def build_position_plan(
     decisions: Sequence[Mapping[str, Any]],
     regime: str,
@@ -1343,6 +1396,10 @@ def build_swing_report(
     )
 
     position_output = build_position_plan(decisions, strategy_snapshot["market_regime"], risk_profile=risk_profile)
+    position_output = _apply_validation_position_caps(
+        position_output["actions"],
+        position_output["position_plan"],
+    )
     snapshot_output = build_current_position_snapshot(
         position_output["actions"],
         ai_input.get("portfolio_state"),
@@ -1375,6 +1432,7 @@ def build_swing_report(
         watchlist_codes=watchlist_codes,
         strategy_preferences=ai_input.get("strategy_preferences", {}),
         market_regime=strategy_snapshot["market_regime"],
+        decision_evidence=decision_evidence,
     )
 
     technical_evidence = [

@@ -503,6 +503,89 @@ def test_build_swing_report_attaches_validation_evidence_summary_to_actions():
     assert action["validation_evidence"]["cluster"]["sample_count"] == 10
 
 
+def test_build_swing_report_caps_target_weight_when_validation_cluster_is_weak():
+    history = _make_multi_history(
+        {
+            "510300": [100 + (idx * 0.5) for idx in range(41)],
+            "159819": [100 + (idx * 0.9) for idx in range(41)],
+            "159338": [100 + (idx * 0.3) for idx in range(41)],
+        }
+    )
+    ai_input = {
+        "market_breadth": "3500家上涨，1400家下跌",
+        "indices": {"上证指数": {"change_pct": 1.0}, "创业板指": {"change_pct": 1.5}},
+        "macro_news": {"telegraph": ["风险偏好回升，成长方向活跃"]},
+        "strategy_preferences": {"risk_profile": "aggressive"},
+        "stocks": [
+            _make_stock(
+                "510300",
+                "沪深300ETF",
+                signal="SAFE",
+                confidence="高",
+                bias_pct=0.03,
+                pct_change=1.0,
+                current_price=125.0,
+                ma20=119.0,
+                tech_summary="站上20日线",
+                macd_trend="BULLISH",
+                obv_trend="INFLOW",
+            ),
+            _make_stock(
+                "159819",
+                "人工智能ETF",
+                signal="OPPORTUNITY",
+                confidence="高",
+                bias_pct=0.06,
+                pct_change=2.6,
+                current_price=136.0,
+                ma20=128.0,
+                tech_summary="强势突破",
+                macd_trend="GOLDEN_CROSS",
+                obv_trend="INFLOW",
+            ),
+        ],
+        "validation_report": {
+            "summary_text": "AI 方向验证走弱。",
+            "decision_evidence": {
+                "primary_window": 20,
+                "cluster": {
+                    "ai": {
+                        "sample_count": 7,
+                        "avg_absolute_return": -0.018,
+                        "avg_relative_return": -0.032,
+                        "avg_max_drawdown": -0.094,
+                    }
+                },
+                "regime": {
+                    "进攻": {
+                        "sample_count": 12,
+                        "avg_absolute_return": 0.015,
+                        "avg_relative_return": 0.009,
+                        "avg_max_drawdown": -0.041,
+                    }
+                },
+                "action": {
+                    "增配": {
+                        "sample_count": 10,
+                        "avg_absolute_return": 0.018,
+                        "avg_relative_return": 0.006,
+                        "avg_max_drawdown": -0.047,
+                    }
+                },
+            },
+        },
+    }
+
+    report = build_swing_report(ai_input, history, analysis_date="2026-03-24")
+
+    broad = next(item for item in report["actions"] if item["code"] == "510300")
+    ai = next(item for item in report["actions"] if item["code"] == "159819")
+
+    assert broad["target_weight"] == "45%-55%"
+    assert ai["target_weight"] == "0%-10%"
+    assert report["position_plan"]["satellite_target"] == "0%-10%"
+
+
 def test_build_swing_report_retreat_overlay_uses_breakdown_and_bad_news_confirmation():
     history = _make_multi_history(
         {

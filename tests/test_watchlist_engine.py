@@ -49,3 +49,57 @@ def test_build_watchlist_candidates_limits_active_ideas_and_keeps_weak_names_obs
     assert candidates["action_buckets"]["继续观察"][0]["code"] == "159611"
     assert candidates["all_candidates"][-1]["code"] == "512200"
     assert candidates["all_candidates"][-1]["action_label"] == "继续观察"
+
+
+def test_build_watchlist_candidates_blocks_trial_when_validation_evidence_is_weak():
+    candidates = build_watchlist_candidates(
+        [
+            {
+                "code": "159819",
+                "name": "人工智能ETF",
+                "signal": "OPPORTUNITY",
+                "confidence": "高",
+                "final_action": "增配",
+                "cluster": "ai",
+                "setup_type": "trend_follow",
+                "evidence_text": "重新站上20日线并放量",
+                "invalid_condition": "跌回20日线下方",
+                "rebalance_instruction": "下一交易日分批加仓10%-20%",
+            },
+            {
+                "code": "512660",
+                "name": "军工ETF",
+                "signal": "OPPORTUNITY",
+                "confidence": "高",
+                "final_action": "增配",
+                "cluster": "sector_etf",
+                "setup_type": "trend_follow",
+                "evidence_text": "站上20日线并放量突破",
+                "invalid_condition": "跌回20日线下方",
+                "rebalance_instruction": "下一交易日分批加仓10%-20%",
+            },
+        ],
+        held_codes=set(),
+        watchlist_codes={"159819", "512660"},
+        strategy_preferences={"candidate_limit": 2, "max_watchlist_adds_per_day": 2},
+        market_regime="进攻",
+        decision_evidence={
+            "primary_window": 20,
+            "cluster": {
+                "ai": {
+                    "sample_count": 7,
+                    "avg_absolute_return": -0.018,
+                    "avg_relative_return": -0.032,
+                    "avg_max_drawdown": -0.094,
+                }
+            },
+        },
+    )
+
+    ai_candidate = next(item for item in candidates["all_candidates"] if item["code"] == "159819")
+    defense_candidate = next(item for item in candidates["all_candidates"] if item["code"] == "512660")
+
+    assert ai_candidate["action_label"] == "继续观察"
+    assert "20日验证偏弱" in ai_candidate["validation_note"]
+    assert "验证暂时不支持直接试仓" in ai_candidate["plan"]
+    assert defense_candidate["action_label"] == "进入试仓区"

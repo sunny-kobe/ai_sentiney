@@ -17,6 +17,18 @@ SIGNAL_PRIORITY = {
 }
 CONFIDENCE_PRIORITY = {"高": 2, "中": 1, "低": 0}
 WATCHLIST_BUCKETS = ("转正式仓", "进入试仓区", "继续观察")
+VALIDATION_MIN_SAMPLE = 5
+WEAK_VALIDATION_RELATIVE = -0.02
+WEAK_VALIDATION_DRAWDOWN = -0.08
+CLUSTER_LABELS = {
+    "ai": "人工智能方向",
+    "broad_beta": "大盘核心方向",
+    "small_cap": "中小盘方向",
+    "semiconductor": "半导体方向",
+    "precious_metals": "贵金属方向",
+    "sector_etf": "行业轮动方向",
+    "single_name": "个股方向",
+}
 
 
 def _watchlist_rank(item: Mapping[str, Any]) -> int:
@@ -41,6 +53,39 @@ def _candidate_action(item: Mapping[str, Any], market_regime: str) -> str:
     return "继续观察"
 
 
+def _is_weak_validation_stats(stats: Mapping[str, Any]) -> bool:
+    sample_count = int(stats.get("sample_count", 0) or 0)
+    avg_relative = stats.get("avg_relative_return")
+    avg_drawdown = float(stats.get("avg_max_drawdown", 0.0) or 0.0)
+    return sample_count >= VALIDATION_MIN_SAMPLE and (
+        (avg_relative is not None and float(avg_relative) <= WEAK_VALIDATION_RELATIVE)
+        or avg_drawdown <= WEAK_VALIDATION_DRAWDOWN
+    )
+
+
+def _validation_note_for_item(item: Mapping[str, Any], decision_evidence: Mapping[str, Any]) -> str:
+    primary_window = decision_evidence.get("primary_window")
+    cluster = str(item.get("cluster", "") or "")
+    cluster_stats = ((decision_evidence.get("cluster") or {}).get(cluster)) or {}
+    if not primary_window or not cluster_stats:
+        return ""
+
+    cluster_label = CLUSTER_LABELS.get(cluster, cluster or "该方向")
+    avg_relative = cluster_stats.get("avg_relative_return")
+    relative_text = (
+        f"平均跑赢基准{float(avg_relative) * 100:.1f}%"
+        if isinstance(avg_relative, (int, float)) and float(avg_relative) >= 0
+        else f"平均落后基准{abs(float(avg_relative or 0.0)) * 100:.1f}%"
+    )
+    drawdown = abs(float(cluster_stats.get("avg_max_drawdown", 0.0) or 0.0)) * 100
+    if _is_weak_validation_stats(cluster_stats):
+        return (
+            f"{cluster_label}的{int(primary_window)}日验证偏弱，样本"
+            f"{int(cluster_stats.get('sample_count', 0) or 0)}笔，{relative_text}，回撤约{drawdown:.1f}%。"
+        )
+    return ""
+
+
 def build_watchlist_candidates(
     holdings: Sequence[Mapping[str, Any]],
     *,
@@ -48,6 +93,7 @@ def build_watchlist_candidates(
     watchlist_codes: Set[str],
     strategy_preferences: Mapping[str, Any],
     market_regime: str,
+    decision_evidence: Mapping[str, Any] | None = None,
 ) -> Dict[str, Any]:
     candidate_limit = int(strategy_preferences.get("candidate_limit", 3) or 3)
     daily_limit = int(strategy_preferences.get("max_watchlist_adds_per_day", candidate_limit) or candidate_limit)
@@ -60,6 +106,12 @@ def build_watchlist_candidates(
             continue
 
         action_label = _candidate_action(item, market_regime)
+        validation_note = _validation_note_for_item(item, decision_evidence or {})
+        if validation_note and action_label == "进入试仓区":
+            action_label = "继续观察"
+            plan = "验证暂时不支持直接试仓，先继续观察，等该方向样本修复后再考虑。"
+        else:
+            plan = item.get("rebalance_instruction", "继续观察")
         candidates.append(
             {
                 "code": code,
@@ -68,8 +120,9 @@ def build_watchlist_candidates(
                 "confidence": item.get("confidence", ""),
                 "action_label": action_label,
                 "reason": item.get("evidence_text", "") or item.get("tech_summary", ""),
-                "plan": item.get("rebalance_instruction", "继续观察"),
+                "plan": plan,
                 "risk_line": item.get("invalid_condition", ""),
+                "validation_note": validation_note,
                 "rank_score": _watchlist_rank(item),
             }
         )
