@@ -16,7 +16,7 @@ from src.storage.database import SentinelDB
 from src.processor.signal_tracker import evaluate_yesterday, calculate_rolling_stats, calculate_pair_rolling_stats, build_scorecard, _compute_risk_stats, _compute_buy_stats
 from src.processor.swing_tracker import build_swing_scorecard
 from src.utils.trading_calendar import should_run_market_report
-from src.service.report_quality import evaluate_input_quality, evaluate_output_quality
+from src.service.report_quality import build_swing_quality_guard, evaluate_input_quality, evaluate_output_quality
 from src.service.structured_report import build_structured_report
 from src.service.portfolio_advisor import build_investor_snapshot
 from src.service.performance_gate import build_default_performance_context, gate_offensive_setup
@@ -461,6 +461,8 @@ class AnalysisService:
                 ai_input.setdefault("watchlist", investor_snapshot.get("watchlist", []))
                 ai_input.setdefault("held_codes", investor_snapshot.get("held_codes", set()))
                 ai_input.setdefault("watchlist_codes", investor_snapshot.get("watchlist_codes", set()))
+                swing_quality_guard = build_swing_quality_guard(ai_input)
+                ai_input.setdefault("swing_quality_guard", swing_quality_guard)
                 historical_records = self._get_swing_history_records(days=90)
                 validation_report = self._compute_swing_validation_report(historical_records)
                 if validation_report:
@@ -482,6 +484,9 @@ class AnalysisService:
                 analysis_result.setdefault("source_labels", ["rule_engine", "history"])
                 analysis_result.setdefault("data_issues", ai_input.get("data_issues", []))
                 analysis_result.setdefault("collection_status", ai_input.get("collection_status", {}))
+                analysis_result.setdefault("execution_readiness", swing_quality_guard.get("execution_readiness"))
+                analysis_result.setdefault("quality_summary", swing_quality_guard.get("summary"))
+                analysis_result.setdefault("trade_guard", swing_quality_guard)
             elif mode in ("midday", "preclose", "close") and quality_input["status"] == "degraded":
                 analysis_result = self._build_degraded_report(mode, ai_input["structured_report"], quality_input["issues"])
             elif mode in ("midday", "preclose", "close"):

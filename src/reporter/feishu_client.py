@@ -788,6 +788,26 @@ class FeishuClient:
                 {"tag": "hr"},
             ]
         )
+        execution_readiness = str(data.get("execution_readiness", "") or "").strip()
+        quality_summary = str(data.get("quality_summary", "") or "").strip()
+        if execution_readiness or quality_summary:
+            detail_lines = []
+            if execution_readiness:
+                detail_lines.append(f"- **可执行度**: {execution_readiness}")
+            if quality_summary:
+                detail_lines.append(f"- **说明**: {quality_summary}")
+            elements.extend(
+                [
+                    {
+                        "tag": "div",
+                        "text": {
+                            "tag": "lark_md",
+                            "content": "**执行提示**\n" + "\n".join(detail_lines),
+                        },
+                    },
+                    {"tag": "hr"},
+                ]
+            )
         validation_budgets = position_plan.get("validation_budgets") or []
         if validation_budgets:
             elements.extend(

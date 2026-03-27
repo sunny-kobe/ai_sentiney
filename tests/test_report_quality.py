@@ -1,4 +1,4 @@
-from src.service.report_quality import evaluate_input_quality, evaluate_output_quality
+from src.service.report_quality import build_swing_quality_guard, evaluate_input_quality, evaluate_output_quality
 
 
 def test_input_quality_blocked_when_midday_stocks_missing():
@@ -85,3 +85,49 @@ def test_output_quality_degraded_when_ai_actions_do_not_cover_structured_stocks(
 
     assert result["status"] == "degraded"
     assert "incomplete_action_coverage" in result["issues"]
+
+
+def test_build_swing_quality_guard_is_cautious_when_only_supporting_blocks_are_missing():
+    result = build_swing_quality_guard(
+        {
+            "collection_status": {
+                "overall_status": "degraded",
+                "blocks": {
+                    "stock_quotes": {"status": "fresh"},
+                    "stock_history": {"status": "fresh"},
+                    "market_breadth": {"status": "missing"},
+                    "macro_news": {"status": "missing"},
+                },
+            }
+        }
+    )
+
+    assert result["trust_level"] == "medium"
+    assert result["execution_readiness"] == "谨慎执行"
+    assert result["allow_offensive"] is True
+    assert result["allow_new_entries"] is False
+    assert "核心行情完整" in result["summary"]
+    assert "市场广度" in result["summary"]
+    assert "宏观消息" in result["summary"]
+
+
+def test_build_swing_quality_guard_is_reference_only_when_core_blocks_are_missing():
+    result = build_swing_quality_guard(
+        {
+            "collection_status": {
+                "overall_status": "degraded",
+                "blocks": {
+                    "stock_quotes": {"status": "missing"},
+                    "stock_history": {"status": "degraded"},
+                    "market_breadth": {"status": "fresh"},
+                },
+            }
+        }
+    )
+
+    assert result["trust_level"] == "low"
+    assert result["execution_readiness"] == "仅供参考"
+    assert result["allow_offensive"] is False
+    assert result["allow_new_entries"] is False
+    assert "实时行情" in result["summary"]
+    assert "历史走势" in result["summary"]

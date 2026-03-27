@@ -62,6 +62,18 @@ def _append_quality_note(lines: List[str], quality_status: Any, data_timestamp: 
     suffix = f" | {'；'.join(details)}" if details else ""
     lines.append(f"数据提示: {_format_quality_status(quality_status)}{suffix}")
 
+
+def _append_execution_note(lines: List[str], execution_readiness: Any, quality_summary: Any) -> None:
+    readiness = str(execution_readiness or "").strip()
+    summary = str(quality_summary or "").strip()
+    if not readiness and not summary:
+        return
+    lines.append("执行提示:")
+    if readiness:
+        lines.append(f"  可执行度: {readiness}")
+    if summary:
+        lines.append(f"  说明: {summary}")
+
 def _print_text_summary(result: Dict[str, Any], mode: str):
     """Format analysis result as human-readable text for terminal output."""
     if "error" in result:
@@ -86,6 +98,7 @@ def _print_text_summary(result: Dict[str, Any], mode: str):
         if result.get("validation_summary"):
             lines.append("验证摘要:")
             lines.append(f"  {result.get('validation_summary')}")
+        _append_execution_note(lines, result.get("execution_readiness"), result.get("quality_summary"))
         if lab_hint:
             for detail_line in build_lab_hint_detail(lab_hint).splitlines():
                 lines.append(f"  {detail_line}")

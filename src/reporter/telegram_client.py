@@ -161,6 +161,14 @@ class TelegramClient:
         validation_hint = _build_validation_hint(data)
         if validation_hint:
             lines.append(validation_hint)
+        execution_readiness = str(data.get("execution_readiness", "") or "").strip()
+        quality_summary = str(data.get("quality_summary", "") or "").strip()
+        if execution_readiness or quality_summary:
+            lines.append("执行提示:")
+            if execution_readiness:
+                lines.append(f"可执行度: {execution_readiness}")
+            if quality_summary:
+                lines.append(quality_summary)
         lab_hint = _build_lab_hint(data)
         if lab_hint:
             lines.append(lab_hint)

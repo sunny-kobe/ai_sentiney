@@ -22,6 +22,8 @@ def _make_swing_result():
             "offensive_allowed": True,
             "offensive_reason": "真实建议近期进攻统计仍有效，正式回测未见明显恶化",
         },
+        "execution_readiness": "谨慎执行",
+        "quality_summary": "核心行情完整，但市场广度和宏观消息暂时缺失。已有仓位可按计划处理，新开仓先等补齐信息。",
         "lab_hint": {
             "preset": "aggressive_leader_focus",
             "winner": "candidate",
@@ -144,6 +146,9 @@ def test_cli_swing_summary_uses_plain_language_sections():
     assert "观察池机会" in rendered
     assert "风险清单" in rendered
     assert "验证摘要" in rendered
+    assert "执行提示" in rendered
+    assert "谨慎执行" in rendered
+    assert "新开仓先等补齐信息" in rendered
     assert "真实建议跟踪" in rendered
     assert "实验提示" in rendered
     assert "激进龙头聚焦" in rendered
@@ -170,6 +175,8 @@ def test_telegram_swing_text_shows_action_buckets_and_risk_lines():
     assert "现金目标: 50%-65%" in text
     assert "当前总仓位: 68.7%" in text
     assert "观察池机会" in text
+    assert "执行提示" in text
+    assert "谨慎执行" in text
     assert "军工ETF" in text
     assert "验证摘要" in text
     assert "真实建议跟踪" in text
@@ -199,6 +206,8 @@ def test_feishu_swing_card_shows_plain_language_sections():
     assert "当前总仓位" in joined
     assert "持仓处理" in joined
     assert "观察池机会" in joined
+    assert "执行提示" in joined
+    assert "谨慎执行" in joined
     assert "验证摘要" in joined
     assert "真实建议跟踪" in joined
     assert "真实样本: 20日8笔 | 历史样本: 20日12笔 | 进攻权限: 允许（真实建议近期进攻统计仍有效，正式回测未见明显恶化）" in joined

@@ -480,6 +480,42 @@ def _build_validation_budgets(
     return budgets
 
 
+def _apply_trade_guard_overlay(
+    decisions: Sequence[Mapping[str, Any]],
+    *,
+    trade_guard: Optional[Mapping[str, Any]],
+) -> List[Dict[str, Any]]:
+    guard = dict(trade_guard or {})
+    if guard.get("allow_offensive", True) is not False:
+        return [dict(item) for item in decisions]
+
+    summary = str(guard.get("summary", "") or "").strip()
+    adjusted: List[Dict[str, Any]] = []
+    for item in decisions:
+        updated = dict(item)
+        action_label = str(updated.get("action_label", "观察") or "观察")
+        if action_label in {"增配", "持有"} and summary:
+            updated["quality_note"] = summary
+            updated["reason"] = f"{updated.get('reason', '').strip()} {summary}".strip()
+
+        if action_label != "增配":
+            adjusted.append(updated)
+            continue
+
+        shares = int(updated.get("shares", 0) or 0)
+        downgraded = "持有" if shares > 0 else "观察"
+        updated["action_label"] = downgraded
+        updated["conclusion"] = downgraded
+        updated["operation"] = downgraded
+        updated["plan"] = (
+            "核心行情不完整，今天先不主动加仓，等数据恢复完整后再决定。"
+            if shares > 0
+            else "核心行情不完整，先列入观察名单，等数据恢复完整后再决定是否建立试仓。"
+        )
+        adjusted.append(updated)
+    return adjusted
+
+
 def _apply_validation_position_caps(
     actions: Sequence[Mapping[str, Any]],
     position_plan: Mapping[str, Any],
@@ -1425,6 +1461,7 @@ def build_swing_report(
     held_codes = {str(code) for code in (ai_input.get("held_codes") or set())}
     watchlist_codes = {str(code) for code in (ai_input.get("watchlist_codes") or set())}
     decision_evidence = ((ai_input.get("validation_report") or {}).get("decision_evidence") or {})
+    trade_guard = dict(ai_input.get("swing_quality_guard") or {})
     decisions = []
     watchlist_holdings = []
     for holding in strategy_snapshot.get("holdings", []):
@@ -1495,6 +1532,7 @@ def build_swing_report(
             regime=strategy_snapshot["market_regime"],
             stock_map=stock_map,
         )
+    decisions = _apply_trade_guard_overlay(decisions, trade_guard=trade_guard)
     decisions = _attach_validation_evidence(
         decisions,
         decision_evidence=decision_evidence,
@@ -1540,6 +1578,7 @@ def build_swing_report(
         strategy_preferences=ai_input.get("strategy_preferences", {}),
         market_regime=strategy_snapshot["market_regime"],
         decision_evidence=decision_evidence,
+        trade_guard=trade_guard,
     )
 
     technical_evidence = [
@@ -1565,6 +1604,8 @@ def build_swing_report(
         "watchlist_actions": watchlist_output["action_buckets"],
         "watchlist_candidates": watchlist_output["active_candidates"],
         "validation_summary": ((ai_input.get("validation_report") or {}).get("summary_text") or ""),
+        "execution_readiness": trade_guard.get("execution_readiness"),
+        "quality_summary": trade_guard.get("summary"),
         "technical_evidence": technical_evidence,
         "strategy_snapshot": strategy_snapshot,
     }

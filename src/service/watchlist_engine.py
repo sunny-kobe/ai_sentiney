@@ -98,6 +98,7 @@ def build_watchlist_candidates(
     strategy_preferences: Mapping[str, Any],
     market_regime: str,
     decision_evidence: Mapping[str, Any] | None = None,
+    trade_guard: Mapping[str, Any] | None = None,
 ) -> Dict[str, Any]:
     candidate_limit = int(strategy_preferences.get("candidate_limit", 3) or 3)
     daily_limit = int(strategy_preferences.get("max_watchlist_adds_per_day", candidate_limit) or candidate_limit)
@@ -111,7 +112,12 @@ def build_watchlist_candidates(
 
         action_label = _candidate_action(item, market_regime)
         validation_note = _validation_note_for_item(item, decision_evidence or {})
-        if validation_note and action_label == "进入试仓区":
+        quality_note = ""
+        if action_label == "进入试仓区" and (trade_guard or {}).get("allow_new_entries") is False:
+            quality_note = str((trade_guard or {}).get("summary", "") or "").strip()
+            action_label = "继续观察"
+            plan = "新开仓先等补齐信息，等核心与辅助数据恢复后再考虑试仓。"
+        elif validation_note and action_label == "进入试仓区":
             action_label = "继续观察"
             if (decision_evidence or {}).get("offensive_allowed") is False:
                 plan = "进攻权限恢复前先不试仓，继续观察，等验证重新转强后再考虑。"
@@ -130,6 +136,7 @@ def build_watchlist_candidates(
                 "plan": plan,
                 "risk_line": item.get("invalid_condition", ""),
                 "validation_note": validation_note,
+                "quality_note": quality_note,
                 "rank_score": _watchlist_rank(item),
             }
         )

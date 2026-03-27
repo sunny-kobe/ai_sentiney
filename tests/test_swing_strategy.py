@@ -825,6 +825,68 @@ def test_build_swing_report_adds_direction_budget_summary():
     assert any(item["label"] == "大盘核心方向" and item["status"] == "正常" for item in budgets)
 
 
+def test_build_swing_report_blocks_offensive_actions_when_trade_guard_disallows_them():
+    ai_input = {
+        "market_breadth": "3200家上涨，1700家下跌",
+        "indices": {"上证指数": {"change_pct": 0.8}, "创业板指": {"change_pct": 1.1}},
+        "macro_news": {"telegraph": ["成交温和回暖，风险偏好有所修复"]},
+        "stocks": [
+            _make_stock(
+                "512480",
+                "半导体ETF",
+                signal="OPPORTUNITY",
+                confidence="高",
+                bias_pct=0.06,
+                pct_change=2.2,
+                current_price=1.08,
+                ma20=1.0,
+                tech_summary="重新站上20日线，量能放大",
+                macd_trend="GOLDEN_CROSS",
+                obv_trend="INFLOW",
+                shares=8000,
+            ),
+            _make_stock(
+                "512660",
+                "军工ETF",
+                signal="OPPORTUNITY",
+                confidence="高",
+                bias_pct=0.05,
+                pct_change=1.9,
+                current_price=0.92,
+                ma20=0.88,
+                tech_summary="重新站上20日线，量能放大",
+                macd_trend="GOLDEN_CROSS",
+                obv_trend="INFLOW",
+            ),
+        ],
+        "held_codes": {"512480"},
+        "watchlist_codes": {"512660"},
+        "watchlist": [{"code": "512660", "name": "军工ETF", "strategy": "trend", "priority": "high"}],
+        "strategy_preferences": {"risk_profile": "aggressive", "candidate_limit": 2},
+        "swing_quality_guard": {
+            "trust_level": "low",
+            "execution_readiness": "仅供参考",
+            "summary": "核心行情不完整。今天结论只供参考，不做主动加仓，不开新仓。",
+            "allow_offensive": False,
+            "allow_new_entries": False,
+        },
+    }
+
+    report = build_swing_report(
+        ai_input,
+        _make_history("510300", [100, 101, 103, 104]),
+        analysis_date="2026-03-27",
+    )
+
+    action = next(item for item in report["actions"] if item["code"] == "512480")
+
+    assert action["action_label"] == "持有"
+    assert "核心行情不完整" in action["reason"]
+    assert report["execution_readiness"] == "仅供参考"
+    assert report["quality_summary"] == "核心行情不完整。今天结论只供参考，不做主动加仓，不开新仓。"
+    assert report["watchlist_candidates"] == []
+
+
 def test_build_swing_report_retreat_overlay_uses_breakdown_and_bad_news_confirmation():
     history = _make_multi_history(
         {

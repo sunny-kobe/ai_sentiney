@@ -137,3 +137,37 @@ def test_build_watchlist_candidates_blocks_trial_when_global_offensive_gate_is_c
     assert candidate["action_label"] == "继续观察"
     assert candidate["validation_note"] == "当前全局进攻权限关闭：真实建议近期进攻统计失效。"
     assert "进攻权限恢复" in candidate["plan"]
+
+
+def test_build_watchlist_candidates_blocks_trial_when_trade_guard_disallows_new_entries():
+    candidates = build_watchlist_candidates(
+        [
+            {
+                "code": "512660",
+                "name": "军工ETF",
+                "signal": "OPPORTUNITY",
+                "confidence": "高",
+                "final_action": "增配",
+                "cluster": "sector_etf",
+                "setup_type": "trend_follow",
+                "evidence_text": "站上20日线并放量突破",
+                "invalid_condition": "跌回20日线下方",
+                "rebalance_instruction": "下一交易日分批加仓10%-20%",
+            },
+        ],
+        held_codes=set(),
+        watchlist_codes={"512660"},
+        strategy_preferences={"candidate_limit": 2, "max_watchlist_adds_per_day": 2},
+        market_regime="进攻",
+        trade_guard={
+            "execution_readiness": "谨慎执行",
+            "summary": "核心行情完整，但辅助信息不足。已有仓位可按计划处理，新开仓先等补齐信息。",
+            "allow_offensive": True,
+            "allow_new_entries": False,
+        },
+    )
+
+    candidate = candidates["all_candidates"][0]
+    assert candidate["action_label"] == "继续观察"
+    assert candidate["quality_note"] == "核心行情完整，但辅助信息不足。已有仓位可按计划处理，新开仓先等补齐信息。"
+    assert "新开仓先等补齐信息" in candidate["plan"]
