@@ -23,9 +23,9 @@ def test_cli_summary_displays_quality_status_and_sources():
         _print_text_summary(result, "midday")
 
     rendered = output.getvalue()
-    assert "质量: degraded" in rendered
-    assert "时间: 2026-03-23" in rendered
-    assert "来源: rule_engine, stock_news" in rendered
+    assert "数据提示: 数据降级" in rendered
+    assert "时间 2026-03-23" in rendered
+    assert "来源 rule_engine, stock_news" in rendered
 
 
 def test_telegram_midday_text_includes_quality_metadata():
@@ -105,5 +105,30 @@ def test_feishu_card_displays_degraded_banner_and_metadata():
     ]
     joined = "\n".join(contents)
     assert "结构化快报" in joined
-    assert "质量: degraded" in joined
-    assert "来源: rule_engine, stock_news" in joined
+    assert "数据提示" in joined
+    assert "rule_engine, stock_news" in joined
+
+
+def test_feishu_card_hides_quality_metadata_when_report_is_normal():
+    client = FeishuClient()
+    card = client._construct_card(
+        {
+            "quality_status": "normal",
+            "data_timestamp": "2026-03-23",
+            "source_labels": ["rule_engine", "stock_news"],
+            "market_sentiment": "结构化快报",
+            "macro_summary": "证据充分，正常输出",
+            "actions": [],
+        }
+    )
+
+    contents = [
+        element.get("text", {}).get("content", "")
+        for element in card["elements"]
+        if element.get("tag") == "div"
+    ]
+    joined = "\n".join(contents)
+    assert "结构化快报" in joined
+    assert "质量:" not in joined
+    assert "时间:" not in joined
+    assert "来源:" not in joined

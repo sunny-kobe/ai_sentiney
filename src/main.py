@@ -34,6 +34,34 @@ def setup_proxy():
         os.environ["HTTPS_PROXY"] = proxy
         logger.info(f"Global Proxy Enabled: {proxy}")
 
+
+def _is_quality_alert(status: Any) -> bool:
+    normalized = str(status or "").strip().lower()
+    return normalized not in {"", "normal", "fresh"}
+
+
+def _format_quality_status(status: Any) -> str:
+    normalized = str(status or "").strip().lower()
+    labels = {
+        "degraded": "数据降级",
+        "blocked": "数据受阻",
+        "missing": "关键数据缺失",
+    }
+    return labels.get(normalized, str(status or "数据异常"))
+
+
+def _append_quality_note(lines: List[str], quality_status: Any, data_timestamp: Any, source_labels: List[str]) -> None:
+    if not _is_quality_alert(quality_status):
+        return
+
+    details = []
+    if data_timestamp:
+        details.append(f"时间 {data_timestamp}")
+    if source_labels:
+        details.append(f"来源 {', '.join(source_labels)}")
+    suffix = f" | {'；'.join(details)}" if details else ""
+    lines.append(f"数据提示: {_format_quality_status(quality_status)}{suffix}")
+
 def _print_text_summary(result: Dict[str, Any], mode: str):
     """Format analysis result as human-readable text for terminal output."""
     if "error" in result:
@@ -54,12 +82,7 @@ def _print_text_summary(result: Dict[str, Any], mode: str):
         header_hint = build_lab_hint_header(lab_hint)
         if header_hint:
             lines.append(header_hint)
-        if quality_status:
-            lines.append(f"质量: {quality_status}")
-        if data_timestamp:
-            lines.append(f"时间: {data_timestamp}")
-        if source_labels:
-            lines.append(f"来源: {', '.join(source_labels)}")
+        _append_quality_note(lines, quality_status, data_timestamp, source_labels)
         if result.get("validation_summary"):
             lines.append("验证摘要:")
             lines.append(f"  {result.get('validation_summary')}")
@@ -119,12 +142,7 @@ def _print_text_summary(result: Dict[str, Any], mode: str):
             lines.append(f"  [{a.get('code')}] {a.get('name')} | 预期:{a.get('opening_expectation')} | 策略:{a.get('strategy')}")
     elif mode == 'preclose':
         lines.append(f"=== 收盘前执行 ===")
-        if quality_status:
-            lines.append(f"质量: {quality_status}")
-        if data_timestamp:
-            lines.append(f"时间: {data_timestamp}")
-        if source_labels:
-            lines.append(f"来源: {', '.join(source_labels)}")
+        _append_quality_note(lines, quality_status, data_timestamp, source_labels)
         lines.append(f"情绪: {result.get('market_sentiment', 'N/A')}")
         lines.append(f"量能: {result.get('volume_analysis', 'N/A')}")
         lines.append(f"指数: {result.get('indices_info', 'N/A')}")
@@ -141,12 +159,7 @@ def _print_text_summary(result: Dict[str, Any], mode: str):
                 lines.append(f"    理由: {a.get('reason')}")
     elif mode == 'close':
         lines.append(f"=== 收盘复盘 ===")
-        if quality_status:
-            lines.append(f"质量: {quality_status}")
-        if data_timestamp:
-            lines.append(f"时间: {data_timestamp}")
-        if source_labels:
-            lines.append(f"来源: {', '.join(source_labels)}")
+        _append_quality_note(lines, quality_status, data_timestamp, source_labels)
         lines.append(f"总结: {result.get('market_summary', 'N/A')}")
         lines.append(f"温度: {result.get('market_temperature', 'N/A')}")
         # Signal Scorecard
@@ -170,12 +183,7 @@ def _print_text_summary(result: Dict[str, Any], mode: str):
                 lines.append(f"    指标: {tech}")
     else:  # midday
         lines.append(f"=== 午盘分析 ===")
-        if quality_status:
-            lines.append(f"质量: {quality_status}")
-        if data_timestamp:
-            lines.append(f"时间: {data_timestamp}")
-        if source_labels:
-            lines.append(f"来源: {', '.join(source_labels)}")
+        _append_quality_note(lines, quality_status, data_timestamp, source_labels)
         lines.append(f"情绪: {result.get('market_sentiment', 'N/A')}")
         lines.append(f"量能: {result.get('volume_analysis', 'N/A')}")
         lines.append(f"指数: {result.get('indices_info', 'N/A')}")

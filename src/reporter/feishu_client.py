@@ -31,6 +31,40 @@ def _build_lab_hint(data: Dict[str, Any]) -> str:
     return build_lab_hint_detail(hint, markdown=True)
 
 
+def _is_quality_alert(status: Any) -> bool:
+    normalized = str(status or "").strip().lower()
+    return normalized not in {"", "normal", "fresh"}
+
+
+def _format_quality_status(status: Any) -> str:
+    normalized = str(status or "").strip().lower()
+    labels = {
+        "degraded": "数据降级",
+        "blocked": "数据受阻",
+        "missing": "关键数据缺失",
+    }
+    return labels.get(normalized, str(status or "数据异常"))
+
+
+def _build_quality_notice(data: Dict[str, Any]) -> Dict[str, Any] | None:
+    quality_status = data.get("quality_status", "normal")
+    if not _is_quality_alert(quality_status):
+        return None
+
+    data_timestamp = data.get("data_timestamp", "N/A")
+    source_labels = ", ".join(data.get("source_labels", [])) or "N/A"
+    return {
+        "tag": "div",
+        "text": {
+            "tag": "lark_md",
+            "content": (
+                f"> ⚠️ **数据提示**: {_format_quality_status(quality_status)}"
+                f"（时间：{data_timestamp}；来源：{source_labels}）"
+            ),
+        },
+    }
+
+
 class FeishuClient:
     def __init__(self):
         self.config = ConfigLoader().config
@@ -97,9 +131,6 @@ class FeishuClient:
         bull_case = data.get("bull_case", "")
         bear_case = data.get("bear_case", "")
         actions = data.get("actions", [])
-        quality_status = data.get("quality_status", "normal")
-        data_timestamp = data.get("data_timestamp", "N/A")
-        source_labels = ", ".join(data.get("source_labels", [])) or "N/A"
         
         # Pass indices data manually if we can, but usually 'data' is just the AI result.
         # Wait, the AI result doesn't contain the raw indices data unless we put it there or pass it separately.
@@ -118,15 +149,11 @@ class FeishuClient:
             header_color = "grey"
 
         # 1. Header Section
-        elements: List[Dict[str, Any]] = [
-            {
-                "tag": "div",
-                "text": {
-                    "tag": "lark_md",
-                    "content": f"🧪 质量: {quality_status}\n🕒 时间: {data_timestamp}\n🔎 来源: {source_labels}"
-                }
-            },
-            {"tag": "hr"},
+        elements: List[Dict[str, Any]] = []
+        quality_notice = _build_quality_notice(data)
+        if quality_notice:
+            elements.extend([quality_notice, {"tag": "hr"}])
+        elements.extend([
             {
                 "tag": "div",
                 "text": {
@@ -143,7 +170,7 @@ class FeishuClient:
                 }
             },
             {"tag": "hr"}
-        ]
+        ])
 
         # Signal Scorecard Section
         scorecard = data.get('signal_scorecard')
@@ -565,10 +592,6 @@ class FeishuClient:
         bull_case = data.get("bull_case", "")
         bear_case = data.get("bear_case", "")
         actions = data.get("actions", [])
-        quality_status = data.get("quality_status", "normal")
-        data_timestamp = data.get("data_timestamp", "N/A")
-        source_labels = ", ".join(data.get("source_labels", [])) or "N/A"
-
         # Temperature-based color
         header_color = "blue"
         if "冰点" in market_temperature:
@@ -579,15 +602,11 @@ class FeishuClient:
         from datetime import datetime
         date_str = datetime.now().strftime('%Y年%m月%d日')
 
-        elements = [
-            {
-                "tag": "div",
-                "text": {
-                    "tag": "lark_md",
-                    "content": f"🧪 质量: {quality_status}\n🕒 时间: {data_timestamp}\n🔎 来源: {source_labels}"
-                }
-            },
-            {"tag": "hr"},
+        elements = []
+        quality_notice = _build_quality_notice(data)
+        if quality_notice:
+            elements.extend([quality_notice, {"tag": "hr"}])
+        elements.extend([
             {
                 "tag": "div",
                 "text": {
@@ -596,7 +615,7 @@ class FeishuClient:
                 }
             },
             {"tag": "hr"}
-        ]
+        ])
 
         # Bull/Bear case section
         if bull_case or bear_case:

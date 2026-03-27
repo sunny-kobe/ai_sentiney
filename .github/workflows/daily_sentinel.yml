@@ -4,12 +4,12 @@ on:
   schedule:
     # UTC Time! China is UTC+8.
     # OpenClaw 本地为主力，GitHub Actions 再提前一档作为兜底
-    # Morning 08:10 CST = 00:10 UTC
+    # Morning 04:10 CST = 20:10 UTC (previous UTC day, so cron uses 0-4)
     # Midday 11:20 CST = 03:20 UTC
     # Preclose 14:35 CST = 06:35 UTC
     # Close review 15:05 CST = 07:05 UTC
     # Swing 20:00 CST = 12:00 UTC
-    - cron: "10 0 * * 1-5" # Morning Brief (兜底)
+    - cron: "10 20 * * 0-4" # Morning Brief (兜底)
     - cron: "20 3 * * 1-5" # Midday Check (兜底)
     - cron: "35 6 * * 1-5" # Preclose Execution (主模式)
     - cron: "5 7 * * 1-5" # Close Review (兜底)
@@ -40,6 +40,8 @@ on:
 jobs:
   run-sentinel:
     runs-on: ubuntu-latest
+    env:
+      TZ: Asia/Shanghai
 
     # Permission to commit back to repo
     permissions:
@@ -74,7 +76,7 @@ jobs:
             echo "Manual dispatch mode selected: $TARGET_MODE"
           else
             case "$SCHEDULE_EXPR" in
-              "10 0 * * 1-5")
+              "10 20 * * 0-4")
                 TARGET_MODE="morning"
                 ;;
               "20 3 * * 1-5")
@@ -90,17 +92,17 @@ jobs:
                 TARGET_MODE="swing"
                 ;;
               *)
-                current_hour=$(date -u +%-H)
-                current_minute=$(date -u +%-M)
+                current_hour=$(date +%-H)
+                current_minute=$(date +%-M)
                 current_total_minutes=$((10#$current_hour * 60 + 10#$current_minute))
-                echo "Current UTC Time: ${current_hour}:${current_minute}"
-                if [ "$current_total_minutes" -lt 150 ]; then
+                echo "Current CST Time: ${current_hour}:${current_minute}"
+                if [ "$current_total_minutes" -lt 280 ]; then
                   TARGET_MODE="morning"
-                elif [ "$current_total_minutes" -lt 360 ]; then
+                elif [ "$current_total_minutes" -lt 415 ]; then
                   TARGET_MODE="midday"
-                elif [ "$current_total_minutes" -lt 430 ]; then
+                elif [ "$current_total_minutes" -lt 450 ]; then
                   TARGET_MODE="preclose"
-                elif [ "$current_total_minutes" -lt 540 ]; then
+                elif [ "$current_total_minutes" -lt 930 ]; then
                   TARGET_MODE="close"
                 else
                   TARGET_MODE="swing"
