@@ -378,16 +378,20 @@ class DataCollector:
         return headlines
 
     async def _fetch_macro_news_backup(self) -> List[str]:
+        merged: List[str] = []
         for source_name, func, kwargs in self.MACRO_NEWS_BACKUP_SOURCES:
             try:
                 df = await self._run_blocking(func, timeout=4, **kwargs)
                 headlines = self._normalize_macro_news_rows(df, source_name)
-                if headlines:
-                    return headlines
+                for headline in headlines:
+                    if headline not in merged:
+                        merged.append(headline)
+                    if len(merged) >= 10:
+                        return merged[:10]
             except Exception as exc:
                 logger.warning(f"Backup macro news source {source_name} failed: {exc}")
                 continue
-        return []
+        return merged[:10]
 
     def close(self):
         """Release thread-pool resources so CLI runs can exit cleanly."""
@@ -1160,11 +1164,14 @@ class DataCollector:
                 df_hist = df_hist.tail(self.history_days)
             
             # 3. Fetch News via Fallback
-            news_str = await self._fetch_with_fallback('fetch_news', code=code, count=5, timeout=3)
-            # news_str returns string separated by ;
-            news_list = news_str.split("; ") if news_str else []
-            if news_list:
-                news_status = "fresh"
+            if self._is_fund_like_security({"code": code, "name": stock_name}):
+                news_list = []
+                news_status = "skipped"
+            else:
+                news_str = await self._fetch_with_fallback('fetch_news', code=code, count=5, timeout=3)
+                news_list = news_str.split("; ") if news_str else []
+                if news_list:
+                    news_status = "fresh"
 
             return {
                 "code": code,

@@ -162,6 +162,45 @@ async def test_get_macro_news_falls_back_to_public_feeds_when_cctv_times_out(col
 
 
 @pytest.mark.asyncio
+async def test_fetch_macro_news_backup_merges_unique_headlines_across_sources(collector, monkeypatch):
+    async def fake_run_blocking(func, *args, **kwargs):
+        if func is ak.stock_info_global_cls:
+            return pd.DataFrame(
+                [
+                    {"标题": "AI算力需求继续提升"},
+                    {"标题": "海外流动性预期回暖"},
+                ]
+            )
+        if func is ak.stock_info_global_sina:
+            return pd.DataFrame(
+                [
+                    {"内容": "海外流动性预期回暖"},
+                    {"内容": "美债收益率回落"},
+                ]
+            )
+        if func is ak.stock_info_global_futu:
+            return pd.DataFrame(
+                [
+                    {"标题": "科技股夜盘回暖", "内容": ""},
+                ]
+            )
+        if func is ak.stock_info_global_ths:
+            return pd.DataFrame()
+        raise AssertionError(f"unexpected call: {func.__name__}")
+
+    monkeypatch.setattr(collector, "_run_blocking", fake_run_blocking)
+
+    headlines = await collector._fetch_macro_news_backup()
+
+    assert headlines == [
+        "AI算力需求继续提升",
+        "海外流动性预期回暖",
+        "美债收益率回落",
+        "科技股夜盘回暖",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_collect_morning_data_keeps_macro_news_fresh_when_backup_feed_succeeds(collector, monkeypatch):
     async def fake_global_indices():
         return [
@@ -385,6 +424,41 @@ async def test_collect_all_marks_supporting_data_failures_as_degraded(collector,
     assert result["collection_status"]["blocks"]["macro_news"]["status"] == "missing"
     assert result["collection_status"]["overall_status"] == "degraded"
     assert result["data_issues"]
+
+
+@pytest.mark.asyncio
+async def test_fetch_individual_stock_extras_skips_news_lookup_for_fund_like_security(collector, monkeypatch):
+    calls = []
+
+    async def fake_fetch_with_fallback(method_name, *args, **kwargs):
+        calls.append(method_name)
+        if method_name == "fetch_single_quote":
+            return {
+                "code": kwargs["code"],
+                "name": "人工智能ETF",
+                "current_price": 1.5,
+                "pct_change": 1.2,
+                "volume": 1000.0,
+                "turnover_rate": 1.2,
+            }
+        if method_name == "fetch_prices":
+            return pd.DataFrame({
+                "date": pd.date_range("2026-02-01", periods=30, freq="D"),
+                "close": [1.0] * 30,
+                "open": [1.0] * 30,
+                "high": [1.01] * 30,
+                "low": [0.99] * 30,
+                "volume": [1000.0] * 30,
+            })
+        raise AssertionError(f"unexpected method: {method_name}")
+
+    monkeypatch.setattr(collector, "_fetch_with_fallback", fake_fetch_with_fallback)
+
+    result = await collector._fetch_individual_stock_extras("159819", "人工智能ETF", pd.DataFrame())
+
+    assert result["news"] == []
+    assert result["news_status"] == "skipped"
+    assert "fetch_news" not in calls
 
 
 @pytest.mark.asyncio
