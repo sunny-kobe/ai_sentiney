@@ -5,6 +5,7 @@ from typing import Dict, Any, List
 from src.utils.logger import logger
 from src.utils.config_loader import ConfigLoader
 from src.utils.lab_hint_formatter import build_lab_hint_detail, build_lab_hint_header
+from src.utils.report_payload_normalizer import normalize_report_for_display
 from src.utils.tech_summary_formatter import format_tech_summary_for_display
 
 
@@ -140,6 +141,7 @@ class FeishuClient:
         """
         Constructs the Feishu Interactive Card JSON (Optimized V2).
         """
+        data = normalize_report_for_display(data)
         market_sentiment = data.get("market_sentiment", "N/A")
         macro_summary = data.get("macro_summary", "暂无大盘点评")
         risk_alert = data.get("risk_alert", "")
@@ -604,6 +606,7 @@ class FeishuClient:
         """
         Constructs the Feishu Interactive Card for close review.
         """
+        data = normalize_report_for_display(data)
         market_summary = data.get("market_summary", "暂无总结")
         market_temperature = data.get("market_temperature", "N/A")
         bull_case = data.get("bull_case", "")

@@ -12,6 +12,7 @@ from src.service.analysis_service import AnalysisService
 from src.web.server import WebServer
 from src.utils.config_loader import ConfigLoader
 from src.utils.lab_hint_formatter import build_lab_hint_detail, build_lab_hint_header
+from src.utils.report_payload_normalizer import normalize_report_for_display
 from src.utils.tech_summary_formatter import format_tech_summary_for_display
 from src.web.api import get_router
 
@@ -85,6 +86,7 @@ def _append_execution_note(lines: List[str], execution_readiness: Any, quality_s
 
 def _print_text_summary(result: Dict[str, Any], mode: str):
     """Format analysis result as human-readable text for terminal output."""
+    result = normalize_report_for_display(result)
     if "error" in result:
         print(f"Error: {result['error']}")
         return

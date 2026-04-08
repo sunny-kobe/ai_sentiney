@@ -4,6 +4,7 @@ from typing import Any, Dict
 from src.utils.config_loader import ConfigLoader
 from src.utils.lab_hint_formatter import build_lab_hint_detail, build_lab_hint_header
 from src.utils.logger import logger
+from src.utils.report_payload_normalizer import normalize_report_for_display
 
 
 def _build_validation_hint(data: Dict[str, Any]) -> str:
@@ -87,6 +88,7 @@ class TelegramClient:
         return self._build_intraday_text(data, title="🛡️ Sentinel 收盘前执行", summary_label="执行摘要")
 
     def _build_intraday_text(self, data: Dict[str, Any], *, title: str, summary_label: str) -> str:
+        data = normalize_report_for_display(data)
         lines = [
             title,
             f"质量: {data.get('quality_status', 'normal')}",
@@ -114,6 +116,7 @@ class TelegramClient:
         return "\n".join(lines)
 
     def _build_close_text(self, data: Dict[str, Any]) -> str:
+        data = normalize_report_for_display(data)
         lines = [
             "🛡️ Sentinel 收盘复盘",
             f"质量: {data.get('quality_status', 'normal')}",

@@ -107,7 +107,7 @@ def test_feishu_card_displays_degraded_banner_and_metadata():
         if element.get("tag") == "div"
     ]
     joined = "\n".join(contents)
-    assert "结构化快报" in joined
+    assert "信息不全，先看技术结构" in joined
     assert "数据提示" in joined
     assert "rule_engine, stock_news" in joined
     assert "核心行情不完整：实时行情。" in joined
@@ -236,3 +236,49 @@ def test_feishu_preclose_card_avoids_duplicate_tech_summary_when_reason_repeats_
     joined = "\n".join(contents)
     assert "[日线_MACD_" not in joined
     assert joined.count("MACD空头-超弱，无背驰") == 1
+
+
+def test_feishu_close_card_normalizes_legacy_degraded_payload_copy():
+    client = FeishuClient()
+    card = client._construct_close_card(
+        {
+            "quality_status": "degraded",
+            "quality_issues": ["degraded_collection"],
+            "data_timestamp": "2026-04-07",
+            "source_labels": ["rule_engine", "stock_quotes", "stock_history"],
+            "market_temperature": "结构化快报",
+            "market_summary": "证据不足，降级输出",
+            "structured_report": {
+                "collection_status": {
+                    "overall_status": "degraded",
+                    "blocks": {
+                        "stock_quotes": {"status": "missing"},
+                        "stock_history": {"status": "fresh"},
+                    },
+                }
+            },
+            "actions": [
+                {
+                    "code": "510500",
+                    "name": "中证500ETF",
+                    "today_review": "结构化快报",
+                    "tomorrow_plan": "减仓30%-50%",
+                    "tech_summary": "[日线_MACD_空头-超弱_无背驰_0]",
+                    "confidence": "高",
+                }
+            ],
+        }
+    )
+
+    contents = [
+        element.get("text", {}).get("content", "")
+        for element in card["elements"]
+        if element.get("tag") == "div"
+    ]
+    joined = "\n".join(contents)
+    assert "证据不足，降级输出" not in joined
+    assert "结构化快报" not in joined
+    assert "当前主要依据技术面和已采集快讯整理，先给盘后执行摘要。" in joined
+    assert "信息不全，先看技术结构" in joined
+    assert "盘后信息不全，先看技术结构" in joined
+    assert "原因：核心行情不完整：实时行情。" in joined
