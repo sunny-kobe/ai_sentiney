@@ -1,4 +1,9 @@
-from src.service.report_quality import build_swing_quality_guard, evaluate_input_quality, evaluate_output_quality
+from src.service.report_quality import (
+    build_quality_detail,
+    build_swing_quality_guard,
+    evaluate_input_quality,
+    evaluate_output_quality,
+)
 
 
 def test_input_quality_blocked_when_midday_stocks_missing():
@@ -66,6 +71,93 @@ def test_input_quality_normal_when_required_fields_and_evidence_exist():
 
     assert result["status"] == "normal"
     assert result["issues"] == []
+
+
+def test_input_quality_close_stays_normal_when_supporting_collection_blocks_are_missing_but_evidence_exists():
+    result = evaluate_input_quality(
+        {
+            "context_date": "2026-03-23",
+            "market_breadth": "Unknown",
+            "indices": {},
+            "macro_news": {"telegraph": ["收盘后等待次日确认"]},
+            "stocks": [{"code": "600519", "name": "贵州茅台", "signal": "SAFE", "news": []}],
+            "collection_status": {
+                "overall_status": "degraded",
+                "blocks": {
+                    "stock_quotes": {"status": "fresh"},
+                    "stock_history": {"status": "fresh"},
+                    "indices": {"status": "missing"},
+                    "market_breadth": {"status": "missing"},
+                },
+            },
+        },
+        mode="close",
+        now="2026-03-23",
+    )
+
+    assert result["status"] == "normal"
+    assert "degraded_collection" not in result["issues"]
+
+
+def test_input_quality_close_degrades_when_core_collection_blocks_are_missing():
+    result = evaluate_input_quality(
+        {
+            "context_date": "2026-03-23",
+            "market_breadth": "涨: 10 / 跌: 5",
+            "indices": {"上证指数": {"change_pct": 0.5}},
+            "macro_news": {"telegraph": ["收盘后等待次日确认"]},
+            "stocks": [{"code": "600519", "name": "贵州茅台", "signal": "SAFE", "news": []}],
+            "collection_status": {
+                "overall_status": "degraded",
+                "blocks": {
+                    "stock_quotes": {"status": "missing"},
+                    "stock_history": {"status": "fresh"},
+                    "indices": {"status": "fresh"},
+                },
+            },
+        },
+        mode="close",
+        now="2026-03-23",
+    )
+
+    assert result["status"] == "degraded"
+    assert "degraded_collection" in result["issues"]
+
+
+def test_build_quality_detail_describes_stale_context_with_explicit_dates():
+    detail = build_quality_detail(
+        {
+            "context_date": "2026-04-01",
+            "collection_status": {},
+        },
+        ["stale_context"],
+        mode="midday",
+        now="2026-04-03",
+    )
+
+    assert detail == "上下文日期仍是 2026-04-01，不是今天 2026-04-03。"
+
+
+def test_build_quality_detail_describes_intraday_core_collection_gap():
+    detail = build_quality_detail(
+        {
+            "collection_status": {
+                "overall_status": "degraded",
+                "blocks": {
+                    "stock_quotes": {"status": "missing"},
+                    "stock_history": {"status": "degraded"},
+                    "macro_news": {"status": "fresh"},
+                },
+            }
+        },
+        ["degraded_collection"],
+        mode="preclose",
+        now="2026-04-03",
+    )
+
+    assert "核心行情不完整" in detail
+    assert "实时行情" in detail
+    assert "历史走势" in detail
 
 
 def test_output_quality_degraded_when_ai_actions_do_not_cover_structured_stocks():

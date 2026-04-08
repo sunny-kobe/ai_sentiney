@@ -12,6 +12,7 @@ from src.service.analysis_service import AnalysisService
 from src.web.server import WebServer
 from src.utils.config_loader import ConfigLoader
 from src.utils.lab_hint_formatter import build_lab_hint_detail, build_lab_hint_header
+from src.utils.tech_summary_formatter import format_tech_summary_for_display
 from src.web.api import get_router
 
 existing_pythonwarnings = os.environ.get("PYTHONWARNINGS", "")
@@ -50,7 +51,13 @@ def _format_quality_status(status: Any) -> str:
     return labels.get(normalized, str(status or "数据异常"))
 
 
-def _append_quality_note(lines: List[str], quality_status: Any, data_timestamp: Any, source_labels: List[str]) -> None:
+def _append_quality_note(
+    lines: List[str],
+    quality_status: Any,
+    data_timestamp: Any,
+    source_labels: List[str],
+    quality_detail: Any = None,
+) -> None:
     if not _is_quality_alert(quality_status):
         return
 
@@ -59,6 +66,8 @@ def _append_quality_note(lines: List[str], quality_status: Any, data_timestamp: 
         details.append(f"时间 {data_timestamp}")
     if source_labels:
         details.append(f"来源 {', '.join(source_labels)}")
+    if quality_detail:
+        details.append(f"原因 {quality_detail}")
     suffix = f" | {'；'.join(details)}" if details else ""
     lines.append(f"数据提示: {_format_quality_status(quality_status)}{suffix}")
 
@@ -87,6 +96,7 @@ def _print_text_summary(result: Dict[str, Any], mode: str):
     quality_status = result.get("quality_status")
     data_timestamp = result.get("data_timestamp")
     source_labels = result.get("source_labels", [])
+    quality_detail = result.get("quality_detail")
 
     if mode == 'swing':
         lab_hint = result.get("lab_hint") or {}
@@ -94,7 +104,7 @@ def _print_text_summary(result: Dict[str, Any], mode: str):
         header_hint = build_lab_hint_header(lab_hint)
         if header_hint:
             lines.append(header_hint)
-        _append_quality_note(lines, quality_status, data_timestamp, source_labels)
+        _append_quality_note(lines, quality_status, data_timestamp, source_labels, quality_detail)
         if result.get("validation_summary"):
             lines.append("验证摘要:")
             lines.append(f"  {result.get('validation_summary')}")
@@ -165,7 +175,7 @@ def _print_text_summary(result: Dict[str, Any], mode: str):
             lines.append(f"  [{a.get('code')}] {a.get('name')} | 预期:{a.get('opening_expectation')} | 策略:{a.get('strategy')}")
     elif mode == 'preclose':
         lines.append(f"=== 收盘前执行 ===")
-        _append_quality_note(lines, quality_status, data_timestamp, source_labels)
+        _append_quality_note(lines, quality_status, data_timestamp, source_labels, quality_detail)
         lines.append(f"情绪: {result.get('market_sentiment', 'N/A')}")
         lines.append(f"量能: {result.get('volume_analysis', 'N/A')}")
         lines.append(f"指数: {result.get('indices_info', 'N/A')}")
@@ -175,14 +185,14 @@ def _print_text_summary(result: Dict[str, Any], mode: str):
             confidence = a.get('confidence', '')
             conf_tag = f" [{confidence}]" if confidence else ""
             lines.append(f"  [{a.get('code')}] {a.get('name')} {pct} | 信号:{a.get('signal','N/A')}{conf_tag} | 执行:{a.get('operation','N/A')}")
-            tech = a.get('tech_summary', '')
+            tech = format_tech_summary_for_display(a.get('tech_summary', ''))
             if tech:
                 lines.append(f"    指标: {tech}")
             if a.get('reason'):
                 lines.append(f"    理由: {a.get('reason')}")
     elif mode == 'close':
         lines.append(f"=== 收盘复盘 ===")
-        _append_quality_note(lines, quality_status, data_timestamp, source_labels)
+        _append_quality_note(lines, quality_status, data_timestamp, source_labels, quality_detail)
         lines.append(f"总结: {result.get('market_summary', 'N/A')}")
         lines.append(f"温度: {result.get('market_temperature', 'N/A')}")
         # Signal Scorecard
@@ -201,12 +211,12 @@ def _print_text_summary(result: Dict[str, Any], mode: str):
             lines.append(f"    今日: {a.get('today_review', '')}")
             lines.append(f"    明日: {a.get('tomorrow_plan', '')}")
             lines.append(f"    支撑:{a.get('support_level', 0)} / 压力:{a.get('resistance_level', 0)}")
-            tech = a.get('tech_summary', '')
+            tech = format_tech_summary_for_display(a.get('tech_summary', ''))
             if tech:
                 lines.append(f"    指标: {tech}")
     else:  # midday
         lines.append(f"=== 午盘分析 ===")
-        _append_quality_note(lines, quality_status, data_timestamp, source_labels)
+        _append_quality_note(lines, quality_status, data_timestamp, source_labels, quality_detail)
         lines.append(f"情绪: {result.get('market_sentiment', 'N/A')}")
         lines.append(f"量能: {result.get('volume_analysis', 'N/A')}")
         lines.append(f"指数: {result.get('indices_info', 'N/A')}")
@@ -227,7 +237,7 @@ def _print_text_summary(result: Dict[str, Any], mode: str):
             confidence = a.get('confidence', '')
             conf_tag = f" [{confidence}]" if confidence else ""
             lines.append(f"  [{a.get('code')}] {a.get('name')} {pct} | 信号:{a.get('signal','N/A')}{conf_tag} | 操作:{a.get('operation','N/A')}")
-            tech = a.get('tech_summary', '')
+            tech = format_tech_summary_for_display(a.get('tech_summary', ''))
             if tech:
                 lines.append(f"    指标: {tech}")
             if a.get('reason'):

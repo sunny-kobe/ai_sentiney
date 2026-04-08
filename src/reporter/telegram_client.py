@@ -95,6 +95,8 @@ class TelegramClient:
             f"情绪: {data.get('market_sentiment', 'N/A')}",
             f"{summary_label}: {data.get('macro_summary', 'N/A')}",
         ]
+        if data.get("quality_detail"):
+            lines.append(f"原因: {data.get('quality_detail')}")
         for action in data.get("actions", [])[:8]:
             signal = str(action.get('signal') or action.get('action') or action.get('operation', ''))
             signal_upper = signal.upper()
@@ -120,6 +122,8 @@ class TelegramClient:
             f"总结: {data.get('market_summary', 'N/A')}",
             f"温度: {data.get('market_temperature', 'N/A')}",
         ]
+        if data.get("quality_detail"):
+            lines.append(f"原因: {data.get('quality_detail')}")
         for action in data.get("actions", [])[:8]:
             lines.append(
                 f"- {action.get('name', '')}({action.get('code', '')}) "

@@ -16,7 +16,12 @@ from src.storage.database import SentinelDB
 from src.processor.signal_tracker import evaluate_yesterday, calculate_rolling_stats, calculate_pair_rolling_stats, build_scorecard, _compute_risk_stats, _compute_buy_stats
 from src.processor.swing_tracker import build_swing_scorecard
 from src.utils.trading_calendar import should_run_market_report
-from src.service.report_quality import build_swing_quality_guard, evaluate_input_quality, evaluate_output_quality
+from src.service.report_quality import (
+    build_quality_detail,
+    build_swing_quality_guard,
+    evaluate_input_quality,
+    evaluate_output_quality,
+)
 from src.service.structured_report import build_structured_report
 from src.service.portfolio_advisor import build_investor_snapshot
 from src.service.performance_gate import build_default_performance_context, gate_offensive_setup
@@ -33,6 +38,13 @@ SWING_LAB_PRESETS = (
     "aggressive_leader_focus",
     "aggressive_core_rotation",
 )
+
+DEGRADED_OVERVIEW_LABEL = "信息不全，先看技术结构"
+DEGRADED_INTRADAY_SUMMARY = "当前主要依据技术面和已采集快讯整理，先给保守执行摘要。"
+DEGRADED_CLOSE_SUMMARY = "当前主要依据技术面和已采集快讯整理，先给盘后执行摘要。"
+DEGRADED_CLOSE_REVIEW = "盘后信息不全，先看技术结构"
+DEGRADED_ACTION_REASON = "增量消息不足，先按技术结构保守处理。"
+DEGRADED_CLOSE_ACTION_REASON = "盘后增量消息不足，先按技术结构制定明日计划。"
 
 
 class AnalysisService:
@@ -432,16 +444,24 @@ class AnalysisService:
                 ai_input['signal_scorecard'] = scorecard
 
         quality_input = {"status": "normal", "issues": []}
+        quality_detail = ""
         if mode in ('midday', 'preclose', 'close'):
             quality_input = evaluate_input_quality(ai_input, mode=mode)
+            quality_detail = build_quality_detail(ai_input, quality_input["issues"], mode=mode)
             ai_input["quality_input"] = quality_input
+            ai_input["quality_detail"] = quality_detail
             ai_input["structured_report"] = build_structured_report(
                 ai_input,
                 mode=mode,
                 quality_status=quality_input["status"],
             )
             if quality_input["status"] == "blocked" and not dry_run:
-                return self._build_blocked_report(mode, ai_input["structured_report"], quality_input["issues"])
+                return self._build_blocked_report(
+                    mode,
+                    ai_input["structured_report"],
+                    quality_input["issues"],
+                    quality_detail,
+                )
         collection_quality_status = (
             "degraded"
             if (ai_input.get("collection_status") or {}).get("overall_status") == "degraded"
@@ -488,7 +508,12 @@ class AnalysisService:
                 analysis_result.setdefault("quality_summary", swing_quality_guard.get("summary"))
                 analysis_result.setdefault("trade_guard", swing_quality_guard)
             elif mode in ("midday", "preclose", "close") and quality_input["status"] == "degraded":
-                analysis_result = self._build_degraded_report(mode, ai_input["structured_report"], quality_input["issues"])
+                analysis_result = self._build_degraded_report(
+                    mode,
+                    ai_input["structured_report"],
+                    quality_input["issues"],
+                    quality_detail,
+                )
             elif mode in ("midday", "preclose", "close"):
                 historical_records = self._get_swing_history_records(days=90)
                 strategy_snapshot = build_strategy_snapshot(
@@ -552,14 +577,21 @@ class AnalysisService:
                         mode,
                         ai_input["structured_report"],
                         output_quality["issues"],
+                        build_quality_detail(ai_input, output_quality["issues"], mode=mode),
                     )
                     analysis_result = self.post_process_result(analysis_result, ai_input, mode=mode)
                 if "quality_status" not in analysis_result:
                     analysis_result["quality_status"] = "normal" if output_quality["status"] == "normal" else "degraded"
                 analysis_result["quality_issues"] = output_quality["issues"] if output_quality["issues"] else quality_input["issues"]
+                analysis_result["quality_detail"] = (
+                    build_quality_detail(ai_input, output_quality["issues"], mode=mode)
+                    if output_quality["issues"]
+                    else quality_detail
+                )
             elif mode in ("midday", "preclose", "close"):
                 analysis_result.setdefault("quality_status", quality_input["status"])
                 analysis_result.setdefault("quality_issues", quality_input["issues"])
+                analysis_result.setdefault("quality_detail", quality_detail)
             else:
                 analysis_result.setdefault("quality_status", collection_quality_status)
                 analysis_result.setdefault("quality_issues", collection_quality_issues)
@@ -615,18 +647,31 @@ class AnalysisService:
         logger.info(f"=== Analysis ({mode.upper()}) Finished ===")
         return analysis_result
 
-    def _build_blocked_report(self, mode: str, structured_report: Dict[str, Any], issues: List[str]) -> Dict[str, Any]:
+    def _build_blocked_report(
+        self,
+        mode: str,
+        structured_report: Dict[str, Any],
+        issues: List[str],
+        quality_detail: str,
+    ) -> Dict[str, Any]:
         return {
             "error": "Insufficient input quality for report generation",
             "mode": mode,
             "quality_status": "blocked",
             "quality_issues": issues,
+            "quality_detail": quality_detail,
             "structured_report": structured_report,
             "data_timestamp": structured_report.get("data_timestamp"),
             "source_labels": structured_report.get("source_labels", []),
         }
 
-    def _build_degraded_report(self, mode: str, structured_report: Dict[str, Any], issues: List[str]) -> Dict[str, Any]:
+    def _build_degraded_report(
+        self,
+        mode: str,
+        structured_report: Dict[str, Any],
+        issues: List[str],
+        quality_detail: str,
+    ) -> Dict[str, Any]:
         actions = []
         for stock in structured_report.get("stocks", []):
             base_action = {
@@ -641,18 +686,19 @@ class AnalysisService:
                 "source_labels": stock.get("source_labels", []),
                 "data_timestamp": stock.get("data_timestamp"),
             }
-            evidence_text = " / ".join(stock.get("news_evidence", [])[:2]) or stock.get("tech_evidence", "")
+            evidence_text = " / ".join(stock.get("news_evidence", [])[:2]).strip()
             if mode == "close":
-                base_action["today_review"] = "结构化快报"
+                base_action["today_review"] = DEGRADED_CLOSE_REVIEW
                 base_action["tomorrow_plan"] = stock.get("operation")
-                base_action["reason"] = evidence_text
+                base_action["reason"] = evidence_text or DEGRADED_CLOSE_ACTION_REASON
             else:
-                base_action["reason"] = evidence_text or "证据不足，采用结构化技术快报"
+                base_action["reason"] = evidence_text or DEGRADED_ACTION_REASON
             actions.append(base_action)
 
         top = {
             "quality_status": "degraded",
             "quality_issues": issues,
+            "quality_detail": quality_detail,
             "structured_report": structured_report,
             "data_timestamp": structured_report.get("data_timestamp"),
             "source_labels": structured_report.get("source_labels", []),
@@ -660,14 +706,14 @@ class AnalysisService:
         }
         if mode == "close":
             top.update({
-                "market_summary": "证据不足，降级输出",
-                "market_temperature": "结构化快报",
+                "market_summary": DEGRADED_CLOSE_SUMMARY,
+                "market_temperature": DEGRADED_OVERVIEW_LABEL,
             })
         else:
             top.update({
-                "market_sentiment": "结构化快报",
+                "market_sentiment": DEGRADED_OVERVIEW_LABEL,
                 "volume_analysis": "N/A",
-                "macro_summary": "证据不足，降级输出",
+                "macro_summary": DEGRADED_INTRADAY_SUMMARY,
                 "indices_info": structured_report.get("market", {}).get("indices_info", ""),
             })
         return top

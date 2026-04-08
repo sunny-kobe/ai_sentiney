@@ -106,7 +106,7 @@ def _make_swing_result():
                     "name": "军工ETF",
                     "action_label": "进入试仓区",
                     "reason": "重新站上20日线，量能同步放大。",
-                    "plan": "先试仓5%-10%，确认延续后再考虑转正式仓。",
+                    "plan": "先试仓5%-10%，重点看突破后能否继续放量延续，确认后再考虑转正式仓。",
                     "risk_line": "跌回20日线下方则撤回观察。",
                 }
             ],
@@ -118,7 +118,7 @@ def _make_swing_result():
                 "name": "军工ETF",
                 "action_label": "进入试仓区",
                 "reason": "重新站上20日线，量能同步放大。",
-                "plan": "先试仓5%-10%，确认延续后再考虑转正式仓。",
+                "plan": "先试仓5%-10%，重点看突破后能否继续放量延续，确认后再考虑转正式仓。",
                 "risk_line": "跌回20日线下方则撤回观察。",
             }
         ],
@@ -160,6 +160,7 @@ def test_cli_swing_summary_uses_plain_language_sections():
     assert "验证: 20日验证里，大盘核心方向样本10笔，平均跑赢基准0.7%，回撤约2.6%。" in rendered
     assert "大盘核心方向: 正常 | 预算:25%-35%" in rendered
     assert "[512660] 军工ETF | 动作:进入试仓区" in rendered
+    assert "突破后能否继续放量延续" in rendered
     assert "MACD" not in rendered
     assert "中期跟踪" not in rendered
 

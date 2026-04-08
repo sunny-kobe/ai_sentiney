@@ -4,15 +4,15 @@ on:
   schedule:
     # UTC Time! China is UTC+8.
     # OpenClaw 本地为主力，GitHub Actions 再提前一档作为兜底
-    # Morning 04:10 CST = 20:10 UTC (previous UTC day, so cron uses 0-4)
-    # Midday 11:20 CST = 03:20 UTC
-    # Preclose 14:35 CST = 06:35 UTC
-    # Close review 15:05 CST = 07:05 UTC
+    # Morning 07:10 CST = 23:10 UTC (previous UTC day, so cron uses 0-4)
+    # Midday 09:50 CST = 01:50 UTC
+    # Preclose 13:05 CST = 05:05 UTC
+    # Close review 14:35 CST = 06:35 UTC
     # Swing 20:00 CST = 12:00 UTC
-    - cron: "10 20 * * 0-4" # Morning Brief (兜底)
-    - cron: "20 3 * * 1-5" # Midday Check (兜底)
-    - cron: "35 6 * * 1-5" # Preclose Execution (主模式)
-    - cron: "5 7 * * 1-5" # Close Review (兜底)
+    - cron: "10 23 * * 0-4" # Morning Brief (兜底)
+    - cron: "50 1 * * 1-5" # Midday Check (兜底)
+    - cron: "5 5 * * 1-5" # Preclose Execution (主模式)
+    - cron: "35 6 * * 1-5" # Close Review (兜底)
     - cron: "0 12 * * 1-5" # Swing Strategy (主模式)
   workflow_dispatch:
     inputs:
@@ -76,16 +76,16 @@ jobs:
             echo "Manual dispatch mode selected: $TARGET_MODE"
           else
             case "$SCHEDULE_EXPR" in
-              "10 20 * * 0-4")
+              "10 23 * * 0-4")
                 TARGET_MODE="morning"
                 ;;
-              "20 3 * * 1-5")
+              "50 1 * * 1-5")
                 TARGET_MODE="midday"
                 ;;
-              "35 6 * * 1-5")
+              "5 5 * * 1-5")
                 TARGET_MODE="preclose"
                 ;;
-              "5 7 * * 1-5")
+              "35 6 * * 1-5")
                 TARGET_MODE="close"
                 ;;
               "0 12 * * 1-5")

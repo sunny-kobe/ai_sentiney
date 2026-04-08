@@ -5,6 +5,7 @@ from typing import Dict, Any, List
 from src.utils.logger import logger
 from src.utils.config_loader import ConfigLoader
 from src.utils.lab_hint_formatter import build_lab_hint_detail, build_lab_hint_header
+from src.utils.tech_summary_formatter import format_tech_summary_for_display
 
 
 def _build_validation_hint(data: Dict[str, Any]) -> str:
@@ -53,6 +54,8 @@ def _build_quality_notice(data: Dict[str, Any]) -> Dict[str, Any] | None:
 
     data_timestamp = data.get("data_timestamp", "N/A")
     source_labels = ", ".join(data.get("source_labels", [])) or "N/A"
+    quality_detail = str(data.get("quality_detail", "") or "").strip()
+    detail_line = f"\n> 原因：{quality_detail}" if quality_detail else ""
     return {
         "tag": "div",
         "text": {
@@ -60,9 +63,21 @@ def _build_quality_notice(data: Dict[str, Any]) -> Dict[str, Any] | None:
             "content": (
                 f"> ⚠️ **数据提示**: {_format_quality_status(quality_status)}"
                 f"（时间：{data_timestamp}；来源：{source_labels}）"
+                f"{detail_line}"
             ),
         },
     }
+
+
+def _normalize_reason(reason: Any, tech_summary: Any) -> str:
+    reason_text = str(reason or "").strip()
+    raw_tech = str(tech_summary or "").strip()
+    if not reason_text:
+        return ""
+    formatted_tech = format_tech_summary_for_display(raw_tech)
+    if reason_text in {raw_tech, formatted_tech}:
+        return ""
+    return reason_text
 
 
 class FeishuClient:
@@ -303,10 +318,12 @@ class FeishuClient:
                     content += f"\n> 🔥 **建议**: {operation}"
                     
                 if confidence: content += f" `置信度:{confidence}`"
-                content += f"\n> 💡 {reason}"
+                normalized_reason = _normalize_reason(reason, s.get('tech_summary', ''))
+                if normalized_reason:
+                    content += f"\n> 💡 {normalized_reason}"
                 if key_level: content += f"\n> 🎯 关键位: {key_level}"
 
-                tech_summary = s.get('tech_summary', '')
+                tech_summary = format_tech_summary_for_display(s.get('tech_summary', ''))
                 if tech_summary:
                     content += f"\n> 📊 {tech_summary}"
                 
@@ -671,7 +688,7 @@ class FeishuClient:
             if support and resistance:
                 content += f"\n> 📐 支撑: {support} / 压力: {resistance}"
 
-            tech_summary = s.get('tech_summary', '')
+            tech_summary = format_tech_summary_for_display(s.get('tech_summary', ''))
             confidence = s.get('confidence', '')
             if tech_summary:
                 content += f"\n> 📊 {tech_summary}"

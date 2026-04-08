@@ -29,6 +29,7 @@ CLUSTER_LABELS = {
     "sector_etf": "行业轮动方向",
     "single_name": "个股方向",
 }
+FAST_TRACK_SETUPS = {"trend_follow", "pullback_resume"}
 
 
 def _watchlist_rank(item: Mapping[str, Any]) -> int:
@@ -43,9 +44,17 @@ def _candidate_action(item: Mapping[str, Any], market_regime: str) -> str:
     signal = str(item.get("signal", "")).upper()
     confidence = str(item.get("confidence", "") or "")
     final_action = str(item.get("final_action", "观察"))
+    setup_type = str(item.get("setup_type", "") or "")
 
     if market_regime == "撤退":
         return "继续观察"
+    if (
+        market_regime in {"进攻", "均衡"}
+        and confidence == "高"
+        and setup_type in FAST_TRACK_SETUPS
+        and signal in {"OPPORTUNITY", "ACCUMULATE"}
+    ):
+        return "进入试仓区"
     if final_action == "增配" and signal == "OPPORTUNITY" and confidence == "高" and market_regime == "进攻":
         return "进入试仓区"
     if final_action in {"增配", "持有"} and signal in {"OPPORTUNITY", "ACCUMULATE", "SAFE", "HOLD"} and market_regime in {"进攻", "均衡"}:
@@ -90,6 +99,27 @@ def _validation_note_for_item(item: Mapping[str, Any], decision_evidence: Mappin
     return ""
 
 
+def _watchlist_plan(item: Mapping[str, Any], action_label: str) -> str:
+    setup_type = str(item.get("setup_type", "") or "")
+    default_plan = str(item.get("rebalance_instruction", "继续观察") or "继续观察")
+
+    if action_label == "进入试仓区":
+        if setup_type == "trend_follow":
+            return "先试仓5%-10%，重点看突破后能否继续放量延续，确认后再考虑转正式仓。"
+        if setup_type == "pullback_resume":
+            return "先试仓5%-10%，重点看回踩后的承接能否继续稳住，确认后再考虑转正式仓。"
+        return default_plan
+
+    if action_label == "继续观察":
+        if setup_type == "trend_follow":
+            return "先观察突破后是否还能继续放量站稳，确认更强延续后再考虑试仓。"
+        if setup_type == "pullback_resume":
+            return "先观察回踩后的承接是否继续确认，等支撑更稳后再考虑试仓。"
+        return default_plan
+
+    return default_plan
+
+
 def build_watchlist_candidates(
     holdings: Sequence[Mapping[str, Any]],
     *,
@@ -124,7 +154,7 @@ def build_watchlist_candidates(
             else:
                 plan = "验证暂时不支持直接试仓，先继续观察，等该方向样本修复后再考虑。"
         else:
-            plan = item.get("rebalance_instruction", "继续观察")
+            plan = _watchlist_plan(item, action_label)
         candidates.append(
             {
                 "code": code,

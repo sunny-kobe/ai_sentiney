@@ -51,6 +51,135 @@ def test_build_watchlist_candidates_limits_active_ideas_and_keeps_weak_names_obs
     assert candidates["all_candidates"][-1]["action_label"] == "继续观察"
 
 
+def test_build_watchlist_candidates_fast_tracks_strong_setup_candidates():
+    candidates = build_watchlist_candidates(
+        [
+            {
+                "code": "159611",
+                "name": "电力ETF",
+                "signal": "ACCUMULATE",
+                "confidence": "高",
+                "final_action": "观察",
+                "cluster": "sector_etf",
+                "setup_type": "trend_follow",
+                "evidence_text": "回踩后重新转强，量价重新配合",
+                "invalid_condition": "跌回平台下沿",
+                "rebalance_instruction": "下一交易日分批加仓5%-10%",
+            },
+            {
+                "code": "512660",
+                "name": "军工ETF",
+                "signal": "OPPORTUNITY",
+                "confidence": "高",
+                "final_action": "观察",
+                "cluster": "sector_etf",
+                "setup_type": "pullback_resume",
+                "evidence_text": "回踩后重新站上20日线",
+                "invalid_condition": "重新跌回20日线下方",
+                "rebalance_instruction": "下一交易日分批加仓5%-10%",
+            },
+        ],
+        held_codes=set(),
+        watchlist_codes={"159611", "512660"},
+        strategy_preferences={"candidate_limit": 2, "max_watchlist_adds_per_day": 2},
+        market_regime="均衡",
+    )
+
+    assert {item["code"] for item in candidates["active_candidates"]} == {"159611", "512660"}
+    assert all(item["action_label"] == "进入试仓区" for item in candidates["active_candidates"])
+
+
+def test_build_watchlist_candidates_keeps_medium_confidence_fast_track_candidates_observed():
+    candidates = build_watchlist_candidates(
+        [
+            {
+                "code": "159611",
+                "name": "电力ETF",
+                "signal": "ACCUMULATE",
+                "confidence": "中",
+                "final_action": "观察",
+                "cluster": "sector_etf",
+                "setup_type": "trend_follow",
+                "evidence_text": "回踩后重新转强，量价重新配合",
+                "invalid_condition": "跌回平台下沿",
+                "rebalance_instruction": "下一交易日分批加仓5%-10%",
+            },
+        ],
+        held_codes=set(),
+        watchlist_codes={"159611"},
+        strategy_preferences={"candidate_limit": 2, "max_watchlist_adds_per_day": 2},
+        market_regime="进攻",
+    )
+
+    assert candidates["all_candidates"][0]["action_label"] == "继续观察"
+
+
+def test_build_watchlist_candidates_does_not_fast_track_in_retreat_regime():
+    candidates = build_watchlist_candidates(
+        [
+            {
+                "code": "512660",
+                "name": "军工ETF",
+                "signal": "OPPORTUNITY",
+                "confidence": "高",
+                "final_action": "观察",
+                "cluster": "sector_etf",
+                "setup_type": "pullback_resume",
+                "evidence_text": "回踩后重新站上20日线",
+                "invalid_condition": "重新跌回20日线下方",
+                "rebalance_instruction": "下一交易日分批加仓5%-10%",
+            },
+        ],
+        held_codes=set(),
+        watchlist_codes={"512660"},
+        strategy_preferences={"candidate_limit": 2, "max_watchlist_adds_per_day": 2},
+        market_regime="撤退",
+    )
+
+    assert candidates["all_candidates"][0]["action_label"] == "继续观察"
+
+
+def test_build_watchlist_candidates_uses_setup_specific_trial_plan_text():
+    candidates = build_watchlist_candidates(
+        [
+            {
+                "code": "512660",
+                "name": "军工ETF",
+                "signal": "OPPORTUNITY",
+                "confidence": "高",
+                "final_action": "观察",
+                "cluster": "sector_etf",
+                "setup_type": "trend_follow",
+                "evidence_text": "放量突破平台",
+                "invalid_condition": "跌回平台下沿",
+                "rebalance_instruction": "下一交易日分批加仓5%-10%",
+            },
+            {
+                "code": "159611",
+                "name": "电力ETF",
+                "signal": "ACCUMULATE",
+                "confidence": "高",
+                "final_action": "观察",
+                "cluster": "sector_etf",
+                "setup_type": "pullback_resume",
+                "evidence_text": "回踩后承接恢复",
+                "invalid_condition": "跌回20日线下方",
+                "rebalance_instruction": "下一交易日分批加仓5%-10%",
+            },
+        ],
+        held_codes=set(),
+        watchlist_codes={"512660", "159611"},
+        strategy_preferences={"candidate_limit": 2, "max_watchlist_adds_per_day": 2},
+        market_regime="进攻",
+    )
+
+    breakout_candidate = next(item for item in candidates["all_candidates"] if item["code"] == "512660")
+    pullback_candidate = next(item for item in candidates["all_candidates"] if item["code"] == "159611")
+
+    assert "突破后能否继续放量延续" in breakout_candidate["plan"]
+    assert "回踩后的承接能否继续稳住" in pullback_candidate["plan"]
+
+
 def test_build_watchlist_candidates_blocks_trial_when_validation_evidence_is_weak():
     candidates = build_watchlist_candidates(
         [
