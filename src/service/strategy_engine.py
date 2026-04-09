@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, Mapping, Optional, Sequence, Set
 
 from src.processor.swing_tracker import build_price_matrix, calculate_max_drawdown
@@ -19,6 +20,7 @@ BENCHMARK_CANDIDATES = {
     "single_name": ["159338", "510300", "510980"],
 }
 BROAD_BETA_CODES = ("159338", "510300", "510980")
+_MA20_VALUE_PATTERN = re.compile(r"MA20\(([\d.]+)\)")
 
 
 def _window_return(prices: Sequence[float], window: int) -> Optional[float]:
@@ -152,12 +154,81 @@ def _invalid_condition(stock: Mapping[str, Any], setup_type: str) -> str:
             return f"放量跌回MA20({ma20:.2f})下方时，取消偏多判断"
         if setup_type in {"breakdown", "rebound_trap"}:
             return f"重新站回MA20({ma20:.2f})并连续走稳时，再撤销防守判断"
-    return f"价格偏离当前结构 {current_price:.2f} 后再重新评估"
+    if current_price > 0:
+        return f"如果后面继续明显偏离当前区间，再按 {current_price:.2f} 附近的结构重新评估"
+    return "如果后面继续明显偏离当前区间，再重新评估"
 
 
 def _evidence_text(setup: Mapping[str, Any], stock: Mapping[str, Any]) -> str:
     parts = list(setup.get("evidence", []))
     return "；".join(part for part in parts if part)
+
+
+def _humanize_evidence_text(evidence_text: str) -> str:
+    replacements = {
+        "价格站在MA20上方": "还在20日线之上",
+        "价格仍在MA20下方": "还压在20日线下方",
+        "相对基准更强": "走势强于同类基准",
+        "相对基准偏弱": "走势弱于同类基准",
+        "资金承接仍在": "承接还在",
+        "资金流出明显": "资金在流出",
+        "出现底背驰修复线索": "有止跌修复迹象",
+        "量能与趋势证据冲突": "强弱信号还不一致",
+        "当前更适合继续观察": "先观察更稳妥",
+    }
+    parts = [part.strip() for part in str(evidence_text or "").replace("。", "；").split("；")]
+    normalized: list[str] = []
+    for part in parts:
+        if not part:
+            continue
+        for old, new in replacements.items():
+            part = part.replace(old, new)
+        if part not in normalized:
+            normalized.append(part)
+    if not normalized:
+        return ""
+    return f"{'，'.join(normalized)}。"
+
+
+def _humanize_invalid_condition(condition: str) -> str:
+    text = str(condition or "").strip()
+    if not text:
+        return ""
+
+    match = _MA20_VALUE_PATTERN.search(text)
+    level = match.group(1) if match else ""
+    if "放量跌回MA20" in text and level:
+        return f"只要放量跌破20日线 {level}，就先转回谨慎。"
+    if "重新站回MA20" in text and level:
+        return f"只有重新站回20日线 {level} 并站稳，才取消防守。"
+    if "偏离当前区间" in text:
+        return "如果后面继续偏离当前这段区间，再重新评估。"
+    return text if text.endswith("。") else f"{text}。"
+
+
+def _build_execution_reason(holding: Mapping[str, Any]) -> str:
+    evidence = _humanize_evidence_text(str(holding.get("evidence_text", "") or ""))
+    invalid = _humanize_invalid_condition(str(holding.get("invalid_condition", "") or ""))
+    if evidence and invalid:
+        return f"{evidence}{invalid}"
+    return evidence or invalid
+
+
+def _build_close_tomorrow_plan(holding: Mapping[str, Any]) -> str:
+    final_action = str(holding.get("final_action", "") or "")
+    target_range = str(holding.get("target_weight_range", "") or "")
+    invalid = _humanize_invalid_condition(str(holding.get("invalid_condition", "") or ""))
+
+    if final_action == "增配":
+        plan = f"明天如果回踩后还能稳住，再分批加到{target_range}。"
+    elif final_action == "减配":
+        plan = f"明天如果继续走弱，优先减到{target_range}。"
+    elif final_action == "回避":
+        plan = "明天继续按防守处理，优先把风险仓位降下来。"
+    else:
+        plan = "明天先持有观察，不急着加减。"
+
+    return f"{plan}{invalid}" if invalid else plan
 
 
 def build_strategy_snapshot(
@@ -286,7 +357,7 @@ def build_intraday_rule_report(
 
     actions = []
     for holding in holdings:
-        reason = f"{holding.get('evidence_text', '')}。失效条件：{holding.get('invalid_condition', '')}"
+        reason = _build_execution_reason(holding)
         operation = holding.get("rebalance_instruction", "")
         if mode == "midday" and holding.get("final_action") == "增配":
             operation = "尾盘再确认，不盘中追高"
@@ -330,22 +401,14 @@ def build_close_rule_report(
     actions = []
     for holding in holdings:
         support, resistance = _support_resistance(holding)
-        final_action = holding.get("final_action")
-        if final_action == "增配":
-            tomorrow_plan = f"若明日回踩不破MA20，可分批加仓{holding.get('target_weight_range')}; {holding.get('invalid_condition')}"
-        elif final_action == "减配":
-            tomorrow_plan = f"若明日继续走弱，优先减仓{holding.get('target_weight_range')}; {holding.get('invalid_condition')}"
-        elif final_action == "回避":
-            tomorrow_plan = f"明日优先继续降到低风险状态; {holding.get('invalid_condition')}"
-        else:
-            tomorrow_plan = f"优先持有观察，不急着加减; {holding.get('invalid_condition')}"
+        tomorrow_plan = _build_close_tomorrow_plan(holding)
 
         actions.append(
             {
                 "code": holding.get("code"),
                 "name": holding.get("name"),
-                "signal": final_action,
-                "today_review": holding.get("evidence_text", ""),
+                "signal": holding.get("final_action"),
+                "today_review": _humanize_evidence_text(str(holding.get("evidence_text", "") or "")),
                 "tomorrow_plan": tomorrow_plan,
                 "support_level": support,
                 "resistance_level": resistance,

@@ -1,4 +1,4 @@
-from src.utils.tech_summary_formatter import format_tech_summary_for_display
+from src.utils.tech_summary_formatter import format_tech_summary_for_brief, format_tech_summary_for_display
 
 
 def test_format_tech_summary_for_display_converts_structured_tags_to_plain_chinese():
@@ -29,3 +29,17 @@ def test_format_tech_summary_for_display_keeps_plain_text_unchanged():
     raw = "MACD金叉，站上20日线"
 
     assert format_tech_summary_for_display(raw) == raw
+
+
+def test_format_tech_summary_for_brief_collapses_indicator_terms_into_plain_summary():
+    raw = (
+        "[日线_MACD_多头-强势_顶背驰_0] "
+        "[日线_OBV_资金流入_0] "
+        "[日线_RSI_中性_50.23_0] "
+        "[日线_布林带_上半区_0] "
+        "[日线_量能_平量_量比1.22x_0]"
+    )
+
+    formatted = format_tech_summary_for_brief(raw)
+
+    assert formatted == "趋势仍偏强，但短线有钝化压力；承接还在；量能基本正常"

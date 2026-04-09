@@ -2,9 +2,12 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
+> **Follow-up alignment (2026-04-09):**
+> Intraday quote handling is now stricter than this original plan. When bulk spot fails, per-symbol quote fallback gets one extra short retry. Downstream consumers also distinguish fresh vs missing quotes: degraded intraday reports suppress fake `0.0%` quote display and scorecards skip symbols whose `quote_status != fresh`.
+
 **Goal:** Improve all-mode data collection so reports are generated on time with explicit degradation signals when non-core data is slow or missing.
 
-**Architecture:** Add a shared collection-status layer in `DataCollector`, assign different timeout/degradation behavior to core vs supporting fetches, then propagate that state through `AnalysisService`, quality evaluation, and structured-report output. Keep strategy and rendering logic unchanged unless they already consume quality metadata.
+**Architecture:** Add a shared collection-status layer in `DataCollector`, assign different timeout/degradation behavior to core vs supporting fetches, then propagate that state through `AnalysisService`, quality evaluation, structured-report output, and intraday rendering/scorecard guards.
 
 **Tech Stack:** Python, asyncio, pandas, pytest
 

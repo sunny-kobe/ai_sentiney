@@ -164,9 +164,11 @@ def test_cli_summary_formats_structured_tech_tags_for_humans():
 
     rendered = output.getvalue()
     assert "[日线_MACD_" not in rendered
-    assert "MACD空头-超弱，无背驰" in rendered
-    assert "OBV资金流出" in rendered
-    assert "RSI 42.0，中性" in rendered
+    assert "MACD" not in rendered
+    assert "OBV" not in rendered
+    assert "RSI" not in rendered
+    assert "趋势偏弱" in rendered
+    assert "资金有流出" in rendered
 
 
 def test_feishu_card_formats_structured_tech_tags_for_humans():
@@ -199,9 +201,11 @@ def test_feishu_card_formats_structured_tech_tags_for_humans():
     ]
     joined = "\n".join(contents)
     assert "[日线_MACD_" not in joined
-    assert "MACD空头-超弱，无背驰" in joined
-    assert "OBV资金流出" in joined
-    assert "RSI 42.0，中性" in joined
+    assert "MACD" not in joined
+    assert "OBV" not in joined
+    assert "RSI" not in joined
+    assert "趋势偏弱" in joined
+    assert "资金有流出" in joined
 
 
 def test_feishu_preclose_card_avoids_duplicate_tech_summary_when_reason_repeats_it():
@@ -235,7 +239,35 @@ def test_feishu_preclose_card_avoids_duplicate_tech_summary_when_reason_repeats_
     ]
     joined = "\n".join(contents)
     assert "[日线_MACD_" not in joined
-    assert joined.count("MACD空头-超弱，无背驰") == 1
+    assert joined.count("趋势偏弱") == 1
+
+
+def test_feishu_card_uses_professional_group_titles_for_hold_and_watch():
+    client = FeishuClient()
+    card = client._construct_card(
+        {
+            "quality_status": "normal",
+            "data_timestamp": "2026-04-09",
+            "source_labels": ["rule_engine"],
+            "market_sentiment": "防守优先",
+            "macro_summary": "整体建议：保持现有仓位不动。",
+            "actions": [
+                {"code": "510500", "name": "中证500ETF", "signal": "SAFE", "operation": "今日不动"},
+                {"code": "159934", "name": "黄金ETF", "signal": "WATCH", "operation": "持有观察"},
+            ],
+        }
+    )
+
+    contents = [
+        element.get("text", {}).get("content", "")
+        for element in card["elements"]
+        if element.get("tag") == "div"
+    ]
+    joined = "\n".join(contents)
+    assert "持仓安好/躺赢" not in joined
+    assert "重点观察/洗盘" not in joined
+    assert "继续持有" in joined
+    assert "继续观察" in joined
 
 
 def test_feishu_close_card_normalizes_legacy_degraded_payload_copy():

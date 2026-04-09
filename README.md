@@ -74,16 +74,26 @@ python -m src.main --mode swing
 - `swing` 推送会额外附带一条 `实验提示`，自动比较激进中线 preset，告诉你当前哪组实验更值得参考
 - 持仓优先：围绕真实 `portfolio` 和少量 `watchlist` 生成中长期动作
 - 多源容灾采集：单一数据源异常时自动切换
+- 日内行情容灾：批量行情失败后，会继续走单票实时行情补拉，并对瞬时失败追加一次短重试
 - 指标引擎：MA、MACD、RSI、BOLL、KDJ、ATR、OBV 等
 - 对称信号体系：卖出侧（DANGER/WARNING/WATCH）+ 买入侧（OPPORTUNITY/ACCUMULATE）
 - 中期评估：按 `10/20/40` 个交易日统计 `平均收益 / 平均超额 / 平均回撤`
 - 正式验证：新增组合级回测与滚动验证摘要，用来约束中期进攻信号
 - 历史实验：支持按时间区间 / 最近 N 天 / 真实持仓范围发起中期验证
 - 日内诊断：`midday` / `close` 保留短线信号追踪，但不再作为主策略 KPI
+- 降级展示保护：实时行情缺失时，不再伪装显示 `0.0%`；盘中卡片会隐藏伪实时涨跌与价格
+- 评分卡保护：短线信号验证会跳过 `quote_status != fresh` 的标的，避免出现假的 `SAFE→0.0%`
 - 智能追问：基于缓存上下文做二次问答（`--ask`）
 - 趋势分析：自动识别”最近一周/本月走势”等问题
 - 推送与展示：飞书卡片 + Telegram + 本地 WebUI
 - 可扩展：清晰的 source / processor / analyst 分层
+
+### Intraday Degradation Rules / 盘中降级规则
+
+- 如果 `stock_quotes` 缺失但历史日线仍在，系统会继续给出技术结构型摘要，但会显式标记为数据降级。
+- `midday` / `preclose` 遇到 `quote_status != fresh` 时，不展示伪实时 `current_price` 和 `pct_change_str`。
+- 信号评分卡只使用新鲜实时行情；缺失实时行情的标的不参与当日命中率统计。
+- 批量行情失败不会直接让整份报告失效，系统会继续尝试单票行情回补。
 
 ## Quick Start
 

@@ -2,9 +2,12 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
+> **Follow-up alignment (2026-04-09):**
+> The quality/rendering flow now treats quote freshness as part of the display contract for intraday reports. `midday` / `preclose` suppress `pct_change_str` and realtime price when `quote_status != fresh`, and signal scorecards skip those symbols instead of counting them as `0.0%`.
+
 **Goal:** Build quality gates and a structured, evidence-backed report flow for `midday` and `close`, plus add a project skill that standardizes daily report generation.
 
-**Architecture:** Add a pre/post quality-gate layer around the existing analysis pipeline and generate a deterministic `structured_report` from processor outputs and collected evidence before any LLM narration. Keep Gemini only for narrative enrichment in `normal` mode, and degrade to a structured technical brief when gates fail or AI output is incomplete.
+**Architecture:** Add a pre/post quality-gate layer around the existing analysis pipeline and generate a deterministic `structured_report` from processor outputs and collected evidence before any LLM narration. Keep Gemini only for narrative enrichment in `normal` mode, degrade to a structured technical brief when gates fail or AI output is incomplete, and preserve quote freshness metadata so downstream intraday renderers can avoid fake realtime display.
 
 **Tech Stack:** Python 3, pytest, sqlite3, existing AkShare/Gemini pipeline, Feishu/Telegram renderers, Markdown skill docs
 

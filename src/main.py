@@ -13,7 +13,7 @@ from src.web.server import WebServer
 from src.utils.config_loader import ConfigLoader
 from src.utils.lab_hint_formatter import build_lab_hint_detail, build_lab_hint_header
 from src.utils.report_payload_normalizer import normalize_report_for_display
-from src.utils.tech_summary_formatter import format_tech_summary_for_display
+from src.utils.tech_summary_formatter import format_tech_summary_for_brief
 from src.web.api import get_router
 
 existing_pythonwarnings = os.environ.get("PYTHONWARNINGS", "")
@@ -187,9 +187,9 @@ def _print_text_summary(result: Dict[str, Any], mode: str):
             confidence = a.get('confidence', '')
             conf_tag = f" [{confidence}]" if confidence else ""
             lines.append(f"  [{a.get('code')}] {a.get('name')} {pct} | 信号:{a.get('signal','N/A')}{conf_tag} | 执行:{a.get('operation','N/A')}")
-            tech = format_tech_summary_for_display(a.get('tech_summary', ''))
+            tech = format_tech_summary_for_brief(a.get('tech_summary', ''))
             if tech:
-                lines.append(f"    指标: {tech}")
+                lines.append(f"    技术面: {tech}")
             if a.get('reason'):
                 lines.append(f"    理由: {a.get('reason')}")
     elif mode == 'close':
@@ -213,9 +213,9 @@ def _print_text_summary(result: Dict[str, Any], mode: str):
             lines.append(f"    今日: {a.get('today_review', '')}")
             lines.append(f"    明日: {a.get('tomorrow_plan', '')}")
             lines.append(f"    支撑:{a.get('support_level', 0)} / 压力:{a.get('resistance_level', 0)}")
-            tech = format_tech_summary_for_display(a.get('tech_summary', ''))
+            tech = format_tech_summary_for_brief(a.get('tech_summary', ''))
             if tech:
-                lines.append(f"    指标: {tech}")
+                lines.append(f"    技术面: {tech}")
     else:  # midday
         lines.append(f"=== 午盘分析 ===")
         _append_quality_note(lines, quality_status, data_timestamp, source_labels, quality_detail)
@@ -239,9 +239,9 @@ def _print_text_summary(result: Dict[str, Any], mode: str):
             confidence = a.get('confidence', '')
             conf_tag = f" [{confidence}]" if confidence else ""
             lines.append(f"  [{a.get('code')}] {a.get('name')} {pct} | 信号:{a.get('signal','N/A')}{conf_tag} | 操作:{a.get('operation','N/A')}")
-            tech = format_tech_summary_for_display(a.get('tech_summary', ''))
+            tech = format_tech_summary_for_brief(a.get('tech_summary', ''))
             if tech:
-                lines.append(f"    指标: {tech}")
+                lines.append(f"    技术面: {tech}")
             if a.get('reason'):
                 lines.append(f"    理由: {a.get('reason')}")
 

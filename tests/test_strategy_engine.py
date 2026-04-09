@@ -4,7 +4,7 @@ from src.service.execution_gate import apply_mode_gate
 from src.service.market_regime import classify_market_regime
 from src.service.performance_gate import gate_offensive_setup
 from src.service.setup_classifier import classify_setup
-from src.service.strategy_engine import build_strategy_snapshot
+from src.service.strategy_engine import build_close_rule_report, build_intraday_rule_report, build_strategy_snapshot
 
 
 def _make_stock(
@@ -191,3 +191,53 @@ def test_build_strategy_snapshot_returns_normalized_holdings_and_conservative_ac
     assert laggard["setup_type"] in {"rebound_trap", "conflict"}
     assert laggard["final_action"] in {"持有", "减配"}
     assert laggard["evidence"]
+
+
+def test_build_intraday_rule_report_uses_plain_reason_text():
+    report = build_intraday_rule_report(
+        {"indices": {"上证指数": {"change_pct": -0.2}}},
+        {
+            "market_regime": "防守",
+            "holdings": [
+                {
+                    "code": "510500",
+                    "name": "中证500ETF",
+                    "final_action": "持有",
+                    "rebalance_instruction": "今日不动",
+                    "evidence_text": "价格站在MA20上方；相对基准更强；资金承接仍在",
+                    "invalid_condition": "放量跌回MA20(7.88)下方时，取消偏多判断",
+                }
+            ],
+        },
+        mode="preclose",
+    )
+
+    reason = report["actions"][0]["reason"]
+    assert reason == "还在20日线之上，走势强于同类基准，承接还在。只要放量跌破20日线 7.88，就先转回谨慎。"
+    assert "MA20" not in reason
+    assert "相对基准更强" not in reason
+
+
+def test_build_close_rule_report_uses_plain_tomorrow_plan_text():
+    report = build_close_rule_report(
+        {},
+        {
+            "market_regime": "均衡",
+            "holdings": [
+                {
+                    "code": "510500",
+                    "name": "中证500ETF",
+                    "final_action": "持有",
+                    "evidence_text": "价格站在MA20上方；资金承接仍在",
+                    "invalid_condition": "放量跌回MA20(7.88)下方时，取消偏多判断",
+                    "current_price": 7.96,
+                    "ma20": 7.88,
+                }
+            ],
+        },
+    )
+
+    action = report["actions"][0]
+    assert action["today_review"] == "还在20日线之上，承接还在。"
+    assert action["tomorrow_plan"] == "明天先持有观察，不急着加减。只要放量跌破20日线 7.88，就先转回谨慎。"
+    assert "MA20" not in action["tomorrow_plan"]

@@ -6,7 +6,7 @@ from src.utils.logger import logger
 from src.utils.config_loader import ConfigLoader
 from src.utils.lab_hint_formatter import build_lab_hint_detail, build_lab_hint_header
 from src.utils.report_payload_normalizer import normalize_report_for_display
-from src.utils.tech_summary_formatter import format_tech_summary_for_display
+from src.utils.tech_summary_formatter import format_tech_summary_for_brief, format_tech_summary_for_display
 
 
 def _build_validation_hint(data: Dict[str, Any]) -> str:
@@ -325,9 +325,9 @@ class FeishuClient:
                     content += f"\n> 💡 {normalized_reason}"
                 if key_level: content += f"\n> 🎯 关键位: {key_level}"
 
-                tech_summary = format_tech_summary_for_display(s.get('tech_summary', ''))
+                tech_summary = format_tech_summary_for_brief(s.get('tech_summary', ''))
                 if tech_summary:
-                    content += f"\n> 📊 {tech_summary}"
+                    content += f"\n> 📊 技术面: {tech_summary}"
                 
                 elements.append({
                     "tag": "div",
@@ -341,9 +341,9 @@ class FeishuClient:
         # Render Order: SELL -> LIMIT -> OPPORTUNITY -> WATCH -> HOLD -> UNKNOWN
         render_group("建议离场/减仓", "🔴", grouped_actions["SELL"])
         render_group("涨跌停锁定", "🔒", grouped_actions["LIMIT"])
-        render_group("加仓机会", "🟣", grouped_actions["OPPORTUNITY"])
-        render_group("重点观察/洗盘", "🟡", grouped_actions["WATCH"])
-        render_group("持仓安好/躺赢", "🟢", grouped_actions["HOLD"])
+        render_group("候选加仓", "🟣", grouped_actions["OPPORTUNITY"])
+        render_group("继续观察", "🟡", grouped_actions["WATCH"])
+        render_group("继续持有", "🟢", grouped_actions["HOLD"])
         if grouped_actions["UNKNOWN"]:
             render_group("数据不足", "⚪", grouped_actions["UNKNOWN"])
 
@@ -691,10 +691,10 @@ class FeishuClient:
             if support and resistance:
                 content += f"\n> 📐 支撑: {support} / 压力: {resistance}"
 
-            tech_summary = format_tech_summary_for_display(s.get('tech_summary', ''))
+            tech_summary = format_tech_summary_for_brief(s.get('tech_summary', ''))
             confidence = s.get('confidence', '')
             if tech_summary:
-                content += f"\n> 📊 {tech_summary}"
+                content += f"\n> 📊 技术面: {tech_summary}"
             if confidence:
                 content += f" `置信度:{confidence}`"
             
