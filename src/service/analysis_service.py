@@ -268,11 +268,18 @@ class AnalysisService:
             if stock_obj:
                 pct = stock_obj.get('pct_change', 0.0)
                 current_price = stock_obj.get('current_price', 0.0)
-                action['current_price'] = current_price
+                quote_status = stock_obj.get('quote_status', 'missing')
+                action['quote_status'] = quote_status
 
-                sign = "+" if pct > 0 else ""
-                color = "🔴" if pct > 0 else "🟢"
-                action['pct_change_str'] = f"`{color} {sign}{pct}%`"
+                if quote_status == "fresh":
+                    action['current_price'] = current_price
+                    sign = "+" if pct > 0 else ""
+                    color = "🔴" if pct > 0 else "🟢"
+                    action['pct_change_str'] = f"`{color} {sign}{pct}%`"
+                else:
+                    if mode in {"midday", "preclose"}:
+                        action['current_price'] = 0.0
+                    action['pct_change_str'] = ""
 
                 # 🔧 FIX: 传递 T+1 相关字段到 actions
                 if 'tradeable' in stock_obj:

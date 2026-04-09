@@ -141,6 +141,49 @@ def test_run_analysis_degraded_report_attaches_human_quality_detail_and_non_dupl
     assert result["actions"][0]["tech_summary"] == "[日线_MACD_多头_无背驰_0]"
 
 
+def test_post_process_result_hides_intraday_quote_fields_when_realtime_quote_is_missing():
+    service = AnalysisService()
+    analysis_result = {
+        "actions": [
+            {
+                "code": "159819",
+                "name": "人工智能ETF",
+                "signal": "SAFE",
+                "operation": "持有观察",
+            }
+        ]
+    }
+    ai_input = {
+        "indices": {},
+        "stocks": [
+            {
+                "code": "159819",
+                "name": "人工智能ETF",
+                "current_price": 1.53,
+                "pct_change": 0.0,
+                "quote_status": "missing",
+                "confidence": "中",
+                "tech_summary": "[日线_MACD_空头-超弱_无背驰_0]",
+            }
+        ],
+        "structured_report": {
+            "stocks": [
+                {
+                    "code": "159819",
+                    "operation": "持有观察",
+                    "source_labels": ["rule_engine"],
+                    "data_timestamp": "2026-04-09 12:19",
+                }
+            ]
+        },
+    }
+
+    result = service.post_process_result(analysis_result, ai_input, mode="midday")
+
+    assert result["actions"][0]["pct_change_str"] == ""
+    assert result["actions"][0]["current_price"] == 0.0
+
+
 def test_run_analysis_degrades_when_collection_state_is_degraded(monkeypatch):
     service = AnalysisService()
     today = datetime.now().strftime("%Y-%m-%d")

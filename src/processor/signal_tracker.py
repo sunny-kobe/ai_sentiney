@@ -92,7 +92,13 @@ def evaluate_yesterday(yesterday_actions: List[Dict], today_stocks: List[Dict]) 
     today_map = {}
     for s in today_stocks:
         code = s.get('code', '')
-        today_map[code] = s.get('pct_change', 0.0)
+        quote_status = s.get('quote_status')
+        if quote_status and quote_status != 'fresh':
+            continue
+        pct_change = s.get('pct_change')
+        if pct_change is None:
+            continue
+        today_map[code] = pct_change
 
     results = []
     for action in yesterday_actions:

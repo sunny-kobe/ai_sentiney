@@ -236,6 +236,26 @@ class DataCollector:
             return len(result) == 0
         return False
 
+    def _is_valid_single_quote(self, quote: Optional[Dict[str, Any]]) -> bool:
+        if not isinstance(quote, dict):
+            return False
+        try:
+            return float(quote.get("current_price", 0) or 0) > 0
+        except (TypeError, ValueError):
+            return False
+
+    async def _fetch_single_quote_with_retry(self, code: str) -> Optional[Dict[str, Any]]:
+        quote = await self._fetch_with_fallback('fetch_single_quote', code=code, timeout=3)
+        if self._is_valid_single_quote(quote):
+            return quote
+
+        logger.warning(f"Single quote fetch returned empty for {code}, retrying once")
+        await asyncio.sleep(0.2)
+        retry_quote = await self._fetch_with_fallback('fetch_single_quote', code=code, timeout=2)
+        if self._is_valid_single_quote(retry_quote):
+            return retry_quote
+        return None
+
     def _parse_market_breadth_count(self, value: Any) -> Optional[int]:
         text = str(value or "").strip()
         if not text:
@@ -1089,7 +1109,7 @@ class DataCollector:
             # 2. Try Individual Real-Time Quote (Fallback for Spot)
             # This is critical if bulk spot fetch failed (e.g. Efinance timeout)
             if current_price == 0.0:
-                quote = await self._fetch_with_fallback('fetch_single_quote', code=code, timeout=3)
+                quote = await self._fetch_single_quote_with_retry(code)
                 if quote:
                     try:
                         current_price = float(quote['current_price'])

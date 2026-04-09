@@ -431,14 +431,18 @@ class DataProcessor:
             return {
                 "code": code,
                 "name": name,
-                "current_price": current_price, 
+                "current_price": current_price,
+                "pct_change": stock_d.get('pct_change', 0.0),
                 "ma20": 0.0,
                 "bias_pct": 0.0,
                 "status": "UNKNOWN",
                 "shares": stock_d.get('shares', 0),
                 "strategy": stock_d.get('strategy', 'trend'),
                 "cost": stock_d.get('cost', 0),
-                "news": stock_d.get('news', [])
+                "news": stock_d.get('news', []),
+                "quote_status": stock_d.get('quote_status', 'missing'),
+                "history_status": stock_d.get('history_status', 'missing'),
+                "news_status": stock_d.get('news_status', 'missing'),
             }
 
         try:
@@ -641,7 +645,10 @@ class DataProcessor:
                 "strategy": stock_d.get('strategy', 'trend'),
                 "cost": stock_d.get('cost', 0),
                 "shares": stock_d.get('shares', 0),
-                "news": stock_d.get('news', [])
+                "news": stock_d.get('news', []),
+                "quote_status": stock_d.get('quote_status', 'missing'),
+                "history_status": stock_d.get('history_status', 'missing'),
+                "news_status": stock_d.get('news_status', 'missing'),
             }
 
         except Exception as e:

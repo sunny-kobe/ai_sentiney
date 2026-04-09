@@ -462,6 +462,45 @@ async def test_fetch_individual_stock_extras_skips_news_lookup_for_fund_like_sec
 
 
 @pytest.mark.asyncio
+async def test_fetch_individual_stock_extras_retries_single_quote_once_after_transient_failure(collector, monkeypatch):
+    single_quote_calls = 0
+
+    async def fake_fetch_with_fallback(method_name, *args, **kwargs):
+        nonlocal single_quote_calls
+        if method_name == "fetch_single_quote":
+            single_quote_calls += 1
+            if single_quote_calls == 1:
+                return None
+            return {
+                "code": kwargs["code"],
+                "name": "人工智能ETF",
+                "current_price": 1.55,
+                "pct_change": -0.8,
+                "volume": 1200.0,
+                "turnover_rate": 1.5,
+            }
+        if method_name == "fetch_prices":
+            return pd.DataFrame({
+                "date": pd.date_range("2026-02-01", periods=30, freq="D"),
+                "close": [1.5] * 30,
+                "open": [1.5] * 30,
+                "high": [1.56] * 30,
+                "low": [1.48] * 30,
+                "volume": [1000.0] * 30,
+            })
+        raise AssertionError(f"unexpected method: {method_name}")
+
+    monkeypatch.setattr(collector, "_fetch_with_fallback", fake_fetch_with_fallback)
+
+    result = await collector._fetch_individual_stock_extras("159819", "人工智能ETF", pd.DataFrame())
+
+    assert single_quote_calls == 2
+    assert result["quote_status"] == "fresh"
+    assert result["current_price"] == 1.55
+    assert result["pct_change"] == -0.8
+
+
+@pytest.mark.asyncio
 async def test_get_global_indices_falls_back_to_hist_snapshots_when_spot_times_out(collector, monkeypatch):
     calls = []
 
