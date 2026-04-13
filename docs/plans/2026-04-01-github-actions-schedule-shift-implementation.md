@@ -23,9 +23,10 @@ Update the cron assertions to:
 ```python
 assert 'cron: "10 23 * * 0-4"' in content
 assert 'cron: "50 1 * * 1-5"' in content
-assert 'cron: "5 5 * * 1-5"' in content
+assert 'cron: "5 4 * * 1-5"' in content
 assert 'cron: "35 6 * * 1-5"' in content
 assert '"10 23 * * 0-4")' in content
+assert '"5 4 * * 1-5")' in content
 ```
 
 **Step 2: Run test to verify it fails**

@@ -21,7 +21,7 @@ Excluded:
 
 - `morning`: delay by 3 hours, `04:10` -> `07:10`
 - `midday`: move earlier by 1.5 hours, `11:20` -> `09:50`
-- `preclose`: move earlier by 1.5 hours, `14:35` -> `13:05`
+- `preclose`: move earlier by 2.5 hours, `14:35` -> `12:05`
 - `close`: move earlier by 0.5 hour, `15:05` -> `14:35`
 - `swing`: unchanged at `20:00`
 
@@ -31,7 +31,7 @@ GitHub Actions cron uses UTC. With `Asia/Shanghai` fixed at UTC+8:
 
 - `morning` `07:10 CST` -> `23:10 UTC` on the previous day
 - `midday` `09:50 CST` -> `01:50 UTC`
-- `preclose` `13:05 CST` -> `05:05 UTC`
+- `preclose` `12:05 CST` -> `04:05 UTC`
 - `close` `14:35 CST` -> `06:35 UTC`
 - `swing` `20:00 CST` -> `12:00 UTC`
 

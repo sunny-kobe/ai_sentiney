@@ -6,12 +6,12 @@ on:
     # OpenClaw 本地为主力，GitHub Actions 再提前一档作为兜底
     # Morning 07:10 CST = 23:10 UTC (previous UTC day, so cron uses 0-4)
     # Midday 09:50 CST = 01:50 UTC
-    # Preclose 13:05 CST = 05:05 UTC
+    # Preclose 12:05 CST = 04:05 UTC
     # Close review 14:35 CST = 06:35 UTC
     # Swing 20:00 CST = 12:00 UTC
     - cron: "10 23 * * 0-4" # Morning Brief (兜底)
     - cron: "50 1 * * 1-5" # Midday Check (兜底)
-    - cron: "5 5 * * 1-5" # Preclose Execution (主模式)
+    - cron: "5 4 * * 1-5" # Preclose Execution (主模式)
     - cron: "35 6 * * 1-5" # Close Review (兜底)
     - cron: "0 12 * * 1-5" # Swing Strategy (主模式)
   workflow_dispatch:
@@ -82,7 +82,7 @@ jobs:
               "50 1 * * 1-5")
                 TARGET_MODE="midday"
                 ;;
-              "5 5 * * 1-5")
+              "5 4 * * 1-5")
                 TARGET_MODE="preclose"
                 ;;
               "35 6 * * 1-5")
