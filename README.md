@@ -84,9 +84,26 @@ python -m src.main --mode swing
 - 降级展示保护：实时行情缺失时，不再伪装显示 `0.0%`；盘中卡片会隐藏伪实时涨跌与价格
 - 评分卡保护：短线信号验证会跳过 `quote_status != fresh` 的标的，避免出现假的 `SAFE→0.0%`
 - 智能追问：基于缓存上下文做二次问答（`--ask`）
-- 趋势分析：自动识别”最近一周/本月走势”等问题
+- 趋势分析：自动识别"最近一周/本月走势"等问题
 - 推送与展示：飞书卡片 + Telegram + 本地 WebUI
 - 可扩展：清晰的 source / processor / analyst 分层
+
+### 🆕 智能预警系统（New）
+
+- **市场异动预警** (`alert`)：实时监控持仓和观察池，检测放量、急涨急跌、换手率异常
+  - 检测规则：日内涨跌幅 ≥3%、量比 ≥1.5x、换手率 ≥8%
+  - 严重程度分级：critical / alert / warning
+  - 自动搜索相关新闻辅助判断
+  - 同类型同级别异动每天只推一次（去重）
+- **智能信息雷达** (`radar`)：定时采集行业新闻、政策变动、GitHub Trending
+  - 行业新闻：AI、半导体、新能源等赛道
+  - 政策监控：证监会、央行、国务院、发改委、财政部
+  - GitHub Trending：Python、TypeScript、Rust、Go 热门仓库
+  - 使用 AkShare 内置新闻源，更可靠
+- **自动研报** (`report`)：AI 生成每日研报
+  - 聚合市场指数、板块表现、持仓状态、行业新闻、政策动态、技术热点
+  - 使用 MiMo 生成专业研报（600-800字）
+  - 包含市场综述、板块分析、持仓点评、风险提示、明日展望
 
 ### Intraday Degradation Rules / 盘中降级规则
 
@@ -224,6 +241,19 @@ python -m src.main --mode midday --publish --publish-target telegram
 
 # JSON 输出（便于二次开发）
 python -m src.main --mode swing --output json
+
+# 🆕 市场异动预警
+python -m src.main alert                # 扫描并推送异动
+python -m src.main alert --dry-run      # 试运行（不推送）
+
+# 🆕 智能信息雷达
+python -m src.main radar                # 采集并推送新闻
+python -m src.main radar --dry-run      # 试运行（不推送）
+
+# 🆕 自动研报
+python -m src.main report               # 生成并推送研报
+python -m src.main report --dry-run     # 试运行（不推送）
+python -m src.main report --force       # 强制重新生成（忽略今日已生成检查）
 ```
 
 ## Q&A / 趋势追问
@@ -261,10 +291,12 @@ python -m src.main --webui
 
 | 参数 | 说明 |
 |---|---|
-| `--mode {swing,midday,close,morning}` | 分析模式 |
+| `command {run,alert,radar,report,validate,experiment,lab}` | 命令（默认 run） |
+| `--mode {swing,midday,close,morning}` | 分析模式（run 命令） |
 | `--publish` | 推送到发布渠道（默认不推） |
 | `--publish-target {feishu,telegram}` | 推送目标（默认 feishu） |
 | `--dry-run` | 试运行，不推送；`swing` 下会直接拉实时行情做预览 |
+| `--force` | 强制重新生成（report 命令） |
 | `--replay` | 使用历史缓存重放分析，适合验证渲染/结构，不替代实时预览 |
 | `--validation-report` | 直接输出当前模式的验证摘要；`swing` 下文本显示自然语言总结，JSON 默认返回 compact snapshot |
 | `--output {text,json}` | 输出格式 |
@@ -278,11 +310,14 @@ python -m src.main --webui
 src/
   collector/   # 数据采集与多源容灾
   processor/   # 指标计算、信号生成、命中追踪
-  analyst/     # Gemini 分析与结构化输出
+  analyst/     # AI 分析（MiMo + Gemini 兜底）
   reporter/    # 推送渠道（飞书 / Telegram）
   service/     # 主流程编排
   backtest/    # 中长期正式回测与滚动验证
   web/         # 轻量 WebUI
+  alerts/      # 🆕 市场异动预警
+  radar/       # 🆕 智能信息雷达
+  report_gen/  # 🆕 自动研报生成
 ```
 
 ## Why Star This Repo
@@ -312,6 +347,16 @@ src/
 - 定时推送：`morning` / `midday` / `close` / `swing`
 - 手动触发：可在 Actions 页面选择 `mode` 与 `publish_target`
 
+### 本地定时任务（Hermes Cron）
+
+除了 GitHub Actions，还可以通过 Hermes Agent 配置本地定时任务：
+
+| 任务 | 定时 | 说明 |
+|------|------|------|
+| `sentinel-alert` | 每30分钟（交易时段） | 市场异动预警扫描 |
+| `sentinel-radar` | 每天 8:00/12:00/18:00 | 智能信息雷达采集 |
+| `sentinel-report` | 每个交易日 16:00 | 自动研报生成 |
+
 ## Roadmap
 
 - [x] 迁移到新版 `google.genai` SDK（替代 `google-generativeai`）
@@ -319,6 +364,9 @@ src/
 - [x] 增加 Telegram 推送渠道
 - [x] 买入侧信号体系（OPPORTUNITY / ACCUMULATE）
 - [x] 增加 `swing` 中期策略模式与 `10/20/40` 评估
+- [x] 🆕 市场异动预警（放量/急涨急跌/换手率异常）
+- [x] 🆕 智能信息雷达（行业新闻/政策变动/GitHub Trending）
+- [x] 🆕 自动研报生成（MiMo AI 生成每日研报）
 - [ ] 提供 Docker 一键部署
 - [ ] 提供更完整的 API 文档与前端展示
 

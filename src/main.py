@@ -249,7 +249,7 @@ def _print_text_summary(result: Dict[str, Any], mode: str):
 
 def entry_point():
     parser = argparse.ArgumentParser(description="Project Sentinel V2")
-    parser.add_argument('command', nargs='?', choices=['run', 'validate', 'experiment', 'lab'], default='run', help='CLI command')
+    parser.add_argument('command', nargs='?', choices=['run', 'validate', 'experiment', 'lab', 'alert', 'radar', 'report'], default='run', help='CLI command')
     parser.add_argument('--mode', type=str, default='midday', choices=['midday', 'preclose', 'close', 'morning', 'swing'], help='Execution mode')
     parser.add_argument('--dry-run', action='store_true', help='Run without calling expensive APIs or sending notifications')
     parser.add_argument('--replay', action='store_true', help='Replay analysis using last saved data')
@@ -268,6 +268,7 @@ def entry_point():
     parser.add_argument('--group-by', type=str, default=None, choices=['action', 'cluster', 'regime', 'confidence'], help='Optional grouped diagnostics dimension for validation/experiment commands')
     parser.add_argument('--override', action='append', default=None, help='Optional key=value override for lab experiments; can repeat')
     parser.add_argument('--detail', type=str, default='compact', choices=['compact', 'full'], help='Detail level for lab JSON output')
+    parser.add_argument('--force', action='store_true', help='Force regeneration (for report command)')
 
     args = parser.parse_args()
 
@@ -298,6 +299,67 @@ def entry_point():
             print(json.dumps(payload, ensure_ascii=False))
         else:
             print(getattr(result, "summary_text", payload.get("summary_text", "暂无实验结果")))
+    elif args.command == 'alert':
+        # 异动预警模式
+        from src.alerts.runner import AlertRunner
+        runner = AlertRunner()
+        result = asyncio.run(runner.run(dry_run=args.dry_run))
+        if args.output == 'json':
+            print(json.dumps(result, ensure_ascii=False, default=str))
+        else:
+            if result["anomalies"]:
+                print(f"\n发现 {len(result['anomalies'])} 个异动:")
+                for a in result["anomalies"]:
+                    emoji = {"critical": "🚨", "alert": "⚠️", "warning": "📊"}.get(a["severity"], "📊")
+                    print(f"  {emoji} {a['name']}({a['code']}): {a['detail']}")
+                if result["sent"]:
+                    print("\n✅ 预警已推送到 Telegram")
+            else:
+                print("✅ 未发现异动")
+    elif args.command == 'radar':
+        # 智能信息雷达模式
+        from src.radar.runner import RadarRunner
+        runner = RadarRunner()
+        result = asyncio.run(runner.run(dry_run=args.dry_run))
+        if args.output == 'json':
+            print(json.dumps(result, ensure_ascii=False, default=str))
+        else:
+            if result.get("pushed"):
+                print("✅ 雷达报告已推送到 Telegram")
+            else:
+                print("✅ 无新内容")
+            if result.get("stats"):
+                stats = result["stats"]
+                print(f"\n采集统计:")
+                print(f"  行业新闻: {sum(stats.get('industry', {}).values())} 条")
+                print(f"  政策动态: {stats.get('policy', 0)} 条")
+                print(f"  GitHub: {sum(stats.get('github', {}).values())} 个仓库")
+    elif args.command == 'report':
+        # 自动研报模式
+        from src.report_gen.runner import AutoReportRunner
+        runner = AutoReportRunner()
+        result = asyncio.run(runner.run(dry_run=args.dry_run, force=getattr(args, 'force', False)))
+        if args.output == 'json':
+            print(json.dumps(result, ensure_ascii=False, default=str))
+        else:
+            if result.get("generated"):
+                if result.get("pushed"):
+                    print("✅ 研报已生成并推送到 Telegram")
+                else:
+                    print("✅ 研报已生成（试运行模式）")
+            elif result.get("reason") == "already_generated":
+                print("ℹ️ 今日已生成过研报，使用 --force 强制重新生成")
+            else:
+                print("❌ 研报生成失败")
+            if result.get("data_summary"):
+                summary = result["data_summary"]
+                print(f"\n数据统计:")
+                print(f"  指数: {summary['indices']} 个")
+                print(f"  板块: {summary['sectors']} 个")
+                print(f"  持仓: {summary['portfolio']} 只")
+                print(f"  新闻: {summary['news']} 条")
+                print(f"  政策: {summary['policy']} 条")
+                print(f"  GitHub: {summary['github']} 个仓库")
     elif args.command in {'validate', 'experiment'}:
         result = service.build_validation_result(
             mode=args.mode,

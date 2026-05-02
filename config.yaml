@@ -8,6 +8,12 @@ system:
 
 ai:
   model_name: "gemini-3.1-pro-preview"
+  # MiMo 主力模型（OpenAI 兼容接口）
+  mimo:
+    enabled: true
+    base_url: "https://token-plan-cn.xiaomimimo.com/v1"
+    api_key: "${MIMO_API_KEY}"
+    model: "mimo-v2.5-pro"
 
 strategy:
   default_mode: "swing"
@@ -253,6 +259,41 @@ risk_management:
       confidence: "中"
 
   # NOTE: north_money_threshold removed - no longer real-time available
+
+# 市场异动预警配置
+alert:
+  enabled: true
+  thresholds:
+    price_change_pct: 3.0    # 日内涨跌幅超过此值触发预警 (%)
+    volume_ratio: 1.5        # 量比超过此值触发预警 (当前成交量 / 5日均量)
+    turnover_rate: 8.0       # 换手率超过此值触发预警 (%)
+  # 预警严重程度阈值
+  severity:
+    sharp_move:
+      warning: 3.0           # 涨跌幅 >= 3% 为 warning
+      alert: 4.0             # >= 4% 为 alert
+      critical: 5.0          # >= 5% 为 critical
+    volume_spike:
+      warning: 1.5           # 量比 >= 1.5x 为 warning
+      alert: 2.0             # >= 2x 为 alert
+      critical: 3.0          # >= 3x 为 critical
+  # 同类型同级别异动每天只推送一次（去重）
+  dedup: true
+
+# 智能信息雷达配置
+radar:
+  enabled: true
+  # 行业新闻关注的赛道和关键词
+  sectors:
+    AI: ["人工智能", "AI", "大模型", "GPT", "机器人", "自动驾驶"]
+    半导体: ["半导体", "芯片", "GPU", "EDA", "光刻机"]
+    新能源: ["新能源", "光伏", "锂电池", "储能", "电动车"]
+  # 政策监控关键词（可选，留空使用默认）
+  policy_keywords: []  # 默认: 证监会、央行、国务院、发改委、财政部等
+  # GitHub Trending 关注的语言
+  github_languages: ["python", "typescript", "rust", "go"]
+  # 每日推送时间（24小时制）
+  push_times: ["08:00", "12:00", "18:00"]
 
 prompts:
   midday_focus: |
