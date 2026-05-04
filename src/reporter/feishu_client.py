@@ -85,6 +85,8 @@ class FeishuClient:
     def __init__(self):
         self.config = ConfigLoader().config
         self.webhook_url = self.config['api_keys'].get('feishu_webhook')
+        reporter_cfg = ConfigLoader.get_reporter_config()
+        self.timeout = reporter_cfg.get('feishu_timeout', 10)
         if not self.webhook_url:
             logger.error("Feishu Webhook URL is missing!")
 
@@ -103,7 +105,7 @@ class FeishuClient:
                 "card": card_content
             }
             
-            response = requests.post(self.webhook_url, json=payload)
+            response = requests.post(self.webhook_url, json=payload, timeout=self.timeout)
             response.raise_for_status()
             
             # Check Feishu response logic
@@ -127,7 +129,7 @@ class FeishuClient:
                 "msg_type": "interactive",
                 "card": card_content
             }
-            response = requests.post(self.webhook_url, json=payload)
+            response = requests.post(self.webhook_url, json=payload, timeout=self.timeout)
             response.raise_for_status()
             resp_json = response.json()
             if resp_json.get("code") != 0:
@@ -425,7 +427,7 @@ class FeishuClient:
             "card": card_content
         }
         try:
-            response = requests.post(self.webhook_url, json=payload, timeout=10)
+            response = requests.post(self.webhook_url, json=payload, timeout=self.timeout)
             if response.status_code == 200:
                 logger.info("Feishu close review sent successfully.")
             else:
@@ -445,7 +447,7 @@ class FeishuClient:
                 "msg_type": "interactive",
                 "card": card_content
             }
-            response = requests.post(self.webhook_url, json=payload, timeout=10)
+            response = requests.post(self.webhook_url, json=payload, timeout=self.timeout)
             response.raise_for_status()
             resp_json = response.json()
             if resp_json.get("code") != 0:
@@ -466,7 +468,7 @@ class FeishuClient:
                 "msg_type": "interactive",
                 "card": card_content
             }
-            response = requests.post(self.webhook_url, json=payload, timeout=10)
+            response = requests.post(self.webhook_url, json=payload, timeout=self.timeout)
             response.raise_for_status()
         except Exception as e:
             logger.error(f"Failed to send Feishu swing card: {e}")

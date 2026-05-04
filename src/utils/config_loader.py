@@ -36,11 +36,13 @@ class ConfigLoader:
             feishu_webhook = os.getenv("FEISHU_WEBHOOK", "")
             telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
             telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
+            mimo_api_key = os.getenv("MIMO_API_KEY", "")
             
             content = content.replace("${GEMINI_API_KEY}", gemini_key)
             content = content.replace("${FEISHU_WEBHOOK}", feishu_webhook)
             content = content.replace("${TELEGRAM_BOT_TOKEN}", telegram_bot_token)
             content = content.replace("${TELEGRAM_CHAT_ID}", telegram_chat_id)
+            content = content.replace("${MIMO_API_KEY}", mimo_api_key)
             
             self._config: Dict[str, Any] = {}
             self._config.update(yaml.safe_load(content))
@@ -74,3 +76,15 @@ class ConfigLoader:
     def get_swing_strategy_config():
         strategy = ConfigLoader().config.get('strategy', {})
         return strategy.get('swing', {})
+
+    @staticmethod
+    def get_ai_config():
+        return ConfigLoader().config.get('ai', {})
+
+    @staticmethod
+    def get_reporter_config():
+        return ConfigLoader().config.get('reporter', {})
+
+    @staticmethod
+    def get_collector_config():
+        return ConfigLoader().config.get('collector', {})

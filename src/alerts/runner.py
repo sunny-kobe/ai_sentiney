@@ -9,6 +9,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
 
+from chinese_calendar import is_workday
+
 from src.alerts.anomaly_detector import Anomaly, AnomalyDetector
 from src.alerts.news_searcher import NewsSearcher
 from src.reporter.telegram_client import TelegramClient
@@ -117,6 +119,12 @@ class AlertRunner:
         执行一次异动扫描
         返回: {"anomalies": [...], "sent": bool, "message": str}
         """
+        # 非交易日直接跳过
+        today = datetime.now().date()
+        if not is_workday(today):
+            logger.info("📅 今日非交易日，跳过预警扫描")
+            return {"anomalies": [], "sent": False, "message": "", "skip_reason": "非交易日"}
+
         logger.info("🚀 启动异动预警扫描...")
 
         # 1. 扫描异动

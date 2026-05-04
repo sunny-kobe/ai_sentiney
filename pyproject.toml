@@ -1,0 +1,11 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = ["integration: integration tests", "e2e: end-to-end tests"]
+
+[tool.coverage.run]
+source = ["src"]
+omit = ["tests/*", "src/web/*"]
+
+[tool.coverage.report]
+exclude_lines = ["pragma: no cover", "if __name__", "raise NotImplementedError"]

@@ -1,19 +1,18 @@
 name: Sentinel Daily Briefing
 
+# Hermes 为主力执行平台，GitHub Actions 仅保留手动触发作为兜底
+# 自动定时已关闭，如需手动运行：Actions → Run workflow → 选择 mode 和 target
+
 on:
-  schedule:
-    # UTC Time! China is UTC+8.
-    # OpenClaw 本地为主力，GitHub Actions 再提前一档作为兜底
-    # Morning 07:10 CST = 23:10 UTC (previous UTC day, so cron uses 0-4)
-    # Midday 09:50 CST = 01:50 UTC
-    # Preclose 12:05 CST = 04:05 UTC
-    # Close review 14:35 CST = 06:35 UTC
-    # Swing 20:00 CST = 12:00 UTC
-    - cron: "10 23 * * 0-4" # Morning Brief (兜底)
-    - cron: "50 1 * * 1-5" # Midday Check (兜底)
-    - cron: "5 4 * * 1-5" # Preclose Execution (主模式)
-    - cron: "35 6 * * 1-5" # Close Review (兜底)
-    - cron: "0 12 * * 1-5" # Swing Strategy (主模式)
+  # 定时已关闭，由 Hermes Cron 代替
+  # schedule:
+  #   - cron: "10 23 * * 0-4" # Morning Brief
+  #   - cron: "50 1 * * 1-5"  # Midday Check
+  #   - cron: "5 4 * * 1-5"   # Preclose Execution
+  #   - cron: "35 6 * * 1-5"  # Close Review
+  #   - cron: "0 12 * * 1-5"  # Swing Strategy
+
+  # 仅保留手动触发作为兜底
   workflow_dispatch:
     inputs:
       mode:
@@ -31,7 +30,7 @@ on:
       publish_target:
         description: "Publish target"
         required: true
-        default: "feishu"
+        default: "telegram"
         type: choice
         options:
           - feishu
@@ -43,7 +42,6 @@ jobs:
     env:
       TZ: Asia/Shanghai
 
-    # Permission to commit back to repo
     permissions:
       contents: write
 
@@ -68,7 +66,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           WORKFLOW_MODE: ${{ github.event.inputs.mode || 'auto' }}
-          PUBLISH_TARGET: ${{ github.event.inputs.publish_target || 'feishu' }}
+          PUBLISH_TARGET: ${{ github.event.inputs.publish_target || 'telegram' }}
           SCHEDULE_EXPR: ${{ github.event.schedule || '' }}
         run: |
           if [ -n "$WORKFLOW_MODE" ] && [ "$WORKFLOW_MODE" != "auto" ]; then
@@ -126,17 +124,13 @@ jobs:
           fi
 
       - name: Commit Database Changes (Persistence)
-        # Only commit if we are not in a PR and the run succeeded
         if: success()
         run: |
           git config --global user.name 'Sentinel Bot'
           git config --global user.email 'bot@sentinel.ai'
 
-          # Add the DB file (Make sure it is NOT in .gitignore if you use this method!)
-          # Or force add it
           git add -f data/sentinel.db
 
-          # Check if there are changes
           if git diff --staged --quiet; then
             echo "No changes to commit."
           else

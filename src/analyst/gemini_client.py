@@ -2,12 +2,13 @@ from google import genai
 from google.genai import types
 from typing import Dict, Any, List, Optional
 import json
-import re
 from datetime import datetime
 from tenacity import retry, stop_after_attempt, wait_exponential
 from pydantic import BaseModel, Field, field_validator
 from src.utils.logger import logger
 from src.utils.config_loader import ConfigLoader
+from src.utils.json_parser import extract_json_from_text, parse_ai_response
+from src.utils.context_builder import build_intraday_context, build_morning_context
 
 
 # ============================================================
@@ -123,61 +124,16 @@ class GeminiClient:
         self.client = genai.Client(api_key=self.api_key)
 
     def _build_context(self, market_breadth: str, north_funds: float, indices: Dict, macro_news: Dict, portfolio: List[Dict], yesterday_context: Dict = None, scorecard: Dict = None, context_date: str = None) -> str:
-        """Constructs the prompt context (slim version for token efficiency)."""
-        portfolio_summary = []
-        for stock in portfolio:
-            entry = {
-                "Code": stock['code'],
-                "Name": stock['name'],
-                "Price": stock['current_price'],
-                "Change": f"{stock.get('pct_change', 0)}%",
-                "MA20": stock['ma20'],
-                "Bias": f"{round(stock.get('bias_pct', 0) * 100, 2)}%",
-                "Signal": stock.get('signal', 'N/A'),
-                "Confidence": stock.get('confidence', '中'),
-                "Tech": stock.get('tech_summary', ''),
-            }
-            news = stock.get('news', [])
-            if news:
-                entry["News"] = news[:3]
-            portfolio_summary.append(entry)
-
-        context = {
-            "Date": context_date or datetime.now().strftime('%Y-%m-%d'),
-            "Market_Breadth": market_breadth,
-            "North_Money": north_funds,
-            "Indices": {name: f"{'+' if d.get('change_pct',0)>0 else ''}{d.get('change_pct',0)}%"
-                        for name, d in indices.items()},
-            "Portfolio": portfolio_summary,
-        }
-
-        telegraph = macro_news.get("telegraph", [])
-        ai_tech = macro_news.get("ai_tech", [])
-        if telegraph or ai_tech:
-            context["News"] = {}
-            if telegraph:
-                context["News"]["财联社"] = telegraph[:5]
-            if ai_tech:
-                context["News"]["AI科技"] = ai_tech[:3]
-
-        if yesterday_context:
-            context["Yesterday_Plan"] = [
-                {"code": a.get("code"), "plan": a.get("tomorrow_plan", a.get("operation", ""))}
-                for a in yesterday_context.get('actions', [])
-            ]
-
-        if scorecard:
-            context["Signal_Track_Record"] = {
-                "summary": scorecard.get("summary_text", ""),
-                "yesterday": [
-                    {"code": e["code"], "signal": e["yesterday_signal"],
-                     "change": f"{e['today_change']}%", "result": e["result"]}
-                    for e in scorecard.get("yesterday_evaluation", [])
-                    if e["result"] != "NEUTRAL"
-                ]
-            }
-
-        return json.dumps(context, ensure_ascii=False, indent=1)
+        """Constructs the prompt context (slim version for token efficiency).
+        委托公共 context_builder 模块。
+        """
+        from src.utils.context_builder import _build_context
+        return _build_context(
+            market_breadth=market_breadth, north_funds=north_funds,
+            indices=indices, macro_news=macro_news, portfolio=portfolio,
+            yesterday_context=yesterday_context, scorecard=scorecard,
+            context_date=context_date,
+        )
 
     def _build_structured_config(self, system_prompt: str, response_schema: type[BaseModel]) -> types.GenerateContentConfig:
         return types.GenerateContentConfig(
@@ -199,7 +155,16 @@ class GeminiClient:
             if isinstance(parsed, dict):
                 return parsed
         text = getattr(response, "text", "") or ""
-        return self._parse_response(text)
+        result = extract_json_from_text(text)
+        if result is not None:
+            return result
+        logger.error(f"Failed to parse Gemini response as JSON. Raw text preview: {text[:500]}...")
+        return {
+            "market_sentiment": "解析错误",
+            "summary": "AI输出格式无效，请检查prompt配置",
+            "actions": [],
+            "_raw_text": text[:1000],
+        }
 
     def _generate_structured_content(
         self,
@@ -225,29 +190,7 @@ class GeminiClient:
         return (getattr(response, "text", "") or "").strip()
 
     def _build_intraday_context_json(self, market_data: Dict[str, Any]) -> str:
-        market_breadth = market_data.get('market_breadth', "Unknown")
-        north_funds = market_data.get('north_funds', 0.0)
-        portfolio = market_data.get('stocks', [])
-        indices = market_data.get('indices', {})
-        macro_news = market_data.get('macro_news', {})
-        yesterday_context = market_data.get('yesterday_context')
-        scorecard = market_data.get('signal_scorecard')
-        context_date = market_data.get('context_date')
-
-        structured_report = market_data.get("structured_report")
-        if structured_report:
-            return json.dumps({"Structured_Report": structured_report}, ensure_ascii=False, indent=1)
-
-        return self._build_context(
-            market_breadth,
-            north_funds,
-            indices,
-            macro_news,
-            portfolio,
-            yesterday_context,
-            scorecard,
-            context_date,
-        )
+        return build_intraday_context(market_data)
 
     def _analyze_intraday(self, market_data: Dict[str, Any], system_prompt: str, log_label: str) -> Dict[str, Any]:
         context_json = self._build_intraday_context_json(market_data)
@@ -286,20 +229,8 @@ class GeminiClient:
         Analyze with a custom system prompt (for close mode, etc.).
         🔧 增强: 使用Pydantic进行输出校验
         """
-        market_breadth = market_data.get('market_breadth', "Unknown")
-        north_funds = market_data.get('north_funds', 0.0)
-        portfolio = market_data.get('stocks', [])
-        indices = market_data.get('indices', {})
-        macro_news = market_data.get('macro_news', {})
-        scorecard = market_data.get('signal_scorecard')
-        context_date = market_data.get('context_date')
+        context_json = build_intraday_context(market_data)
 
-        structured_report = market_data.get("structured_report")
-        if structured_report:
-            context_json = json.dumps({"Structured_Report": structured_report}, ensure_ascii=False, indent=1)
-        else:
-            context_json = self._build_context(market_breadth, north_funds, indices, macro_news, portfolio, scorecard=scorecard, context_date=context_date)
-        
         logger.info("Sending request to Gemini (custom prompt)...")
         try:
             parsed = self._generate_structured_content(
@@ -315,97 +246,16 @@ class GeminiClient:
             raise
 
     def _parse_response(self, text: str) -> Dict[str, Any]:
-        """
-        🔧 增强版JSON解析器
-        问题: 原解析器找第一个{和最后一个}，当AI输出包含思考日志时会失败
-        解决:
-        1. 先尝试直接解析
-        2. 尝试提取markdown代码块中的JSON
-        3. 使用栈匹配找到最外层完整JSON对象
-        4. 降级返回错误结构
-        """
-        # 清理常见问题
-        text = text.strip()
-
-        # 1. 直接解析
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            pass
-
-        # 2. 提取 ```json ... ``` 代码块
-        json_block_pattern = r'```(?:json)?\s*(\{[\s\S]*?\})\s*```'
-        matches = re.findall(json_block_pattern, text)
-        for match in matches:
-            try:
-                return json.loads(match)
-            except json.JSONDecodeError:
-                continue
-
-        # 3. 栈匹配法：找到最外层完整的JSON对象
-        # 从后向前扫描，找到最后一个完整的 {...} 结构
-        def find_json_by_bracket_matching(s: str) -> str | None:
-            """使用括号匹配找到完整的JSON对象"""
-            # 找所有 { 的位置
-            brace_positions = [i for i, c in enumerate(s) if c == '{']
-
-            for start in brace_positions:
-                depth = 0
-                in_string = False
-                escape_next = False
-
-                for i in range(start, len(s)):
-                    c = s[i]
-
-                    if escape_next:
-                        escape_next = False
-                        continue
-
-                    if c == '\\' and in_string:
-                        escape_next = True
-                        continue
-
-                    if c == '"' and not escape_next:
-                        in_string = not in_string
-                        continue
-
-                    if in_string:
-                        continue
-
-                    if c == '{':
-                        depth += 1
-                    elif c == '}':
-                        depth -= 1
-                        if depth == 0:
-                            # 找到完整的JSON对象
-                            candidate = s[start:i+1]
-                            try:
-                                return json.loads(candidate)
-                            except json.JSONDecodeError:
-                                break  # 这个起点不行，尝试下一个
-            return None
-
-        result = find_json_by_bracket_matching(text)
-        if result:
+        """🔧 增强版JSON解析器（委托公共 json_parser 模块）。"""
+        result = extract_json_from_text(text)
+        if result is not None:
             return result
-
-        # 4. 最后尝试：简单的首{尾}匹配（兼容旧逻辑）
-        try:
-            start = text.find('{')
-            end = text.rfind('}') + 1
-            if start != -1 and end > start:
-                json_str = text[start:end]
-                return json.loads(json_str)
-        except json.JSONDecodeError as e:
-            logger.warning(f"Simple bracket extraction failed: {e}")
-
-        # 5. 降级返回
         logger.error(f"Failed to parse Gemini response as JSON. Raw text preview: {text[:500]}...")
         return {
             "market_sentiment": "解析错误",
             "summary": "AI输出格式无效，请检查prompt配置",
             "actions": [],
-            "_raw_text": text[:1000]  # 保留原始文本用于调试
+            "_raw_text": text[:1000],
         }
 
     def _validate_midday_response(self, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -443,32 +293,8 @@ class GeminiClient:
             return data
 
     def _build_morning_context(self, morning_data: Dict[str, Any]) -> str:
-        """Constructs the prompt context for morning mode."""
-        portfolio_summary = []
-        for stock in morning_data.get('stocks', []):
-            portfolio_summary.append({
-                "Code": stock.get('code'),
-                "Name": stock.get('name'),
-                "Last_Close": stock.get('last_close', 0),
-                "MA20": stock.get('ma20', 0),
-                "Bias": f"{round(stock.get('bias_pct', 0) * 100, 2)}%",
-                "MA20_Status": stock.get('ma20_status', 'NEAR'),
-                "Overnight_Drivers": stock.get('overnight_driver_str', ''),
-                "Opening_Expectation": stock.get('opening_expectation', 'FLAT'),
-            })
-
-        context = {
-            "Date": morning_data.get('context_date') or datetime.now().strftime('%Y-%m-%d'),
-            "Global_Indices": morning_data.get('global_indices', []),
-            "Commodities": morning_data.get('commodities', []),
-            "US_Treasury": morning_data.get('us_treasury', {}),
-            "Macro_News": {
-                "财联社电报": morning_data.get('macro_news', {}).get("telegraph", []),
-                "AI科技热点": morning_data.get('macro_news', {}).get("ai_tech", [])
-            },
-            "Portfolio": portfolio_summary,
-        }
-        return json.dumps(context, ensure_ascii=False, indent=2)
+        """Constructs the prompt context for morning mode (委托公共 context_builder)。"""
+        return build_morning_context(morning_data)
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
     def analyze_morning(self, morning_data: Dict[str, Any], system_prompt: str) -> Dict[str, Any]:

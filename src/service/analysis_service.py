@@ -9,7 +9,7 @@ from src.utils.logger import logger
 from src.utils.config_loader import ConfigLoader
 from src.collector.data_fetcher import DataCollector
 from src.processor.data_processor import DataProcessor
-from src.analyst.gemini_client import GeminiClient
+from src.analyst.hybrid_client import HybridAIClient
 from src.reporter.feishu_client import FeishuClient
 from src.reporter.telegram_client import TelegramClient
 from src.storage.database import SentinelDB
@@ -562,7 +562,7 @@ class AnalysisService:
                     "collection_status": ai_input.get("collection_status", {}),
                 }
             else:
-                analyst = GeminiClient()
+                analyst = HybridAIClient()
                 if mode == 'morning':
                     system_prompt = self.config['prompts'].get('morning_brief')
                     if system_prompt:
@@ -761,7 +761,7 @@ class AnalysisService:
         if not raw_data and not ai_result:
             return "没有找到缓存的分析数据。请先运行一次分析（python -m src.main --mode midday）再进行追问。"
 
-        analyst = GeminiClient()
+        analyst = HybridAIClient()
         qa_prompt = self.config['prompts'].get('qa_prompt', '')
         answer = analyst.ask_question(raw_data, ai_result, question, qa_prompt)
         return answer
@@ -1518,7 +1518,7 @@ class AnalysisService:
                 day_summary["indices"] = raw.get('indices')
             trend_context.append(day_summary)
 
-        analyst = GeminiClient()
+        analyst = HybridAIClient()
         trend_prompt = self.config['prompts'].get('trend_prompt', '')
         answer = analyst.ask_question(
             context_data={"trend_data": trend_context, "days": days},

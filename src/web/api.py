@@ -58,8 +58,8 @@ def init_routes(service: AnalysisService):
         if body:
             try:
                 params = json.loads(body)
-            except:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to parse request body: {e}")
         
         mode = params.get('mode', 'midday')
         dry_run = params.get('dry_run', False)

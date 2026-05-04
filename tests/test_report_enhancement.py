@@ -21,7 +21,8 @@ class TestReportEnhancement(unittest.TestCase):
                 "ma20": 1680.0,
                 "signal": "SAFE",
                 "confidence": "高",
-                "tech_summary": "[日线_MACD_多头_无背驰_0]"
+                "tech_summary": "[日线_MACD_多头_无背驰_0]",
+                "quote_status": "fresh"
             },
             {
                 "code": "300750",
@@ -31,7 +32,8 @@ class TestReportEnhancement(unittest.TestCase):
                 "ma20": 185.0,
                 "signal": "WATCH",
                 "confidence": "中",
-                "tech_summary": "[日线_MACD_空头_无背驰_0]"
+                "tech_summary": "[日线_MACD_空头_无背驰_0]",
+                "quote_status": "fresh"
             }
         ]
         self.ai_input = {

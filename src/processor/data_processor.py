@@ -416,6 +416,179 @@ class DataProcessor:
         self.risk_params = ConfigLoader().config.get('risk_management', {})
         self.ma_window = self.risk_params.get('ma_window', 20)
 
+    # ============================================================
+    # Indicator Sub-calculations (called by calculate_indicators)
+    # ============================================================
+
+    def _calculate_ma_indicators(self, combined_closes: List[float]) -> float:
+        """Calculate MA from stitched closes (均线指标)."""
+        if len(combined_closes) < self.ma_window:
+            return sum(combined_closes) / len(combined_closes)
+        return sum(combined_closes[-self.ma_window:]) / self.ma_window
+
+    def _calculate_bias_indicators(self, current_price: float, realtime_ma20: float) -> float:
+        """Calculate BIAS (乖离率): (Price - MA) / MA."""
+        return (current_price - realtime_ma20) / realtime_ma20
+
+    def _calculate_volume_indicators(
+        self,
+        volume: float,
+        avg_volume_5d: float,
+        history_df_filtered: pd.DataFrame,
+        vol_col,
+        full_closes: List[float],
+    ) -> Dict[str, Any]:
+        """
+        Calculate volume ratio, level, and continuous shrink trend (量能指标).
+
+        🔧 Uses intraday progress normalization: projects partial-day volume
+        to estimated full-day volume before comparing with 5-day average.
+        """
+        intraday_progress = get_intraday_progress()
+        MIN_PROGRESS_THRESHOLD = 0.1
+
+        if intraday_progress >= MIN_PROGRESS_THRESHOLD and avg_volume_5d > 0:
+            projected_daily_volume = volume / intraday_progress
+            volume_ratio = min(projected_daily_volume / avg_volume_5d, 10.0)
+        elif intraday_progress > 0 and intraday_progress < MIN_PROGRESS_THRESHOLD:
+            volume_ratio = 0.0
+        else:
+            volume_ratio = 0.0
+
+        continuous_shrink = False
+        if vol_col and len(history_df_filtered) >= 3:
+            all_past_vols = history_df_filtered[vol_col].tolist()
+            full_vols = all_past_vols + [volume]
+            v3, v2, v1 = all_past_vols[-3], all_past_vols[-2], all_past_vols[-1]
+            if v1 < v2 < v3:
+                continuous_shrink = True
+        else:
+            full_vols = [0] * len(full_closes)
+
+        volume_level = "无"
+        if volume_ratio > 1.5:
+            volume_level = "放量"
+        elif volume_ratio > 1.0:
+            volume_level = "平量"
+        elif volume_ratio > 0.8:
+            volume_level = "温和缩量"
+        elif volume_ratio > 0:
+            volume_level = "极度缩量"
+
+        return {
+            "volume_ratio": volume_ratio,
+            "volume_level": volume_level,
+            "continuous_shrink": continuous_shrink,
+            "full_vols": full_vols,
+        }
+
+    # ============================================================
+    # Signal Sub-calculations (called by generate_signals)
+    # ============================================================
+
+    def _build_feature_flags(
+        self, stock: Dict[str, Any], rsi_oversold: float, rsi_overbought: float, volume_ratio_high: float
+    ) -> set:
+        """Build feature flags from multi-dimensional indicators for rule matching."""
+        flags = set()
+
+        macd_data = stock.get('macd', {})
+        obv_data = stock.get('obv', {})
+        rsi = stock.get('rsi', 50)
+        bb_data = stock.get('bollinger', {})
+        volume_ratio = stock.get('volume_ratio', 1.0)
+
+        macd_trend = macd_data.get('trend', 'UNKNOWN')
+        macd_power = macd_data.get('power', 'UNKNOWN')
+        macd_div = macd_data.get('divergence', 'NONE')
+        obv_trend = obv_data.get('trend', 'UNKNOWN')
+        bb_position = bb_data.get('position', 'UNKNOWN')
+
+        if macd_trend in ("BULLISH", "GOLDEN_CROSS"): flags.add("MACD_BULLISH")
+        if macd_trend in ("BEARISH", "DEATH_CROSS"): flags.add("MACD_BEARISH")
+        if macd_trend == "GOLDEN_CROSS": flags.add("MACD_GOLDEN_CROSS")
+        if macd_power in ("WEAK", "SUPER_WEAK"): flags.add("MACD_WEAK")
+        if macd_div == "BOTTOM_DIV": flags.add("MACD_BOTTOM_DIV")
+        if macd_div == "TOP_DIV": flags.add("MACD_TOP_DIV")
+        if obv_trend == "INFLOW": flags.add("OBV_INFLOW")
+        if obv_trend == "OUTFLOW": flags.add("OBV_OUTFLOW")
+        if volume_ratio < 1.0: flags.add("VOLUME_SHRINK")
+        if volume_ratio > volume_ratio_high: flags.add("VOLUME_HIGH")
+        if rsi > rsi_overbought and bb_position == "ABOVE_UPPER": flags.add("RSI_BB_OVERBOUGHT")
+        if rsi > rsi_overbought: flags.add("RSI_OVERBOUGHT")
+        if rsi < rsi_oversold: flags.add("RSI_OVERSOLD")
+        if rsi < 50: flags.add("RSI_WEAK")
+        if bb_position == "BELOW_LOWER": flags.add("BB_BELOW_LOWER")
+        if bb_position == "ABOVE_UPPER": flags.add("BB_ABOVE_UPPER")
+
+        kdj_data = stock.get('kdj', {})
+        kdj_signal = kdj_data.get('signal', 'NEUTRAL')
+        if kdj_signal in ("OVERSOLD", "OVERSOLD_GOLDEN"): flags.add("KDJ_OVERSOLD")
+        if kdj_signal in ("OVERBOUGHT", "OVERBOUGHT_DEATH"): flags.add("KDJ_OVERBOUGHT")
+        if kdj_signal == "OVERSOLD_GOLDEN": flags.add("KDJ_OVERSOLD_GOLDEN")
+        if kdj_signal == "OVERBOUGHT_DEATH": flags.add("KDJ_OVERBOUGHT_DEATH")
+
+        atr_data = stock.get('atr', {})
+        atr_vol = atr_data.get('volatility', 'NORMAL')
+        if atr_vol == "HIGH_VOLATILE": flags.add("ATR_HIGH_VOLATILE")
+        if atr_vol == "LOW_VOLATILE": flags.add("ATR_LOW_VOLATILE")
+
+        if stock.get('continuous_shrink', False): flags.add("VOLUME_CONTINUOUS_SHRINK")
+
+        return flags
+
+    def _generate_sell_signals(
+        self, stock: Dict[str, Any], flags: set, signal: str
+    ) -> tuple:
+        """Generate sell-side signals (DANGER, WARNING) with confidence."""
+        confidence = "中"
+        if signal == "DANGER":
+            bearish_count = sum([
+                "MACD_BEARISH" in flags,
+                "MACD_WEAK" in flags,
+                "OBV_OUTFLOW" in flags,
+                "RSI_OVERSOLD" in flags,
+                "BB_BELOW_LOWER" in flags,
+            ])
+            confidence = "高" if bearish_count >= 3 else "中"
+        return signal, confidence
+
+    def _generate_watch_signals(
+        self, stock: Dict[str, Any], flags: set, signal: str
+    ) -> tuple:
+        """Generate watch signals (WATCH, OBSERVED, OVERBOUGHT) with confidence."""
+        confidence = "中"
+        if signal == "OVERBOUGHT":
+            overbought_count = sum([
+                "RSI_OVERBOUGHT" in flags,
+                "BB_ABOVE_UPPER" in flags,
+                "MACD_BEARISH" in flags,
+                "MACD_TOP_DIV" in flags
+            ])
+            confidence = "高" if overbought_count >= 2 else "中"
+        return signal, confidence
+
+    def _generate_buy_signals(
+        self, stock: Dict[str, Any], flags: set, signal: str, existing_confidence: str = "中"
+    ) -> tuple:
+        """Generate buy-side signals (SAFE, OPPORTUNITY, ACCUMULATE) with confidence."""
+        confidence = existing_confidence
+        if signal in ("OPPORTUNITY", "ACCUMULATE"):
+            bullish_count = sum([
+                "MACD_BOTTOM_DIV" in flags,
+                "MACD_GOLDEN_CROSS" in flags,
+                "OBV_INFLOW" in flags,
+                "KDJ_OVERSOLD_GOLDEN" in flags,
+                "RSI_OVERSOLD" in flags,
+                "BB_BELOW_LOWER" in flags,
+                "VOLUME_CONTINUOUS_SHRINK" in flags,
+            ])
+            if signal == "OPPORTUNITY" and bullish_count >= 3:
+                confidence = "高"
+            elif signal == "ACCUMULATE" and bullish_count >= 2:
+                confidence = "高"
+        return signal, confidence
+
     def calculate_indicators(self, stock_d: Dict[str, Any]) -> Dict[str, Any]:
         """
         Calculates dynamic indicators for a single stock.

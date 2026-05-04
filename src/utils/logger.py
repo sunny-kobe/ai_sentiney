@@ -2,6 +2,7 @@ import logging
 import sys
 import os
 from pathlib import Path
+from logging.handlers import RotatingFileHandler
 import colorlog
 
 def setup_logger(name: str = "sentinel") -> logging.Logger:
@@ -38,7 +39,12 @@ def setup_logger(name: str = "sentinel") -> logging.Logger:
     logger.addHandler(console_handler)
 
     # 2. File Handler (Detailed)
-    file_handler = logging.FileHandler(log_dir / "sentinel.log", encoding='utf-8')
+    file_handler = RotatingFileHandler(
+        log_dir / "sentinel.log",
+        maxBytes=10*1024*1024,  # 10MB
+        backupCount=5,
+        encoding='utf-8'
+    )
     file_handler.setLevel(logging.DEBUG)
     file_formatter = logging.Formatter(
         "%(asctime)s - [%(levelname)s] - %(name)s - %(filename)s:%(lineno)d - %(message)s"

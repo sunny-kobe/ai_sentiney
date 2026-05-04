@@ -127,10 +127,15 @@ class DataCollector:
     ]
 
     def __init__(self):
+        system_cfg = ConfigLoader.get_system_config()
         # GitHub Actions runners / Standard Cloud Instances (2-4 vCPUs)
-        self.executor = DaemonThreadPoolExecutor(max_workers=16)
+        thread_pool_size = system_cfg.get('thread_pool_size', 16)
+        self.executor = DaemonThreadPoolExecutor(max_workers=thread_pool_size)
         self.config = ConfigLoader().config
         self.state_file = "data/circuit_breaker_state.json"
+
+        collector_cfg = ConfigLoader.get_collector_config()
+        self.default_timeout = collector_cfg.get('timeout', 10)
 
         # Priority: Tencent -> Efinance -> AkShare
         self.sources = [TencentSource(), EfinanceSource(), AkshareSource()]
@@ -499,7 +504,7 @@ class DataCollector:
         Helper to run blocking calls in a thread executor with smart retry logic and timeout.
         """
         loop = asyncio.get_running_loop()
-        timeout = kwargs.pop('timeout', 5) # Default 5s timeout (Fail Fast)
+        timeout = kwargs.pop('timeout', self.default_timeout) # Default from config (Fail Fast)
         
         @retry(
             stop=stop_after_attempt(3), 

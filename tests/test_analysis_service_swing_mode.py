@@ -71,7 +71,7 @@ def test_run_analysis_swing_mode_uses_deterministic_report_without_gemini(monkey
         },
     )
     monkeypatch.setattr(
-        "src.service.analysis_service.GeminiClient",
+        "src.service.analysis_service.HybridAIClient",
         lambda: (_ for _ in ()).throw(AssertionError("Gemini should not be called in swing mode")),
     )
     monkeypatch.setattr(service.db, "save_record", lambda **_kwargs: None)

@@ -3,11 +3,14 @@ system:
   retry_count: 3
   timeout_seconds: 10
   timezone: "Asia/Shanghai"
+  thread_pool_size: 16
+  db_path: "data/sentinel.db"
   # Optional: Proxy URL (e.g., http://127.0.0.1:7890)
   # proxy: "http://127.0.0.1:7890"
 
 ai:
   model_name: "gemini-3.1-pro-preview"
+  timeout: 120
   # MiMo 主力模型（OpenAI 兼容接口）
   mimo:
     enabled: true
@@ -36,6 +39,14 @@ api_keys:
   feishu_webhook: "${FEISHU_WEBHOOK}"
   telegram_bot_token: "${TELEGRAM_BOT_TOKEN}"
   telegram_chat_id: "${TELEGRAM_CHAT_ID}"
+
+reporter:
+  feishu_timeout: 10
+  telegram_timeout: 10
+  telegram_max_length: 3900
+
+collector:
+  timeout: 10
 
 portfolio_state:
   cash_balance: 33091.73
@@ -113,6 +124,20 @@ risk_management:
     value:
       stop_loss_pct: -0.08
   ma_window: 20
+  # 涨跌停阈值 (%，含容差)
+  limit_thresholds:
+    up: 4.5       # ST股 ±5% (留0.5%容差)
+    down: 19.5    # 创业板/科创板 ±20% (留0.5%容差)
+    normal: 9.5   # 主板 ±10% (留0.5%容差)
+  # 波动率阈值 (ATR百分比)
+  volatility_thresholds:
+    high: 0.08    # atr_pct > 0.08 为高波动
+    low: 0.03     # atr_pct < 0.03 为低波动
+  # 量比等级阈值
+  volume_level_thresholds:
+    high: 1.5     # 量比 > 1.5 为放量
+    normal: 1.0   # 量比 > 1.0 为平量
+    shrink: 0.8   # 量比 > 0.8 为温和缩量
   # Bias thresholds for tiered signal generation (v2.0)
   bias_thresholds:
     watch: -0.01 # -1%

@@ -32,13 +32,14 @@ def test_publish_target_telegram_routes_to_telegram(monkeypatch, tmp_path):
             "stocks": [{"code": "600519", "name": "贵州茅台", "signal": "SAFE", "news": ["公司回购进展"]}],
         }
 
+    monkeypatch.setattr("src.service.analysis_service.should_run_market_report", lambda **kwargs: {"should_run": True})
     monkeypatch.setattr(service, "collect_and_process_data", _fake_collect)
     monkeypatch.setattr(service, "post_process_result", lambda result, _ai_input, mode='midday': result)
     monkeypatch.setattr(service.db, "get_last_close_analysis", lambda: None)
     monkeypatch.setattr(service.db, "save_record", lambda **_kwargs: None)
     monkeypatch.setattr(service, "_compute_signal_scorecard", lambda *args, **kwargs: None)
 
-    monkeypatch.setattr("src.service.analysis_service.GeminiClient", lambda: _DummyGemini())
+    monkeypatch.setattr("src.service.analysis_service.HybridAIClient", lambda: _DummyGemini())
 
     feishu = Mock()
     telegram = Mock()
@@ -65,13 +66,14 @@ def test_publish_target_default_routes_to_feishu(monkeypatch, tmp_path):
             "stocks": [{"code": "600519", "name": "贵州茅台", "signal": "SAFE", "news": ["公司回购进展"]}],
         }
 
+    monkeypatch.setattr("src.service.analysis_service.should_run_market_report", lambda **kwargs: {"should_run": True})
     monkeypatch.setattr(service, "collect_and_process_data", _fake_collect)
     monkeypatch.setattr(service, "post_process_result", lambda result, _ai_input, mode='midday': result)
     monkeypatch.setattr(service.db, "get_last_close_analysis", lambda: None)
     monkeypatch.setattr(service.db, "save_record", lambda **_kwargs: None)
     monkeypatch.setattr(service, "_compute_signal_scorecard", lambda *args, **kwargs: None)
 
-    monkeypatch.setattr("src.service.analysis_service.GeminiClient", lambda: _DummyGemini())
+    monkeypatch.setattr("src.service.analysis_service.HybridAIClient", lambda: _DummyGemini())
 
     feishu = Mock()
     telegram = Mock()
@@ -98,11 +100,12 @@ def test_publish_target_telegram_routes_close_to_telegram(monkeypatch, tmp_path)
             "stocks": [{"code": "600519", "name": "贵州茅台", "signal": "SAFE", "news": ["公司回购进展"]}],
         }
 
+    monkeypatch.setattr("src.service.analysis_service.should_run_market_report", lambda **kwargs: {"should_run": True})
     monkeypatch.setattr(service, "collect_and_process_data", _fake_collect)
     monkeypatch.setattr(service, "post_process_result", lambda result, _ai_input, mode='midday': result)
     monkeypatch.setattr(service.db, "save_record", lambda **_kwargs: None)
     monkeypatch.setattr(service, "_compute_signal_scorecard", lambda *args, **kwargs: None)
-    monkeypatch.setattr("src.service.analysis_service.GeminiClient", lambda: _DummyGemini())
+    monkeypatch.setattr("src.service.analysis_service.HybridAIClient", lambda: _DummyGemini())
 
     feishu = Mock()
     telegram = Mock()
@@ -129,10 +132,11 @@ def test_publish_target_telegram_routes_morning_to_telegram(monkeypatch, tmp_pat
             "stocks": [],
         }
 
+    monkeypatch.setattr("src.service.analysis_service.should_run_market_report", lambda **kwargs: {"should_run": True})
     monkeypatch.setattr(service, "collect_and_process_morning_data", _fake_collect_morning)
     monkeypatch.setattr(service, "post_process_result", lambda result, _ai_input, mode='morning': result)
     monkeypatch.setattr(service.db, "save_record", lambda **_kwargs: None)
-    monkeypatch.setattr("src.service.analysis_service.GeminiClient", lambda: _DummyGemini())
+    monkeypatch.setattr("src.service.analysis_service.HybridAIClient", lambda: _DummyGemini())
 
     feishu = Mock()
     telegram = Mock()
@@ -159,12 +163,13 @@ def test_publish_target_telegram_routes_preclose_to_telegram(monkeypatch, tmp_pa
             "stocks": [{"code": "600519", "name": "贵州茅台", "signal": "SAFE", "news": ["公司回购进展"]}],
         }
 
+    monkeypatch.setattr("src.service.analysis_service.should_run_market_report", lambda **kwargs: {"should_run": True})
     monkeypatch.setattr(service, "collect_and_process_data", _fake_collect)
     monkeypatch.setattr(service, "post_process_result", lambda result, _ai_input, mode='preclose': result)
     monkeypatch.setattr(service.db, "get_last_close_analysis", lambda: None)
     monkeypatch.setattr(service.db, "save_record", lambda **_kwargs: None)
     monkeypatch.setattr(service, "_compute_signal_scorecard", lambda *args, **kwargs: None)
-    monkeypatch.setattr("src.service.analysis_service.GeminiClient", lambda: _DummyGemini())
+    monkeypatch.setattr("src.service.analysis_service.HybridAIClient", lambda: _DummyGemini())
 
     feishu = Mock()
     telegram = Mock()

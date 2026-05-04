@@ -27,7 +27,7 @@ def test_replay_dry_run_skips_ai_call(tmp_path, monkeypatch):
     monkeypatch.setattr(service, "post_process_result", lambda result, _ai_input, mode="midday": result)
     monkeypatch.setattr(service.db, "save_record", lambda **_kwargs: None)
     monkeypatch.setattr(
-        "src.service.analysis_service.GeminiClient",
+        "src.service.analysis_service.HybridAIClient",
         lambda: (_ for _ in ()).throw(AssertionError("Gemini should not be called in replay dry-run")),
     )
 

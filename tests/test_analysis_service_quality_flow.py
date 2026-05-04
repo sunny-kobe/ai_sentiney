@@ -18,7 +18,7 @@ def test_run_analysis_blocks_when_input_quality_is_blocked(monkeypatch):
 
     monkeypatch.setattr("src.service.analysis_service.should_run_market_report", lambda **kwargs: {"should_run": True})
     monkeypatch.setattr(service, "collect_and_process_data", fake_collect)
-    monkeypatch.setattr("src.service.analysis_service.GeminiClient", lambda: (_ for _ in ()).throw(AssertionError("Gemini should not be called")))
+    monkeypatch.setattr("src.service.analysis_service.HybridAIClient", lambda: (_ for _ in ()).throw(AssertionError("Gemini should not be called")))
 
     result = asyncio.run(service.run_analysis(mode="midday"))
 
@@ -51,7 +51,7 @@ def test_run_analysis_degrades_to_structured_report_without_ai(monkeypatch):
 
     monkeypatch.setattr("src.service.analysis_service.should_run_market_report", lambda **kwargs: {"should_run": True})
     monkeypatch.setattr(service, "collect_and_process_data", fake_collect)
-    monkeypatch.setattr("src.service.analysis_service.GeminiClient", lambda: (_ for _ in ()).throw(AssertionError("Gemini should not be called")))
+    monkeypatch.setattr("src.service.analysis_service.HybridAIClient", lambda: (_ for _ in ()).throw(AssertionError("Gemini should not be called")))
 
     result = asyncio.run(service.run_analysis(mode="midday"))
 
@@ -87,7 +87,7 @@ def test_run_analysis_close_degraded_report_uses_human_readable_copy(monkeypatch
 
     monkeypatch.setattr("src.service.analysis_service.should_run_market_report", lambda **kwargs: {"should_run": True})
     monkeypatch.setattr(service, "collect_and_process_data", fake_collect)
-    monkeypatch.setattr("src.service.analysis_service.GeminiClient", lambda: (_ for _ in ()).throw(AssertionError("Gemini should not be called")))
+    monkeypatch.setattr("src.service.analysis_service.HybridAIClient", lambda: (_ for _ in ()).throw(AssertionError("Gemini should not be called")))
 
     result = asyncio.run(service.run_analysis(mode="close"))
 
@@ -130,7 +130,7 @@ def test_run_analysis_degraded_report_attaches_human_quality_detail_and_non_dupl
 
     monkeypatch.setattr("src.service.analysis_service.should_run_market_report", lambda **kwargs: {"should_run": True})
     monkeypatch.setattr(service, "collect_and_process_data", fake_collect)
-    monkeypatch.setattr("src.service.analysis_service.GeminiClient", lambda: (_ for _ in ()).throw(AssertionError("Gemini should not be called")))
+    monkeypatch.setattr("src.service.analysis_service.HybridAIClient", lambda: (_ for _ in ()).throw(AssertionError("Gemini should not be called")))
 
     result = asyncio.run(service.run_analysis(mode="preclose"))
 
@@ -221,7 +221,7 @@ def test_run_analysis_degrades_when_collection_state_is_degraded(monkeypatch):
 
     monkeypatch.setattr("src.service.analysis_service.should_run_market_report", lambda **kwargs: {"should_run": True})
     monkeypatch.setattr(service, "collect_and_process_data", fake_collect)
-    monkeypatch.setattr("src.service.analysis_service.GeminiClient", lambda: (_ for _ in ()).throw(AssertionError("Gemini should not be called")))
+    monkeypatch.setattr("src.service.analysis_service.HybridAIClient", lambda: (_ for _ in ()).throw(AssertionError("Gemini should not be called")))
 
     result = asyncio.run(service.run_analysis(mode="midday"))
 
@@ -317,7 +317,7 @@ def test_run_analysis_close_does_not_degrade_to_structured_report_when_only_supp
         },
     )
     monkeypatch.setattr(
-        "src.service.analysis_service.GeminiClient",
+        "src.service.analysis_service.HybridAIClient",
         lambda: (_ for _ in ()).throw(AssertionError("Gemini should not be called")),
     )
 
@@ -435,7 +435,7 @@ def test_run_analysis_midday_uses_rule_engine_without_gemini(monkeypatch):
         },
     )
     monkeypatch.setattr(
-        "src.service.analysis_service.GeminiClient",
+        "src.service.analysis_service.HybridAIClient",
         lambda: (_ for _ in ()).throw(AssertionError("Gemini should not be called")),
     )
 
@@ -524,7 +524,7 @@ def test_run_analysis_preclose_uses_rule_engine_without_gemini(monkeypatch):
         },
     )
     monkeypatch.setattr(
-        "src.service.analysis_service.GeminiClient",
+        "src.service.analysis_service.HybridAIClient",
         lambda: (_ for _ in ()).throw(AssertionError("Gemini should not be called")),
     )
 
@@ -609,7 +609,7 @@ def test_run_analysis_close_uses_rule_engine_without_gemini(monkeypatch):
         },
     )
     monkeypatch.setattr(
-        "src.service.analysis_service.GeminiClient",
+        "src.service.analysis_service.HybridAIClient",
         lambda: (_ for _ in ()).throw(AssertionError("Gemini should not be called")),
     )
 

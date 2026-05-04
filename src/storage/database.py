@@ -5,9 +5,13 @@ from pathlib import Path
 from typing import Dict, Optional, List, Any
 from contextlib import closing
 from src.utils.logger import logger
+from src.utils.config_loader import ConfigLoader
 
 class SentinelDB:
-    def __init__(self, db_path: str = "data/sentinel.db"):
+    def __init__(self, db_path: str = None):
+        if db_path is None:
+            system_cfg = ConfigLoader.get_system_config()
+            db_path = system_cfg.get('db_path', 'data/sentinel.db')
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()

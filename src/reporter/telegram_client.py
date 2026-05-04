@@ -37,6 +37,9 @@ class TelegramClient:
         keys = self.config.get("api_keys", {})
         self.bot_token = keys.get("telegram_bot_token", "")
         self.chat_id = keys.get("telegram_chat_id", "")
+        reporter_cfg = ConfigLoader.get_reporter_config()
+        self.timeout = reporter_cfg.get('telegram_timeout', 10)
+        self.max_length = reporter_cfg.get('telegram_max_length', 3900)
         if not self.bot_token or not self.chat_id:
             logger.warning("Telegram config missing (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID).")
 
@@ -68,10 +71,10 @@ class TelegramClient:
         url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
         payload = {
             "chat_id": self.chat_id,
-            "text": message[:3900],  # keep under Telegram message limit
+            "text": message[:self.max_length],  # keep under Telegram message limit
         }
         try:
-            response = requests.post(url, json=payload, timeout=10)
+            response = requests.post(url, json=payload, timeout=self.timeout)
             response.raise_for_status()
             resp = response.json()
             if not resp.get("ok"):

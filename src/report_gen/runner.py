@@ -9,6 +9,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict
 
+from chinese_calendar import is_workday
+
 from src.report_gen.data_aggregator import DataAggregator
 from src.report_gen.report_generator import ReportGenerator
 from src.reporter.telegram_client import TelegramClient
@@ -73,6 +75,12 @@ class AutoReportRunner:
 
     async def run(self, dry_run: bool = False, force: bool = False) -> Dict[str, Any]:
         """执行一次研报生成"""
+        # 非交易日直接跳过
+        today_date = datetime.now().date()
+        if not is_workday(today_date):
+            logger.info("📅 今日非交易日，跳过研报生成")
+            return {"generated": False, "reason": "non_trading_day", "skip_reason": "非交易日"}
+
         logger.info("🚀 启动自动研报生成...")
 
         # 检查今天是否已经生成过
