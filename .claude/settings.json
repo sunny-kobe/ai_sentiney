@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Edit",
+      "Write",
+      "Bash(python -m pytest *)",
+      "Bash(python -m src.*)",
+      "Bash(git *)",
+      "Bash(pip *)",
+      "Bash(source *)"
+    ],
+    "ask": [
+      "Bash(rm *)",
+      "Bash(curl *)"
+    ],
+    "deny": [
+      "Read(.env)",
+      "Bash(rm -rf *)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit(*.py)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd /Users/lan/Desktop/code/ai_sentiney && source .venv/bin/activate && python -m pytest tests/ -q --tb=no 2>&1 | tail -3"
+          }
+        ]
+      }
+    ]
+  }
+}

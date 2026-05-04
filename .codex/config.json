@@ -1,0 +1,23 @@
+{
+  "model": "gpt-5.5",
+  "approval": "never",
+  "sandbox": "workspace-write",
+  "reasoning_effort": "high",
+  "context": {
+    "include": [
+      "AGENTS.md",
+      "CLAUDE.md",
+      "config.yaml",
+      "requirements.txt",
+      "pyproject.toml"
+    ],
+    "exclude": [
+      ".env",
+      "data/",
+      ".venv/",
+      "__pycache__/",
+      "*.db",
+      ".coverage"
+    ]
+  }
+}
