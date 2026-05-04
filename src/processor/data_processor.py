@@ -420,15 +420,214 @@ class DataProcessor:
     # Indicator Sub-calculations (called by calculate_indicators)
     # ============================================================
 
-    def _calculate_ma_indicators(self, combined_closes: List[float]) -> float:
-        """Calculate MA from stitched closes (均线指标)."""
-        if len(combined_closes) < self.ma_window:
-            return sum(combined_closes) / len(combined_closes)
-        return sum(combined_closes[-self.ma_window:]) / self.ma_window
+    # ============================================================
+    # calculate_indicators() sub-methods
+    # ============================================================
 
-    def _calculate_bias_indicators(self, current_price: float, realtime_ma20: float) -> float:
-        """Calculate BIAS (乖离率): (Price - MA) / MA."""
-        return (current_price - realtime_ma20) / realtime_ma20
+    def _prepare_history_data(self, stock_d: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Extract and validate stock data, detect columns, filter history.
+
+        Returns:
+            dict with code, name, current_price, history_df_filtered,
+            close_col, open_col, high_col, low_col, vol_col, pct_change,
+            strategy, cost, shares, news, quote_status, history_status, news_status,
+            open_price, high, low, volume, avg_volume_5d, turnover_rate
+        Raises:
+            KeyError: if close column is missing
+            ValueError: if data is insufficient
+        """
+        code = stock_d.get('code')
+        name = stock_d.get('name')
+        current_price = stock_d.get('current_price', 0.0)
+        history_df = stock_d.get('history')
+
+        if current_price == 0 or history_df is None or history_df.empty:
+            raise ValueError(f"Insufficient data for {code}")
+
+        # Detect close column
+        if '收盘' in history_df.columns:
+            close_col = '收盘'
+        elif 'Close' in history_df.columns:
+            close_col = 'Close'
+        elif 'close' in history_df.columns:
+            close_col = 'close'
+        else:
+            layout_msg = str(history_df.columns.tolist())
+            logger.error(f"Missing close column in history: {layout_msg}")
+            raise KeyError("Missing close column")
+
+        # Filter out today's data to avoid double-counting in MA20
+        tz = ZoneInfo('Asia/Shanghai')
+        today = datetime.now(tz).date()
+
+        if 'date' in history_df.columns:
+            date_col = 'date'
+        elif '日期' in history_df.columns:
+            date_col = '日期'
+        else:
+            date_col = None
+
+        if date_col:
+            try:
+                history_df_filtered = history_df.copy()
+                history_df_filtered[date_col] = pd.to_datetime(history_df_filtered[date_col])
+                history_df_filtered = history_df_filtered[
+                    history_df_filtered[date_col].dt.date < today
+                ]
+            except Exception as e:
+                logger.warning(f"Date filtering failed for {code}: {e}, using original data")
+                history_df_filtered = history_df
+        else:
+            logger.warning(f"No date column found for {code}, unconditionally removing last row to match previous behavior safely")
+            history_df_filtered = history_df.iloc[:-1] if not history_df.empty else history_df
+            if len(history_df_filtered) < self.ma_window - 1:
+                logger.warning(f"Insufficient history after filtering for {code}: {len(history_df_filtered)}")
+
+        # Detect OHLCV columns
+        open_col = next((c for c in ['开盘', 'Open', 'open'] if c in history_df_filtered.columns), close_col)
+        high_col = next((c for c in ['最高', 'High', 'high'] if c in history_df_filtered.columns), close_col)
+        low_col = next((c for c in ['最低', 'Low', 'low'] if c in history_df_filtered.columns), close_col)
+        vol_col = next((c for c in ['成交量', 'Volume', 'volume'] if c in history_df_filtered.columns), None)
+
+        return {
+            "code": code,
+            "name": name,
+            "current_price": current_price,
+            "history_df_filtered": history_df_filtered,
+            "close_col": close_col,
+            "open_col": open_col,
+            "high_col": high_col,
+            "low_col": low_col,
+            "vol_col": vol_col,
+            "pct_change": stock_d.get('pct_change', 0.0),
+            "strategy": stock_d.get('strategy', 'trend'),
+            "cost": stock_d.get('cost', 0),
+            "shares": stock_d.get('shares', 0),
+            "news": stock_d.get('news', []),
+            "quote_status": stock_d.get('quote_status', 'missing'),
+            "history_status": stock_d.get('history_status', 'missing'),
+            "news_status": stock_d.get('news_status', 'missing'),
+            "open_price": stock_d.get('open_price', current_price),
+            "high": stock_d.get('high', current_price),
+            "low": stock_d.get('low', current_price),
+            "volume": stock_d.get('volume', 0.0),
+            "turnover_rate": stock_d.get('turnover_rate', 0.0),
+            "avg_volume_5d": stock_d.get('avg_volume_5d', 0.0),
+        }
+
+    def _calculate_all_indicators(
+        self,
+        combined_closes: List[float],
+        full_closes: List[float],
+        full_highs: List[float],
+        full_lows: List[float],
+        full_opens: List[float],
+        full_vols: List[float],
+        current_price: float,
+        volume: float,
+        avg_volume_5d: float,
+        history_df_filtered: pd.DataFrame,
+        vol_col,
+    ) -> Dict[str, Any]:
+        """Calculate all technical indicators (MA, bias, volume, MACD, RSI, BB, KDJ, ATR, OBV)."""
+        # MA20
+        if len(combined_closes) < self.ma_window:
+            realtime_ma20 = sum(combined_closes) / len(combined_closes)
+        else:
+            realtime_ma20 = sum(combined_closes[-self.ma_window:]) / self.ma_window
+
+        # Bias
+        bias_pct = (current_price - realtime_ma20) / realtime_ma20
+
+        # Volume indicators
+        vol_result = self._calculate_volume_indicators(
+            volume, avg_volume_5d, history_df_filtered, vol_col, full_closes
+        )
+
+        # Multi-dimensional indicators
+        ti_cfg = self.risk_params.get('technical_indicators', {})
+
+        macd_cfg = ti_cfg.get('macd', {})
+        macd_result = analyze_macd_advanced(
+            full_closes,
+            fast=macd_cfg.get('fast_period', 12),
+            slow=macd_cfg.get('slow_period', 26),
+            signal=macd_cfg.get('signal_period', 9),
+        )
+
+        obv_result = calculate_obv(full_closes, full_opens, full_vols, ma_period=10)
+
+        rsi_cfg = ti_cfg.get('rsi', {})
+        rsi_value = calculate_rsi(full_closes, period=rsi_cfg.get('period', 14))
+
+        bb_cfg = ti_cfg.get('bollinger', {})
+        bb_result = calculate_bollinger(
+            full_closes,
+            window=bb_cfg.get('window', 20),
+            num_std=bb_cfg.get('num_std', 2),
+        )
+
+        kdj_result = calculate_kdj(full_highs, full_lows, full_closes)
+        atr_result = calculate_atr(full_highs, full_lows, full_closes)
+
+        return {
+            "realtime_ma20": round(realtime_ma20, 2),
+            "bias_pct": round(bias_pct, 4),
+            "volume_ratio": round(vol_result["volume_ratio"], 2),
+            "volume_level": vol_result["volume_level"],
+            "continuous_shrink": vol_result["continuous_shrink"],
+            "macd": macd_result,
+            "obv": obv_result,
+            "rsi": rsi_value,
+            "bollinger": bb_result,
+            "kdj": kdj_result,
+            "atr": atr_result,
+        }
+
+    def _determine_status(self, bias_pct: float, pct_change: float) -> str:
+        """Determine preliminary status from bias and price change."""
+        if bias_pct <= -0.05:
+            return "DANGER"
+        elif bias_pct >= 0.05:
+            return "OVERBOUGHT"
+        elif bias_pct <= -0.03:
+            return "WARNING"
+        return "NORMAL"
+
+    def _build_indicator_result(
+        self,
+        prep: Dict[str, Any],
+        indicators: Dict[str, Any],
+        status: str,
+    ) -> Dict[str, Any]:
+        """Assemble the final indicator result dict."""
+        return {
+            "code": prep["code"],
+            "name": prep["name"],
+            "current_price": round(prep["current_price"], 2),
+            "pct_change": prep["pct_change"],
+            "ma20": indicators["realtime_ma20"],
+            "bias_pct": indicators["bias_pct"],
+            "volume": round(prep["volume"] / 10000, 2),
+            "turnover_rate": round(prep["turnover_rate"], 2),
+            "volume_ratio": indicators["volume_ratio"],
+            "volume_level": indicators["volume_level"],
+            "continuous_shrink": indicators["continuous_shrink"],
+            "macd": indicators["macd"],
+            "obv": indicators["obv"],
+            "rsi": indicators["rsi"],
+            "bollinger": indicators["bollinger"],
+            "kdj": indicators["kdj"],
+            "atr": indicators["atr"],
+            "strategy": prep["strategy"],
+            "cost": prep["cost"],
+            "shares": prep["shares"],
+            "news": prep["news"],
+            "quote_status": prep["quote_status"],
+            "history_status": prep["history_status"],
+            "news_status": prep["news_status"],
+        }
 
     def _calculate_volume_indicators(
         self,
@@ -597,7 +796,7 @@ class DataProcessor:
         code = stock_d.get('code')
         name = stock_d.get('name')
         current_price = stock_d.get('current_price', 0.0)
-        history_df = stock_d.get('history') # DataFrame
+        history_df = stock_d.get('history')
 
         if current_price == 0 or history_df is None or history_df.empty:
             logger.warning(f"Insufficient data for {code} to calculate indicators.")
@@ -619,210 +818,43 @@ class DataProcessor:
             }
 
         try:
-            # 1. Prepare Data for Stitching
-            # Hist Data usually has '收盘' or 'Close'
-            # AkShare daily columns:日期, 开盘, 收盘, 最高, 最低, 成交量...
-            # We need the last N-1 days close prices.
-            
-            # Ensure we are using the right column
-            if '收盘' in history_df.columns:
-                close_col = '收盘'
-            elif 'Close' in history_df.columns:
-                close_col = 'Close'
-            elif 'close' in history_df.columns:
-                close_col = 'close'
-            else:
-                layout_msg = str(history_df.columns.tolist())
-                logger.error(f"Missing close column in history: {layout_msg}")
-                raise KeyError("Missing close column")
-            
-            # Get last (Window - 1) closing prices
-            # 🔧 修复: 确保历史数据不包含今日，避免MA20重复计算
-            # 问题: 腾讯K线API可能返回当日未完成的K线，导致今日价格被计算两次
-            # 解决: 按日期过滤，只保留今日之前的数据
-            tz = ZoneInfo('Asia/Shanghai')
-            today = datetime.now(tz).date()
+            # 1. Prepare data
+            prep = self._prepare_history_data(stock_d)
+            hff = prep["history_df_filtered"]
+            close_col = prep["close_col"]
 
-            # 确保有日期列用于过滤
-            if 'date' in history_df.columns:
-                date_col = 'date'
-            elif '日期' in history_df.columns:
-                date_col = '日期'
-            else:
-                date_col = None
+            past_closes = hff[close_col].tail(self.ma_window - 1).tolist()
+            combined_closes = past_closes + [prep["current_price"]]
+            all_past_closes = hff[close_col].tolist()
+            full_closes = all_past_closes + [prep["current_price"]]
 
-            if date_col:
-                # 转换日期列并过滤
-                try:
-                    history_df_filtered = history_df.copy()
-                    history_df_filtered[date_col] = pd.to_datetime(history_df_filtered[date_col])
-                    history_df_filtered = history_df_filtered[
-                        history_df_filtered[date_col].dt.date < today
-                    ]
-                except Exception as e:
-                    logger.warning(f"Date filtering failed for {code}: {e}, using original data")
-                    history_df_filtered = history_df
-            else:
-                # 无日期列时，无论行数多少，都保守地去掉最后一行，防止是今日数据
-                logger.warning(f"No date column found for {code}, unconditionally removing last row to match previous behavior safely")
-                history_df_filtered = history_df.iloc[:-1] if not history_df.empty else history_df
-                
-                if len(history_df_filtered) < self.ma_window - 1:
-                     logger.warning(f"Insufficient history after filtering for {code}: {len(history_df_filtered)}")
+            # Build full OHLCV arrays for multi-dimensional indicators
+            all_past_opens = hff[prep["open_col"]].tolist()
+            full_opens = all_past_opens + [prep["open_price"]]
+            all_past_highs = hff[prep["high_col"]].tolist()
+            full_highs = all_past_highs + [prep["high"]]
+            all_past_lows = hff[prep["low_col"]].tolist()
+            full_lows = all_past_lows + [prep["low"]]
 
-            past_closes = history_df_filtered[close_col].tail(self.ma_window - 1).tolist()
-
-            # Stitch
-            combined_closes = past_closes + [current_price]
-
-            # Full history closes for multi-dimensional indicators (MACD needs 35+ data points)
-            all_past_closes = history_df_filtered[close_col].tolist()
-            full_closes = all_past_closes + [current_price]
-            
-            # 2. Calculate Realtime MA20
-            if len(combined_closes) < self.ma_window:
-                # Not enough data (e.g. IPO < 20 days)
-                realtime_ma20 = sum(combined_closes) / len(combined_closes)
-            else:
-                realtime_ma20 = sum(combined_closes[-self.ma_window:]) / self.ma_window
-
-            # 3. Calculate Bias (乖离率)
-            # Bias = (Price - MA20) / MA20
-            bias_pct = (current_price - realtime_ma20) / realtime_ma20
-
-            # 4. Pass through volume data and calculate volume ratio (日内归一化)
-            volume = stock_d.get('volume', 0.0)
-            turnover_rate = stock_d.get('turnover_rate', 0.0)
-            avg_volume_5d = stock_d.get('avg_volume_5d', 0.0)
-            
-            # 🔧 修复: 日内量比归一化
-            # 问题: 午盘时 volume 只有半天数据，直接除以5日均量会低估50%
-            # 解决: 将当前成交量换算为"预估全天成交量"
-            
-            intraday_progress = get_intraday_progress()
-            MIN_PROGRESS_THRESHOLD = 0.1 # 至少交易24分钟才有意义，否则放大倍数过大
-            
-            if intraday_progress >= MIN_PROGRESS_THRESHOLD and avg_volume_5d > 0:
-                projected_daily_volume = volume / intraday_progress
-                # 限制最大倍数，防止开盘极端数据干扰
-                volume_ratio = min(projected_daily_volume / avg_volume_5d, 10.0)
-            elif intraday_progress > 0 and intraday_progress < MIN_PROGRESS_THRESHOLD:
-                # 进度太小，不计算量比 (或者返回默认1.0)
-                volume_ratio = 0.0 # 标记为无效/数据不足
-            else:
-                volume_ratio = 0.0
-
-            # Extract additional properties for OBV calculation
-            if '开盘' in history_df_filtered.columns:
-                open_col = '开盘'
-            elif 'Open' in history_df_filtered.columns:
-                open_col = 'Open'
-            elif 'open' in history_df_filtered.columns:
-                open_col = 'open'
-            else:
-                open_col = close_col # fallback
-                
-            # Add High and Low extraction
-            high_col = next((c for c in ['最高', 'High', 'high'] if c in history_df_filtered.columns), close_col)
-            low_col = next((c for c in ['最低', 'Low', 'low'] if c in history_df_filtered.columns), close_col)
-                
-            if '成交量' in history_df_filtered.columns:
-                vol_col = '成交量'
-            elif 'Volume' in history_df_filtered.columns:
-                vol_col = 'Volume'
-            elif 'volume' in history_df_filtered.columns:
-                vol_col = 'volume'
-            else:
-                vol_col = None
-
-            all_past_opens = history_df_filtered[open_col].tolist()
-            full_opens = all_past_opens + [stock_d.get('open_price', current_price)]
-            
-            all_past_highs = history_df_filtered[high_col].tolist()
-            full_highs = all_past_highs + [stock_d.get('high', current_price)]
-            
-            all_past_lows = history_df_filtered[low_col].tolist()
-            full_lows = all_past_lows + [stock_d.get('low', current_price)]
-
-            # Detect shrinking volume trend
-            continuous_shrink = False
-            if vol_col and len(history_df_filtered) >= 3:
-                all_past_vols = history_df_filtered[vol_col].tolist()
-                full_vols = all_past_vols + [volume]
-                
-                # Check if last 3 days were shrinking
-                v3, v2, v1 = all_past_vols[-3], all_past_vols[-2], all_past_vols[-1]
-                if v1 < v2 < v3:
-                    continuous_shrink = True
+            if prep["vol_col"] and len(hff) >= 3:
+                all_past_vols = hff[prep["vol_col"]].tolist()
+                full_vols = all_past_vols + [prep["volume"]]
             else:
                 full_vols = [0] * len(full_closes)
 
-            # Categorize volume ratio
-            volume_level = "无"
-            if volume_ratio > 1.5:
-                volume_level = "放量"
-            elif volume_ratio > 1.0:
-                volume_level = "平量"
-            elif volume_ratio > 0.8:
-                volume_level = "温和缩量"
-            elif volume_ratio > 0:
-                volume_level = "极度缩量"
-
-            # 5. Multi-dimensional indicators (Advanced MACD / RSI / Bollinger / OBV)
-            ti_cfg = self.risk_params.get('technical_indicators', {})
-
-            macd_cfg = ti_cfg.get('macd', {})
-            macd_result = analyze_macd_advanced(
-                full_closes,
-                fast=macd_cfg.get('fast_period', 12),
-                slow=macd_cfg.get('slow_period', 26),
-                signal=macd_cfg.get('signal_period', 9),
-            )
-            
-            obv_result = calculate_obv(
-                full_closes, full_opens, full_vols,
-                ma_period=10
+            # 2. Calculate all indicators
+            indicators = self._calculate_all_indicators(
+                combined_closes, full_closes, full_highs, full_lows,
+                full_opens, full_vols, prep["current_price"],
+                prep["volume"], prep["avg_volume_5d"],
+                hff, prep["vol_col"],
             )
 
-            rsi_cfg = ti_cfg.get('rsi', {})
-            rsi_value = calculate_rsi(full_closes, period=rsi_cfg.get('period', 14))
+            # 3. Determine preliminary status
+            status = self._determine_status(indicators["bias_pct"], prep["pct_change"])
 
-            bb_cfg = ti_cfg.get('bollinger', {})
-            bb_result = calculate_bollinger(
-                full_closes,
-                window=bb_cfg.get('window', 20),
-                num_std=bb_cfg.get('num_std', 2),
-            )
-            
-            kdj_result = calculate_kdj(full_highs, full_lows, full_closes)
-            atr_result = calculate_atr(full_highs, full_lows, full_closes)
-
-            return {
-                "code": code,
-                "name": name,
-                "current_price": round(current_price, 2),
-                "pct_change": stock_d.get('pct_change', 0.0),
-                "ma20": round(realtime_ma20, 2),
-                "bias_pct": round(bias_pct, 4),
-                "volume": round(volume / 10000, 2),
-                "turnover_rate": round(turnover_rate, 2),
-                "volume_ratio": round(volume_ratio, 2),
-                "volume_level": volume_level,
-                "continuous_shrink": continuous_shrink,
-                "macd": macd_result,
-                "obv": obv_result,
-                "rsi": rsi_value,
-                "bollinger": bb_result,
-                "kdj": kdj_result,
-                "atr": atr_result,
-                "strategy": stock_d.get('strategy', 'trend'),
-                "cost": stock_d.get('cost', 0),
-                "shares": stock_d.get('shares', 0),
-                "news": stock_d.get('news', []),
-                "quote_status": stock_d.get('quote_status', 'missing'),
-                "history_status": stock_d.get('history_status', 'missing'),
-                "news_status": stock_d.get('news_status', 'missing'),
-            }
+            # 4. Assemble result
+            return self._build_indicator_result(prep, indicators, status)
 
         except Exception as e:
             logger.error(f"Error calculating indicators for {code}: {e}")
