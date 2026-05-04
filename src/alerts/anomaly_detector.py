@@ -1,6 +1,6 @@
 """
 市场异动检测模块
-检测：放量、急涨急跌、换手率异常
+检测：放量、急涨急跌、换手率异常、涨跌停
 """
 
 import asyncio
@@ -18,7 +18,7 @@ class Anomaly:
     """单个异动事件"""
     code: str
     name: str
-    anomaly_type: str  # volume_spike | sharp_move | high_turnover
+    anomaly_type: str  # volume_spike | sharp_move | high_turnover | limit_move
     severity: str  # warning | alert | critical
     current_price: float
     pct_change: float
@@ -138,7 +138,54 @@ class AnomalyDetector:
                 detail=f"换手率 {turnover:.1f}% 异常偏高",
             ))
 
+        # 4. 涨跌停检测
+        limit_pct, board_type = self._get_limit_info(code, name)
+        if limit_pct is not None:
+            tolerance = 0.1  # 距涨停/跌停 0.1% 以内视为触及
+            if pct >= limit_pct - tolerance:
+                anomalies.append(Anomaly(
+                    code=code, name=name,
+                    anomaly_type="limit_move",
+                    severity="critical",
+                    current_price=price,
+                    pct_change=pct,
+                    volume=volume,
+                    turnover_rate=turnover,
+                    detail=f"涨停 +{pct:.2f}%（{board_type}，涨停板 +{limit_pct:.0f}%）",
+                ))
+            elif pct <= -(limit_pct - tolerance):
+                anomalies.append(Anomaly(
+                    code=code, name=name,
+                    anomaly_type="limit_move",
+                    severity="alert",
+                    current_price=price,
+                    pct_change=pct,
+                    volume=volume,
+                    turnover_rate=turnover,
+                    detail=f"跌停 {pct:.2f}%（{board_type}，跌停板 -{limit_pct:.0f}%）",
+                ))
+
         return anomalies
+
+    @staticmethod
+    def _get_limit_info(code: str, name: str) -> tuple[Optional[float], str]:
+        """根据股票代码返回涨跌停幅度（%）和板块名称。
+
+        Returns:
+            (limit_pct, board_type) 或 (None, "") 如果无法判断（如 ETF）。
+        """
+        # ST / *ST 股票统一 5%
+        if "ST" in name.upper():
+            return 5.0, "ST"
+
+        if code.startswith("30"):
+            return 20.0, "创业板"
+        if code.startswith("68"):
+            return 20.0, "科创板"
+        if code.startswith(("60", "00")):
+            return 10.0, "主板"
+
+        return None, ""
 
     async def scan(self) -> List[Anomaly]:
         """扫描所有标的，返回异动列表"""

@@ -198,6 +198,102 @@ class TestDetectHighTurnover:
 
 
 # ---------------------------------------------------------------------------
+# _detect_anomalies – limit move (涨跌停)
+# ---------------------------------------------------------------------------
+
+class TestDetectLimitMove:
+    def test_main_board_limit_up(self, detector):
+        """主板 60xxxx 涨停 +10%"""
+        target = {"code": "600519", "name": "贵州茅台"}
+        quote = {"name": "贵州茅台", "current_price": 1800.0, "pct_change": 10.0,
+                 "volume": 50000, "turnover_rate": 1.0}
+        anomalies = detector._detect_anomalies(target, quote, avg_volume=None)
+        lm = [a for a in anomalies if a.anomaly_type == "limit_move"]
+        assert len(lm) == 1
+        assert lm[0].severity == "critical"
+        assert "涨停" in lm[0].detail
+        assert "主板" in lm[0].detail
+
+    def test_main_board_limit_down(self, detector):
+        """主板 00xxxx 跌停 -10%"""
+        target = {"code": "000001", "name": "平安银行"}
+        quote = {"name": "平安银行", "current_price": 10.0, "pct_change": -10.0,
+                 "volume": 50000, "turnover_rate": 1.0}
+        anomalies = detector._detect_anomalies(target, quote, avg_volume=None)
+        lm = [a for a in anomalies if a.anomaly_type == "limit_move"]
+        assert len(lm) == 1
+        assert lm[0].severity == "alert"
+        assert "跌停" in lm[0].detail
+        assert "主板" in lm[0].detail
+
+    def test_chinext_limit_up(self, detector):
+        """创业板 30xxxx 涨停 +20%"""
+        target = {"code": "300750", "name": "宁德时代"}
+        quote = {"name": "宁德时代", "current_price": 250.0, "pct_change": 20.0,
+                 "volume": 80000, "turnover_rate": 2.0}
+        anomalies = detector._detect_anomalies(target, quote, avg_volume=None)
+        lm = [a for a in anomalies if a.anomaly_type == "limit_move"]
+        assert len(lm) == 1
+        assert lm[0].severity == "critical"
+        assert "创业板" in lm[0].detail
+
+    def test_star_market_limit_up(self, detector):
+        """科创板 68xxxx 涨停 +20%"""
+        target = {"code": "688981", "name": "中芯国际"}
+        quote = {"name": "中芯国际", "current_price": 80.0, "pct_change": 20.0,
+                 "volume": 60000, "turnover_rate": 3.0}
+        anomalies = detector._detect_anomalies(target, quote, avg_volume=None)
+        lm = [a for a in anomalies if a.anomaly_type == "limit_move"]
+        assert len(lm) == 1
+        assert "科创板" in lm[0].detail
+
+    def test_st_stock_limit_up(self, detector):
+        """ST 股票涨停 +5%"""
+        target = {"code": "600000", "name": "ST 浦发"}
+        quote = {"name": "ST 浦发", "current_price": 3.5, "pct_change": 5.0,
+                 "volume": 20000, "turnover_rate": 0.5}
+        anomalies = detector._detect_anomalies(target, quote, avg_volume=None)
+        lm = [a for a in anomalies if a.anomaly_type == "limit_move"]
+        assert len(lm) == 1
+        assert "ST" in lm[0].detail
+
+    def test_within_tolerance(self, detector):
+        """距涨停 0.05%（< 0.1% 容差）应视为涨停"""
+        target = {"code": "600519", "name": "贵州茅台"}
+        quote = {"name": "贵州茅台", "current_price": 1800.0, "pct_change": 9.95,
+                 "volume": 50000, "turnover_rate": 1.0}
+        anomalies = detector._detect_anomalies(target, quote, avg_volume=None)
+        lm = [a for a in anomalies if a.anomaly_type == "limit_move"]
+        assert len(lm) == 1
+
+    def test_outside_tolerance(self, detector):
+        """距涨停 0.2%（> 0.1% 容差）不应视为涨停"""
+        target = {"code": "600519", "name": "贵州茅台"}
+        quote = {"name": "贵州茅台", "current_price": 1800.0, "pct_change": 9.8,
+                 "volume": 50000, "turnover_rate": 1.0}
+        anomalies = detector._detect_anomalies(target, quote, avg_volume=None)
+        assert [a for a in anomalies if a.anomaly_type == "limit_move"] == []
+
+    def test_etf_no_limit(self, detector):
+        """ETF 没有涨跌停"""
+        target = {"code": "510500", "name": "中证500ETF"}
+        quote = {"name": "中证500ETF", "current_price": 7.0, "pct_change": 10.0,
+                 "volume": 50000, "turnover_rate": 1.0}
+        anomalies = detector._detect_anomalies(target, quote, avg_volume=None)
+        assert [a for a in anomalies if a.anomaly_type == "limit_move"] == []
+
+    def test_limit_up_also_triggers_sharp_move(self, detector):
+        """涨停同时也会触发 sharp_move"""
+        target = {"code": "600519", "name": "贵州茅台"}
+        quote = {"name": "贵州茅台", "current_price": 1800.0, "pct_change": 10.0,
+                 "volume": 50000, "turnover_rate": 1.0}
+        anomalies = detector._detect_anomalies(target, quote, avg_volume=None)
+        types = {a.anomaly_type for a in anomalies}
+        assert "limit_move" in types
+        assert "sharp_move" in types
+
+
+# ---------------------------------------------------------------------------
 # _detect_anomalies – combined scenarios
 # ---------------------------------------------------------------------------
 
