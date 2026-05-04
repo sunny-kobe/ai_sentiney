@@ -1,28 +1,38 @@
-# AI Agent 协同工作流指南
+# AI Agent 协同工作流指南 v2
 
 > 编排者（Hermes）+ 执行者（Claude Code / Codex）的最佳实践
 
 ## 模式概述
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    用户（你）                             │
-│                      ↓ 指令                              │
-│  ┌─────────────────────────────────────────────────────┐ │
-│  │              编排者（Hermes）                        │ │
-│  │  • 任务规划        • 进度追踪                        │ │
-│  │  • 上下文管理      • 结果验证                        │ │
-│  │  • 错误恢复        • 成本控制                        │ │
-│  └───────────────┬─────────────────┬───────────────────┘ │
-│                  ↓                 ↓                      │
-│  ┌───────────────┐   ┌───────────────┐                   │
-│  │ Claude Code   │   │    Codex      │                   │
-│  │  • 读代码     │   │  • 读代码     │                   │
-│  │  • 改代码     │   │  • 改代码     │                   │
-│  │  • 跑测试     │   │  • 跑测试     │                   │
-│  └───────────────┘   └───────────────┘                   │
-└─────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                         用户（你）                           │
+│                           ↓ 指令                            │
+│  ┌─────────────────────────────────────────────────────────┐│
+│  │                  Hermes（编排者）                        ││
+│  │                                                         ││
+│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐              ││
+│  │  │ 任务规划  │  │ 进度追踪  │  │ 结果验证  │              ││
+│  │  └──────────┘  └──────────┘  └──────────┘              ││
+│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐              ││
+│  │  │ 上下文管理│  │ 错误恢复  │  │ 成本控制  │              ││
+│  │  └──────────┘  └──────────┘  └──────────┘              ││
+│  └───────────────────────┬─────────────────────────────────┘│
+│                          ↓                                   │
+│  ┌──────────────────────────────────────────────────────────┐│
+│  │              Claude Code + SuperClaude                   ││
+│  │                                                          ││
+│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐               ││
+│  │  │ 读代码   │  │ 改代码   │  │ 跑测试   │               ││
+│  │  └──────────┘  └──────────┘  └──────────┘               ││
+│  │                                                          ││
+│  │  MCP: Tavily / Context7 / Memory / GitHub / Sequential   ││
+│  │  Agents: python-expert / quality-engineer / ...          ││
+│  └──────────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────┘
 ```
+
+---
 
 ## 编排者规则（Hermes）
 
@@ -34,18 +44,12 @@
 小任务 → 传给执行者
 ```
 
-**示例**：
-```
-用户："优化整个项目"
-→ 第一批：紧急修复（测试、安全）
-→ 第二批：架构优化（重构、消除重复）
-→ 第三批：测试补全（覆盖率）
-→ 第四批：依赖管理（锁定版本）
-```
+**原则**：
+- **INVEST**：Independent、Negotiable、Valuable、Estimable、Small、Testable
+- **垂直切片**：按功能切分，不按技术层切分
+- **风险前置**：最不确定的部分先做
 
 ### 2. 上下文传递模板
-
-传给执行者的任务应包含：
 
 ```markdown
 ## 目标
@@ -81,6 +85,8 @@
 - ❌ 遇到什么问题
 - 📊 关键数据（测试数、覆盖率等）
 
+---
+
 ## 执行者规则（Claude Code / Codex）
 
 ### 1. 接收任务后
@@ -112,6 +118,163 @@ python -m pytest tests/ -q
                               → 修复失败？→ 报告给编排者
 ```
 
+---
+
+## 四大改进模式
+
+### 1. TDD 模式（测试驱动开发）
+
+**原则**：先写测试，再写代码
+
+**流程**：
+```
+Step 1: Hermes 让 Claude Code 写测试
+        "为 XXX 功能写测试，覆盖正常/边界/错误场景"
+        ↓
+Step 2: Hermes 验证测试失败
+        python -m pytest tests/test_xxx.py -q
+        确认：FAIL（预期）
+        ↓
+Step 3: Hermes 让 Claude Code 写代码
+        "实现 XXX 功能，让所有测试通过"
+        ↓
+Step 4: Hermes 验证测试通过
+        python -m pytest tests/ -q
+        确认：PASS
+```
+
+**适用场景**：
+- 新功能开发
+- 边界条件处理
+- 需要明确规格的任务
+
+**示例**：
+```
+Hermes: "为涨跌停检测写测试，覆盖主板/创业板/科创板/ST"
+Claude Code: 写 10 个测试
+Hermes: 验证测试失败（功能未实现）
+Hermes: "实现涨跌停检测，让所有测试通过"
+Claude Code: 实现功能
+Hermes: 验证测试通过（300 passed）
+```
+
+### 2. 并行模式
+
+**原则**：无依赖任务同时执行
+
+**流程**：
+```
+Step 1: Hermes 分析任务依赖关系
+        Task A: 修改 alerts 模块
+        Task B: 修改 radar 模块
+        Task C: 修改 reporter 模块
+        → 三者无依赖，可并行
+        ↓
+Step 2: Hermes 同时启动多个 Claude Code
+        Claude Code 1 → alerts（worktree/alerts）
+        Claude Code 2 → radar（worktree/radar）
+        Claude Code 3 → reporter（worktree/reporter）
+        ↓
+Step 3: Hermes 等待所有完成
+        ↓
+Step 4: Hermes 合并结果
+        git merge worktree/alerts
+        git merge worktree/radar
+        git merge worktree/reporter
+        ↓
+Step 5: Hermes 验证集成测试
+        python -m pytest tests/ -q
+```
+
+**适用场景**：
+- 多模块独立修改
+- 批量任务处理
+- 时间紧迫的任务
+
+**命令**：
+```bash
+# 创建 worktree
+git worktree add -b fix/alerts /tmp/alerts main
+git worktree add -b fix/radar /tmp/radar main
+
+# 并行启动
+claude -p "修改 alerts 模块" --worktree /tmp/alerts &
+claude -p "修改 radar 模块" --worktree /tmp/radar &
+
+# 等待完成
+wait
+
+# 合并
+git merge fix/alerts
+git merge fix/radar
+```
+
+### 3. 成本控制模式
+
+**原则**：分层模型策略
+
+**策略**：
+
+| 任务类型 | 模型 | 原因 |
+|---------|------|------|
+| 简单 bug fix | haiku | 快速、便宜 |
+| 代码格式化 | haiku | 机械性任务 |
+| 一般功能开发 | sonnet | 平衡性能和成本 |
+| 复杂重构 | opus | 需要深度推理 |
+| 架构设计 | opus | 需要全局思考 |
+
+**实现**：
+```bash
+# 简单任务用 haiku
+claude -p "修复 typo" --model haiku --max-turns 3
+
+# 一般任务用 sonnet（默认）
+claude -p "添加日志记录" --max-turns 10
+
+# 复杂任务用 opus
+claude -p "重构数据处理管道" --model opus --max-turns 20
+```
+
+**Token 节省技巧**：
+1. **CLAUDE.md 缓存**：不变的上下文放这里，利用 prompt caching
+2. **搜索先行**：先 search 定位，再 edit 修改
+3. **粒度控制**：每个任务 1000-3000 output tokens 最佳
+4. **提前失败**：前置条件不满足立即失败
+5. **/compact**：上下文大了及时压缩
+
+### 4. 错误恢复模式
+
+**原则**：智能分析，分级处理
+
+**流程**：
+```
+执行失败
+    ↓
+分析失败类型
+    ├── 测试失败 → 分析哪个测试 → 修复该测试
+    ├── 编译错误 → 分析错误信息 → 修复语法/导入
+    ├── 运行时错误 → 分析堆栈 → 修复逻辑
+    └── 超时 → 任务太大 → 拆分重试
+    ↓
+选择恢复策略
+    ├── 策略 1: 直接重试（偶发错误）
+    ├── 策略 2: 换个方法（当前方法不行）
+    ├── 策略 3: 拆分任务（任务太复杂）
+    └── 策略 4: 报告用户（无法自动恢复）
+```
+
+**示例**：
+```
+Claude Code: "重构失败，测试 test_xxx 报错"
+Hermes: 分析 → 测试期望旧 API
+Hermes: 策略 → 先更新测试，再重构
+Hermes: "先更新 test_xxx 适配新 API，然后继续重构"
+Claude Code: 更新测试 + 重构
+Hermes: 验证通过
+```
+
+---
+
 ## 工具选择指南
 
 | 场景 | 推荐工具 | 原因 |
@@ -122,43 +285,94 @@ python -m pytest tests/ -q
 | 代码审查 | Claude Code | 理解能力强 |
 | 简单代码生成 | Codex | 快速 |
 | 配置文件修改 | Hermes 直接改 | 简单任务不值得委派 |
+| TDD | Claude Code `-p` | 先写测试再写代码 |
 
-## 成本优化
+---
 
-### 模型选择
+## 工作流示例
+
+### 示例 1: TDD 开发新功能
+
 ```
-编排者：高能力模型（复杂决策）
-执行者：
-  - 简单任务 → 便宜模型（haiku）
-  - 复杂任务 → 高能力模型（opus/sonnet）
-```
-
-### Token 节省技巧
-1. **CLAUDE.md 缓存**：不变的上下文放这里，利用 prompt caching
-2. **搜索先行**：先 search 定位，再 edit 修改
-3. **粒度控制**：每个任务 1000-3000 output tokens 最佳
-4. **提前失败**：前置条件不满足立即失败
-5. **/compact**：上下文大了及时压缩
-
-## 验证模式
-
-### TDD（测试驱动）
-```
-写失败测试 → 写代码让测试通过 → 重构
-适用：新功能、边界条件
-```
-
-### 增量验证
-```
-lint → compile → unit test → integration test
-适用：大规模重构
+用户: "添加涨跌停检测"
+    ↓
+Hermes: 设计任务
+    ↓
+Hermes → Claude Code: "写测试，覆盖主板/创业板/科创板/ST"
+    ↓
+Claude Code: 写 10 个测试
+    ↓
+Hermes: 验证测试失败（功能未实现）
+    ↓
+Hermes → Claude Code: "实现功能，让测试通过"
+    ↓
+Claude Code: 实现 _get_limit_info() + 检测逻辑
+    ↓
+Hermes: 验证测试通过（300 passed）
+    ↓
+Hermes: 提交代码
 ```
 
-### 金丝雀验证
+### 示例 2: 并行重构多个模块
+
 ```
-单文件 → 模块 → 全项目
-适用：不确定影响范围
+用户: "优化 alerts、radar、reporter 三个模块"
+    ↓
+Hermes: 分析依赖 → 无依赖，可并行
+    ↓
+Hermes: 创建 3 个 worktree
+    ↓
+Hermes: 同时启动 3 个 Claude Code
+    Claude Code 1 → alerts
+    Claude Code 2 → radar
+    Claude Code 3 → reporter
+    ↓
+Hermes: 等待所有完成
+    ↓
+Hermes: 合并 + 集成测试
+    ↓
+Hermes: 提交代码
 ```
+
+### 示例 3: 成本优化的任务拆分
+
+```
+用户: "重构整个项目"
+    ↓
+Hermes: 拆成 4 批
+    第一批: 紧急修复（简单）→ haiku
+    第二批: 架构优化（复杂）→ opus
+    第三批: 测试补全（中等）→ sonnet
+    第四批: 依赖管理（简单）→ haiku
+    ↓
+Hermes: 按批次执行，每批用合适模型
+    ↓
+Hermes: 验证 + 提交
+```
+
+### 示例 4: 错误恢复
+
+```
+Hermes → Claude Code: "重构 XXX"
+    ↓
+Claude Code: 重构失败，测试报错
+    ↓
+Hermes: 分析 → 测试期望旧 API
+    ↓
+Hermes → Claude Code: "先更新测试适配新 API"
+    ↓
+Claude Code: 更新测试
+    ↓
+Hermes: 验证测试更新正确
+    ↓
+Hermes → Claude Code: "继续重构"
+    ↓
+Claude Code: 完成重构
+    ↓
+Hermes: 验证通过
+```
+
+---
 
 ## 常见陷阱
 
@@ -169,38 +383,19 @@ lint → compile → unit test → integration test
 | 测试失败无人管 | 每个任务必须验证测试 |
 | 成本失控 | 设置 max-turns 和 max-budget |
 | 权限过大 | 不用 --dangerously-skip-permissions |
+| 并行冲突 | 用 worktree 隔离 |
+| TDD 流程中断 | 先验证失败再写代码 |
+| 错误恢复失败 | 分级处理，必要时报告用户 |
 
-## 工作流示例
+---
 
-### 修复 Bug
-```
-1. 用户报告 bug
-2. Hermes 定位问题文件
-3. Hermes 委派给 Claude Code：
-   "修复 src/xxx.py 的 Y 问题，运行测试验证"
-4. Claude Code 读代码 → 修复 → 跑测试
-5. Hermes 验证结果
-6. 提交
-```
+## 配置文件
 
-### 新功能开发
-```
-1. 用户描述需求
-2. Hermes 拆成子任务
-3. 先写测试（TDD）
-4. 逐个委派实现
-5. 每个子任务验证
-6. 集成测试
-7. 提交
-```
-
-### 代码重构
-```
-1. 用户要求重构
-2. Hermes 分析影响范围
-3. 委派给 Claude Code：
-   "重构 XXX，保持 API 不变，所有测试通过"
-4. Claude Code 重构 → 跑测试
-5. Hermes 验证
-6. 提交
-```
+| 文件 | 用途 |
+|------|------|
+| `CLAUDE.md` | Claude Code 项目指南 |
+| `AGENTS.md` | Codex 项目指南 |
+| `.cursorrules` | Cursor IDE 规则 |
+| `.claude/settings.json` | Claude Code 权限和 hooks |
+| `.codex/config.json` | Codex 配置 |
+| `docs/WORKFLOW.md` | 本文件 |
